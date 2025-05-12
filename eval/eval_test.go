@@ -1,0 +1,174 @@
+package eval
+
+import (
+	"testing"
+
+	"github.com/Victorystick/scrapscript/parser"
+	"github.com/Victorystick/scrapscript/token"
+)
+
+var expressions = []struct {
+	source string
+	result Value
+}{
+	{`1`, Int(1)},
+	{`1.0 + to-float 1`, Float(2)},
+	{`"hello" ++ " " ++ "world"`, Text("hello world")},
+	// {`f 1 2 . f = a -> b -> a + b`, Int(3)},
+	{`f "b" . f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`, Int(2)},
+	{`(f >> (x -> x) >> g) 7
+	  . f =
+		  | 7 -> "cat"
+	    | 4 -> "dog"
+	    | _ -> "shark"
+	  . g =
+		  | "cat" -> "kitten"
+	    | "dog" -> "puppy"
+	    |   a   -> "baby " ++ a`, Text("kitten")},
+	{`(x -> x) (y -> y)`, ScriptFunc{source: "y -> y"}},
+	{`m::just 2 |> | #just 2 -> "two" | #just _ -> "other" | #no -> "x" . m : #just int #no`, Text("two")},
+	// {`| "hey" -> ""
+	// 	| "hello " ++ name -> name
+	// 	| _ -> "<empty>" <| "hello Oseg"`, Text("Oseg")},
+	{`a::x 1 . a : #x f . f = x -> 2`, Variant{"x", Int(2)}},
+
+	// Destructuring.
+	{`{ a = 1, b = 2 } |> | { a = c, b = d } -> c + d`, Int(3)},
+	{`{ a = 1 } |> | { a = 2 } -> c | { a = c } -> c`, Int(1)},
+	{`3 |> a -> b -> a`, ScriptFunc{source: "b -> a"}},
+}
+
+var failures = []struct {
+	source string
+	error  string
+}{
+	{`f 1 . f = a -> b`, "unknown variable b"},
+	{`f 1 . b = 2 . f = a -> b`, "unknown variable b"},
+	{`{} |> | { b = a } -> a`, "cannot bind to missing key b"},
+}
+
+func TestLiterals(t *testing.T) {
+	eval(t, `1`, Int(1))
+	eval(t, `1.0`, Float(1))
+	eval(t, `"hello"`, Text("hello"))
+	eval(t, `;41`, Byte(65))
+	eval(t, `;;aGVsbG8gd29ybGQ=`, Bytes("hello world"))
+}
+
+func TestOperators(t *testing.T) {
+	eval(t, `1 + 2`, Int(3))
+	eval(t, `1 + 3 * 3`, Int(10))
+	eval(t, `1.0 + 2.0`, Float(3.0))
+	eval(t, `3 - 2`, Int(1))
+	eval(t, `3.0 - 2.0`, Float(1.0))
+}
+
+func TestBuiltins(t *testing.T) {
+	eval(t, `to-float 1 + 0.5`, Float(1.5))
+
+	// bytes/to-utf8-text
+	eval(t, `bytes-to-utf8-text ;;aGVsbG8gd29ybGQ=`, Text("hello world"))
+	eval(t, `bytes-to-utf8-text <| ;;aGVsbG8gd29ybGQ= +< ;21`, Text("hello world!"))
+	eval(t, `;;aGVsbG8gd29ybGQ= +< ;21 |> bytes-to-utf8-text`, Text("hello world!"))
+}
+
+func TestWhere(t *testing.T) {
+	eval(t, `200 + (x . x = 150)`, Int(350))
+	eval(t, `a + b + c . a = 1 . b = 2 . c = 3`, Int(6))
+	// eval(t, `(f >> (x -> x) >> g) 7`, 7)
+}
+
+func TestFunc(t *testing.T) {
+	eval(t, `2 |> | _ -> 3`, Int(3))
+	// eval(t, `f #true . f = | #true -> 1 | #false -> 2`, 1)
+	// eval(t, `bool::true |> | #true -> 1 | #false -> 2 . bool : #true #false`, 1)
+	eval(t, `f 2 . f = | a -> a + a`, Int(4))
+	eval(t, `2 |> | a -> a + a`, Int(4))
+	eval(t, `hand::l 5 |> | #l n -> n * 2 | #r n -> n * 3 . hand : #l int #r int`, Int(10))
+
+	eval(t, `f "b"
+. f =
+  | "a" -> 1
+  | "b" -> 2
+  | "c" -> 3
+  |  x  -> 0`, Int(2))
+}
+
+func TestEval(t *testing.T) {
+	for _, ex := range expressions {
+		eval(t, ex.source, ex.result)
+	}
+}
+
+var exp2str = []struct{ source, result string }{
+	{`a . a : #x int #y float #z`, "#x int #y float #z"},
+}
+
+func TestEvalString(t *testing.T) {
+	for _, ex := range exp2str {
+		evalString(t, ex.source, ex.result)
+	}
+}
+
+func TestFailures(t *testing.T) {
+	for _, ex := range failures {
+		evalFailure(t, ex.source, ex.error)
+	}
+}
+
+// Evaluates to a comparable value
+func eval(t *testing.T, source string, expected Value) {
+	src := token.NewSource([]byte(source))
+
+	expr, err := parser.Parse(&src)
+	if err != nil {
+		t.Errorf("%s - %s", source, err)
+	} else {
+		val, err := Eval(src, expr)
+		if err != nil {
+			t.Errorf("%s - %s", source, err)
+		} else {
+			if !val.eq(expected) {
+				t.Errorf("Expected: %#v, got: %#v", expected, val)
+			}
+		}
+	}
+}
+
+// Evaluates to a comparable value
+func evalString(t *testing.T, source string, expected string) {
+	src := token.NewSource([]byte(source))
+
+	expr, err := parser.Parse(&src)
+	if err != nil {
+		t.Errorf("%s - %s", source, err)
+	} else {
+		val, err := Eval(src, expr)
+		if err != nil {
+			t.Errorf("%s - %s", source, err)
+		} else {
+			if val.String() != expected {
+				t.Errorf("Expected: %#v, got: %#v", expected, val.String())
+			}
+		}
+	}
+}
+
+// Evaluates to a comparable value
+func evalFailure(t *testing.T, source string, expected string) {
+	src := token.NewSource([]byte(source))
+
+	expr, err := parser.Parse(&src)
+	if err != nil {
+		t.Errorf("%s - %s", source, err)
+	} else {
+		val, err := Eval(src, expr)
+		if err == nil {
+			t.Errorf("%s - should fail but got %s", source, val)
+		} else {
+			if err.Error() != expected {
+				t.Errorf("Expected: '%s', got: '%s'", expected, err.Error())
+			}
+		}
+	}
+}
