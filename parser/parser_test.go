@@ -68,7 +68,7 @@ func TestParseExpr(t *testing.T) {
 		}
 	}
 
-	src = `f 1 2 . f = a -> b -> a + b . ignored = "hi"`
+	src = `f 1 2 ; f = a -> b -> a + b ; ignored = "hi"`
 	x, err = ParseExpr(src)
 	if err != nil {
 		writeParseError(t, src, err)
@@ -96,16 +96,16 @@ func TestParseRecord(t *testing.T) {
 
 func TestParses(t *testing.T) {
 	valid := []string{
-		`f "b" . f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`,
-		`bool::true . bool : #true #false`,
+		`f "b" ; f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`,
+		`bool::true ; bool : #true #false`,
 		`| "hey" -> "" | "hello " ++ name -> name | _ -> ""`,
-		`a |> | a -> a . f = 1`,
-		`hand::l . hand : #l int #r int`,
+		`a |> | a -> a ; f = 1`,
+		`hand::l ; hand : #l int #r int`,
 		`(hand::left 5 |>
 | #l n -> n * 2
 | #r n -> n * 3)
-	. hand : #l int #r int`,
-		`t . t : #a a #b int #c byte . a : #x #y #z`,
+  ; hand : #l int #r int`,
+		`t ; t : #a a #b int #c byte ; a : #x #y #z`,
 	}
 
 	for _, src := range valid {

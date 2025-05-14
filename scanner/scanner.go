@@ -290,14 +290,14 @@ func (s *Scanner) Scan() (token.Token, token.Span) {
 			return s.char(token.LBRACE)
 		case '}':
 			return s.char(token.RBRACE)
-		case ';':
-			if s.ch == ';' {
+		case '~':
+			if s.ch == '~' {
 				s.next()
 				return s.bytes()
 			}
 			return s.byte()
-		case '.':
-			return s.char(token.PERIOD)
+		case ';':
+			return s.char(token.WHERE)
 		case ',':
 			return s.char(token.COMMA)
 		case '"':

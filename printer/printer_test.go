@@ -8,11 +8,11 @@ import (
 )
 
 func TestPrint(t *testing.T) {
-	expect(t, `f 1 . f = a -> a`, `f 1
-. f = a -> a`)
+	expect(t, `f 1 ; f = a -> a`, `f 1
+; f = a -> a`)
 
-	expect(t, `f "b" . f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`, `f "b"
-. f =
+	expect(t, `f "b" ; f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`, `f "b"
+; f =
   | "a" -> 1
   | "b" -> 2
   | "c" -> 3
@@ -23,10 +23,10 @@ func TestPrint(t *testing.T) {
 | "hello " ++ name -> name
 | _ -> ""`)
 
-	expect(t, `a + b + c . a = 1 . b = 2 . c = 3`, `a + b + c
-. a = 1
-. b = 2
-. c = 3`)
+	expect(t, `a + b + c ; a = 1 ; b = 2 ; c = 3`, `a + b + c
+; a = 1
+; b = 2
+; c = 3`)
 }
 
 func expect(t *testing.T, source, expected string) {

@@ -89,7 +89,7 @@ func (p *parser) parseExpr() ast.Expr {
 	expr := p.parsePlainExpr(token.BasePrec)
 	i := 0
 
-	for p.tok == token.PERIOD {
+	for p.tok == token.WHERE {
 		i += 1
 		p.next()
 		expr = p.parseWhereExpr(expr)

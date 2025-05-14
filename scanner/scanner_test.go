@@ -36,12 +36,12 @@ var elements = []elt{
 	{token.INT, "13", literal},
 	{token.FLOAT, "3.7", literal},
 	{token.TEXT, `"world"`, literal},
-	{token.BYTE, ";ca", literal},
-	{token.BYTES, ";;aGVsbG8gd29ybGQ=", literal},
+	{token.BYTE, "~ca", literal},
+	{token.BYTES, "~~aGVsbG8gd29ybGQ=", literal},
 
 	// Operators and delimiters
 	{token.ASSIGN, "=", operator},
-	{token.PERIOD, ".", operator},
+	{token.WHERE, ";", operator},
 
 	{token.DEFINE, ":", operator},
 	{token.PICK, "::", operator},
@@ -116,7 +116,7 @@ func TestScan(t *testing.T) {
 }
 
 func TestScanExample(t *testing.T) {
-	source := []byte(`f "b" . f =
+	source := []byte(`f "b" ; f =
 	| "a" -> 1 | "b" -> 2 | _ -> 0`)
 
 	var s Scanner
@@ -128,7 +128,7 @@ func TestScanExample(t *testing.T) {
 	}{
 		{tok: token.IDENT, lit: `f`},
 		{tok: token.TEXT, lit: `"b"`},
-		{tok: token.PERIOD, lit: `.`},
+		{tok: token.WHERE, lit: `;`},
 		{tok: token.IDENT, lit: `f`},
 		{tok: token.ASSIGN, lit: `=`},
 		{tok: token.PIPE, lit: `|`},

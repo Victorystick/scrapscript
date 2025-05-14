@@ -103,7 +103,7 @@ func (w *writer) print(expr ast.Expr) error {
 			return err
 		}
 		w.newline()
-		w.string(token.PERIOD.Op())
+		w.string(token.WHERE.Op())
 		w.string(" ")
 		err = w.span(e.Id.Pos)
 		if err != nil {

@@ -23,7 +23,7 @@ const (
 	// Where clauses.
 
 	ASSIGN // =
-	PERIOD // .
+	WHERE  // ;
 	COMMA  // ,
 
 	// Relating to types.
@@ -85,7 +85,7 @@ var tokens = [...]string{
 	BYTES: "BYTES",
 
 	ASSIGN: "ASSIGN",
-	PERIOD: "PERIOD",
+	WHERE:  "WHERE",
 	COMMA:  "COMMA",
 
 	DEFINE: "DEFINE",
@@ -123,7 +123,7 @@ var tokens = [...]string{
 var operators = [...]string{
 	HOLE:   "()",
 	ASSIGN: "=",
-	PERIOD: ".",
+	WHERE:  ";",
 	COMMA:  ",",
 
 	DEFINE: ":",
@@ -185,15 +185,15 @@ func (tok Token) String() string {
 }
 
 const (
-	LetPrec  = 0
-	BasePrec = 1
-	CallPrec = 7
+	WherePrec = 0
+	BasePrec  = 1
+	CallPrec  = 7
 )
 
 func (op Token) Precedence() int {
 	switch op {
-	case PERIOD:
-		return LetPrec
+	case WHERE:
+		return WherePrec
 	case PIPE:
 		return 1
 	case LPIPE, RPIPE:
