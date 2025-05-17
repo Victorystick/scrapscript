@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/Victorystick/scrapscript"
+	"github.com/Victorystick/scrapscript/yards"
 )
 
 type Command func(args []string)
@@ -31,7 +33,23 @@ func main() {
 }
 
 func eval(args []string) {
-	input, err := io.ReadAll(os.Stdin)
+	var input []byte
+	var err error
+
+	// Temporary method to fetch a remote scrap.
+	if len(args) >= 2 && args[0] == "by-sha" {
+		var dir string
+		dir, err = os.UserCacheDir()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		cache := os.DirFS(filepath.Join(dir, "scrapscript"))
+		input, err = yards.ByDirectory(cache).FetchSha256(args[1])
+	} else {
+		input, err = io.ReadAll(os.Stdin)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
