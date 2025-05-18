@@ -31,43 +31,26 @@ func main() {
 	cmd(flag.Args()[1:])
 }
 
-func eval(args []string) {
-	var input []byte
-	var err error
+func must[T any](val T, err error) T {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	return val
+}
 
-	fetcher, err := yards.NewDefaultCacheFetcher(
+func eval(args []string) {
+	fetcher := must(yards.NewDefaultCacheFetcher(
 		// TODO: make configurable
 		yards.ByHttp("https://scraps.oseg.dev/"),
-	)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
-	}
+	))
 
-	input, err = io.ReadAll(os.Stdin)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
-	}
-
-	val, err := scrapscript.Eval(input, fetcher)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
-	}
+	input := must(io.ReadAll(os.Stdin))
+	val := must(scrapscript.Eval(input, fetcher))
 
 	if len(args) >= 2 && args[0] == "apply" {
-		maybeFn, err := scrapscript.Eval([]byte(args[1]), fetcher)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		val, err = scrapscript.Call(maybeFn, val)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
+		fn := must(scrapscript.Eval([]byte(args[1]), fetcher))
+		val = must(scrapscript.Call(fn, val))
 	}
 
 	fmt.Println(val.String())
