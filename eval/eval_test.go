@@ -102,6 +102,8 @@ func TestEval(t *testing.T) {
 
 var exp2str = []struct{ source, result string }{
 	{`a ; a : #x int #y float #z`, "#x int #y float #z"},
+	{`~ff`, "~ff"},
+	{`~~abcd`, "~~abcd"},
 }
 
 func TestEvalString(t *testing.T) {

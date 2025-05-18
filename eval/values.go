@@ -127,10 +127,10 @@ func (t Text) String() string {
 	return strconv.QuoteToGraphic(string(t))
 }
 func (b Byte) String() string {
-	return ";" + strconv.FormatInt(int64(b), 16)
+	return "~" + strconv.FormatInt(int64(b), 16)
 }
 func (bs Bytes) String() string {
-	return ";;" + base64.StdEncoding.EncodeToString(bs)
+	return "~~" + base64.StdEncoding.EncodeToString(bs)
 }
 func (e Enum) String() string {
 	var b strings.Builder

@@ -146,7 +146,7 @@ func Literal(source *token.Source, x *ast.Literal) (Value, error) {
 		}
 		return Bytes(dst[:n]), nil
 	case token.BYTE:
-		val, err := strconv.ParseInt(source.GetString(x.Pos.TrimStart(1)), 16, 8)
+		val, err := strconv.ParseUint(source.GetString(x.Pos.TrimStart(1)), 16, 8)
 		if err != nil {
 			return nil, err
 		}
