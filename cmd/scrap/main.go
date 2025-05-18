@@ -41,8 +41,10 @@ func must[T any](val T, err error) T {
 
 func eval(args []string) {
 	fetcher := must(yards.NewDefaultCacheFetcher(
-		// TODO: make configurable
-		yards.ByHttp("https://scraps.oseg.dev/"),
+		// Don't cache invalid scraps, but trust the local cache for now.
+		yards.Validate(
+			// TODO: make configurable
+			yards.ByHttp("https://scraps.oseg.dev/")),
 	))
 
 	input := must(io.ReadAll(os.Stdin))
