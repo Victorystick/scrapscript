@@ -4,6 +4,14 @@ import (
 	"github.com/Victorystick/scrapscript/token"
 )
 
+// A SourceExpr combines an expression with its source,
+// which is necessary to extract identifiers and literals
+// from it, as well as for error reporting.
+type SourceExpr struct {
+	Source token.Source
+	Expr   Expr
+}
+
 type Node interface {
 	Span() token.Span
 }

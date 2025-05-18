@@ -30,12 +30,12 @@ func TestPrint(t *testing.T) {
 }
 
 func expect(t *testing.T, source, expected string) {
-	expr, err := parser.ParseExpr(source)
+	se, err := parser.ParseExpr(source)
 	if err != nil {
 		t.Error(err)
 	} else {
 		var buf bytes.Buffer
-		err = Fprint(&buf, []byte(source), expr)
+		err = Fprint(&buf, []byte(source), se.Expr)
 		if err != nil {
 			t.Error(err)
 		} else {

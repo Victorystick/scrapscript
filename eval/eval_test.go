@@ -120,11 +120,11 @@ func TestFailures(t *testing.T) {
 func eval(t *testing.T, source string, expected Value) {
 	src := token.NewSource([]byte(source))
 
-	expr, err := parser.Parse(&src)
+	se, err := parser.Parse(&src)
 	if err != nil {
 		t.Errorf("%s - %s", source, err)
 	} else {
-		val, err := Eval(src, expr)
+		val, err := Eval(se)
 		if err != nil {
 			t.Errorf("%s - %s", source, err)
 		} else {
@@ -139,11 +139,11 @@ func eval(t *testing.T, source string, expected Value) {
 func evalString(t *testing.T, source string, expected string) {
 	src := token.NewSource([]byte(source))
 
-	expr, err := parser.Parse(&src)
+	se, err := parser.Parse(&src)
 	if err != nil {
 		t.Errorf("%s - %s", source, err)
 	} else {
-		val, err := Eval(src, expr)
+		val, err := Eval(se)
 		if err != nil {
 			t.Errorf("%s - %s", source, err)
 		} else {
@@ -158,11 +158,11 @@ func evalString(t *testing.T, source string, expected string) {
 func evalFailure(t *testing.T, source string, expected string) {
 	src := token.NewSource([]byte(source))
 
-	expr, err := parser.Parse(&src)
+	se, err := parser.Parse(&src)
 	if err != nil {
 		t.Errorf("%s - %s", source, err)
 	} else {
-		val, err := Eval(src, expr)
+		val, err := Eval(se)
 		if err == nil {
 			t.Errorf("%s - should fail but got %s", source, val)
 		} else {

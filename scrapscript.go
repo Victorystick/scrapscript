@@ -19,13 +19,13 @@ func Eval(script []byte) (eval.Value, error) {
 	}
 
 	src := token.NewSource(script)
-	expr, err := parser.Parse(&src)
+	se, err := parser.Parse(&src)
 
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
 
-	val, err := eval.Eval(src, expr)
+	val, err := eval.Eval(se)
 	if err != nil {
 		return nil, fmt.Errorf("evaluation error: %w", err)
 	}

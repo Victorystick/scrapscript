@@ -19,10 +19,11 @@ func TestParseExpr(t *testing.T) {
 		"1 + f 2",
 	}
 	for _, src := range binops {
-		x, err := ParseExpr(src)
+		se, err := ParseExpr(src)
 		if err != nil {
 			writeParseError(t, src, err)
 		}
+		x := se.Expr
 		// sanity check
 		if _, ok := x.(*ast.BinaryExpr); !ok {
 			t.Errorf("ParseExpr(%q): got %T, want *ast.BinaryExpr", src, x)
@@ -39,10 +40,11 @@ func TestParseExpr(t *testing.T) {
 	}
 
 	src = "a * b + c * d"
-	x, err := ParseExpr(src)
+	se, err := ParseExpr(src)
 	if err != nil {
 		writeParseError(t, src, err)
 	}
+	x := se.Expr
 	// sanity check
 	if b, ok := x.(*ast.BinaryExpr); !ok || b.Op != token.ADD {
 		t.Errorf("ParseExpr(%q): got %T, want *ast.BinaryExpr", src, x)
@@ -55,10 +57,11 @@ func TestParseExpr(t *testing.T) {
 		"f (1 + 2)",
 	}
 	for _, src := range fns {
-		x, err = ParseExpr(src)
+		se, err = ParseExpr(src)
 		if err != nil {
 			writeParseError(t, src, err)
 		}
+		x := se.Expr
 		// sanity check
 		if _, ok := x.(*ast.CallExpr); !ok {
 			t.Errorf("ParseExpr(%q): got %T, want *ast.CallExpr", src, x)
@@ -69,10 +72,11 @@ func TestParseExpr(t *testing.T) {
 	}
 
 	src = `f 1 2 ; f = a -> b -> a + b ; ignored = "hi"`
-	x, err = ParseExpr(src)
+	se, err = ParseExpr(src)
 	if err != nil {
 		writeParseError(t, src, err)
 	}
+	x = se.Expr
 	// sanity check
 	if _, ok := x.(*ast.WhereExpr); !ok {
 		t.Errorf("ParseExpr(%q): got %T, want *ast.LetExpr", src, x)

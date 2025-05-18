@@ -43,12 +43,12 @@ func (p *parser) bail(msg string) {
 	panic(scanner.Error{Pos: p.scanner.Pos(p.span.Start), Msg: msg})
 }
 
-func ParseExpr(source string) (expr ast.Expr, err error) {
+func ParseExpr(source string) (ast.SourceExpr, error) {
 	src := token.NewSource([]byte(source))
 	return Parse(&src)
 }
 
-func Parse(source *token.Source) (expr ast.Expr, err error) {
+func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	var p parser
 
 	eh := func(e scanner.Error) {
@@ -72,12 +72,14 @@ func Parse(source *token.Source) (expr ast.Expr, err error) {
 	p.scanner.Init(p.source.Bytes(), eh)
 
 	p.next()
-	expr = p.parseExpr()
+	expr := p.parseExpr()
 	if debug && p.tok != token.EOF {
 		fmt.Fprintf(os.Stderr, "%#v\n", expr)
 		// printer.Fprint(os.Stderr, p.source, expr)
 	}
 	p.expect(token.EOF)
+
+	se = ast.SourceExpr{Source: *p.source, Expr: expr}
 	return
 }
 

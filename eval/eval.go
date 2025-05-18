@@ -76,11 +76,10 @@ func (c *context) sub(vars Vars) *context {
 	return &context{c.source, vars, c}
 }
 
-func Eval(source token.Source, x ast.Node) (Value, error) {
-	base := context{&source, builtIns, nil}
-	ctx := context{&source, make(Variables), &base}
+func Eval(se ast.SourceExpr) (Value, error) {
+	ctx := context{&se.Source, builtIns, nil}
 
-	return ctx.eval(x)
+	return ctx.eval(se.Expr)
 }
 
 func (c *context) eval(x ast.Node) (Value, error) {
