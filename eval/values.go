@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -134,7 +135,8 @@ func (bs Bytes) String() string {
 func (e Enum) String() string {
 	var b strings.Builder
 	space := len(e) - 1
-	for _, val := range e {
+	for _, key := range slices.Sorted(maps.Keys(e)) {
+		val := e[key]
 		b.WriteString(val.String())
 
 		if space > 0 {
