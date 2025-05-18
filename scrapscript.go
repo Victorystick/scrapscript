@@ -45,9 +45,15 @@ func Call(toCall, val eval.Value) (eval.Value, error) {
 
 func WithImports(fetcher yards.Fetcher) eval.Vars {
 	binding := eval.FuncBinding("$sha256", func(v eval.Value) (eval.Value, error) {
-		hash, ok := v.(eval.Bytes)
-		if !ok || len(hash) != sha256.Size {
-			return nil, fmt.Errorf("cannot import non-sha256 bytes %s", v)
+		bs, ok := v.(eval.Bytes)
+		if !ok {
+			return nil, fmt.Errorf("cannot import non-bytes %s", v)
+		}
+
+		// Must convert from `eval.Byte` to `[]byte`.
+		hash := []byte(bs)
+		if len(hash) != sha256.Size {
+			return nil, fmt.Errorf("cannot import sha256 bytes of length %d, must be %d", len(hash), sha256.Size)
 		}
 
 		key := fmt.Sprintf("%x", hash)
