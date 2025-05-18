@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/Victorystick/scrapscript"
 	"github.com/Victorystick/scrapscript/yards"
@@ -38,15 +37,16 @@ func eval(args []string) {
 
 	// Temporary method to fetch a remote scrap.
 	if len(args) >= 2 && args[0] == "by-sha" {
-		var dir string
-		dir, err = os.UserCacheDir()
+		fetcher, err := yards.NewDefaultCacheFetcher(
+			// TODO: make configurable
+			yards.ByHttp("https://scraps.oseg.dev/"),
+		)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 
-		cache := os.DirFS(filepath.Join(dir, "scrapscript"))
-		input, err = yards.ByDirectory(cache).FetchSha256(args[1])
+		input, err = fetcher.FetchSha256(args[1])
 	} else {
 		input, err = io.ReadAll(os.Stdin)
 	}

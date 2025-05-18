@@ -3,6 +3,7 @@ package scrapscript
 // Here to get `go test ./...` to work.
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Victorystick/scrapscript/eval"
@@ -10,8 +11,14 @@ import (
 	"github.com/Victorystick/scrapscript/token"
 )
 
+var ErrEmptyScript = errors.New("empty script")
+
 func Eval(script []byte) (eval.Value, error) {
-	src := token.NewSource([]byte(script))
+	if len(script) == 0 {
+		return nil, ErrEmptyScript
+	}
+
+	src := token.NewSource(script)
 	expr, err := parser.Parse(&src)
 
 	if err != nil {
