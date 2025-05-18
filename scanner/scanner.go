@@ -347,7 +347,7 @@ func isAlpha(ch rune) bool {
 }
 
 func isLetter(ch rune) bool {
-	return 'a' <= lower(ch) && lower(ch) <= 'z' || ch == '_' || ch >= utf8.RuneSelf && unicode.IsLetter(ch)
+	return 'a' <= lower(ch) && lower(ch) <= 'z' || ch == '$' || ch == '_' || ch >= utf8.RuneSelf && unicode.IsLetter(ch)
 }
 func isDigit(ch rune) bool {
 	return isDecimal(ch) || ch >= utf8.RuneSelf && unicode.IsDigit(ch)

@@ -35,34 +35,29 @@ func eval(args []string) {
 	var input []byte
 	var err error
 
-	// Temporary method to fetch a remote scrap.
-	if len(args) >= 2 && args[0] == "by-sha" {
-		fetcher, err := yards.NewDefaultCacheFetcher(
-			// TODO: make configurable
-			yards.ByHttp("https://scraps.oseg.dev/"),
-		)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		input, err = fetcher.FetchSha256(args[1])
-	} else {
-		input, err = io.ReadAll(os.Stdin)
-	}
+	fetcher, err := yards.NewDefaultCacheFetcher(
+		// TODO: make configurable
+		yards.ByHttp("https://scraps.oseg.dev/"),
+	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
 
-	val, err := scrapscript.Eval(input)
+	input, err = io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return
+	}
+
+	val, err := scrapscript.Eval(input, fetcher)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
 
 	if len(args) >= 2 && args[0] == "apply" {
-		maybeFn, err := scrapscript.Eval([]byte(args[1]))
+		maybeFn, err := scrapscript.Eval([]byte(args[1]), fetcher)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return

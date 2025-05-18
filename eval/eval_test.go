@@ -108,6 +108,8 @@ func TestEvalString(t *testing.T) {
 	for _, ex := range exp2str {
 		evalString(t, ex.source, ex.result)
 	}
+
+	evalString(t, `external-value`, `"Injected"`, Binding{"external-value", Text("Injected")})
 }
 
 func TestFailures(t *testing.T) {
@@ -135,15 +137,17 @@ func eval(t *testing.T, source string, expected Value) {
 	}
 }
 
-// Evaluates to a comparable value
-func evalString(t *testing.T, source string, expected string) {
+// Evaluates an expression and compares the string representation of the
+// result with a target string; optionally with some additional variables
+// in scope.
+func evalString(t *testing.T, source, expected string, vars ...Vars) {
 	src := token.NewSource([]byte(source))
 
 	se, err := parser.Parse(&src)
 	if err != nil {
 		t.Errorf("%s - %s", source, err)
 	} else {
-		val, err := Eval(se)
+		val, err := Eval(se, vars...)
 		if err != nil {
 			t.Errorf("%s - %s", source, err)
 		} else {
