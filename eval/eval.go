@@ -108,6 +108,8 @@ func (c *context) eval(x ast.Node) (Value, error) {
 		return c.enum(x)
 	case *ast.RecordExpr:
 		return c.record(x)
+	case *ast.ListExpr:
+		return c.list(x)
 	case *ast.FuncExpr:
 		return c.createFunc(x)
 	case ast.MatchFuncExpr:
@@ -327,6 +329,19 @@ func (c *context) record(x *ast.RecordExpr) (Record, error) {
 	return record, nil
 }
 
+func (c *context) list(x *ast.ListExpr) (List, error) {
+	list := make(List, len(x.Elements))
+	for i, x := range x.Elements {
+		val, err := c.eval(x)
+		if err != nil {
+			return nil, err
+		}
+
+		list[i] = val
+	}
+	return list, nil
+}
+
 func (c *context) pick(enum Enum, x ast.Expr) (Value, error) {
 	tag, ok := x.(*ast.Ident)
 	if !ok {
@@ -354,8 +369,9 @@ func (c *context) createFunc(x *ast.FuncExpr) (ScriptFunc, error) {
 }
 
 func (c *context) createMatchFunc(x ast.MatchFuncExpr) (ScriptFunc, error) {
+	source := c.source.GetString(x.Span())
 	return ScriptFunc{
-		source: c.source.GetString(x.Span()),
+		source: source,
 		fn: func(a Value) (Value, error) {
 			for _, alt := range x {
 				matches, err := Match(c.source, alt.Arg, a)
@@ -367,7 +383,7 @@ func (c *context) createMatchFunc(x ast.MatchFuncExpr) (ScriptFunc, error) {
 				}
 				return c.sub(matches).eval(alt.Body)
 			}
-			return nil, fmt.Errorf("%#v had no alternative for %s", x, a)
+			return nil, fmt.Errorf("%s had no alternative for %s", source, a)
 		},
 	}, nil
 }

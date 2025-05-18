@@ -90,6 +90,20 @@ func (m *matcher) match(x ast.Expr, val Value) {
 			return
 		}
 
+	case *ast.ListExpr:
+		if list, ok := val.(List); ok {
+			if len(x.Elements) != len(list) {
+				m.err = ErrNoMatch
+				return
+			}
+
+			for index, x := range x.Elements {
+				// Recursively match further.
+				m.match(x, list[index])
+			}
+			return
+		}
+
 	case *ast.BinaryExpr:
 		if x.Op == token.CONCAT {
 

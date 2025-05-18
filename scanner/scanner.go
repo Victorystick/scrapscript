@@ -290,6 +290,10 @@ func (s *Scanner) Scan() (token.Token, token.Span) {
 			return s.char(token.LBRACE)
 		case '}':
 			return s.char(token.RBRACE)
+		case '[':
+			return s.char(token.LBRACK)
+		case ']':
+			return s.char(token.RBRACK)
 		case '~':
 			if s.ch == '~' {
 				s.next()

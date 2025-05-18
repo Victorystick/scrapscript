@@ -46,6 +46,7 @@ var failures = []struct {
 	{`f 1 ; b = 2 ; f = a -> b`, "unknown variable b"},
 	{`{} |> | { b = a } -> a`, "cannot bind to missing key b"},
 	{`f 1 2 ; f = a -> b -> a + b`, "non-func value 1"}, // Bug
+	{`[ 1, ] |> | [] -> "four"`, `[] -> "four" had no alternative for [ 1 ]`},
 }
 
 func TestLiterals(t *testing.T) {
@@ -106,6 +107,8 @@ var exp2str = []struct{ source, result string }{
 	{`~ff`, "~ff"},
 	{`~~abcd`, "~~abcd"},
 	{`f 1 <| 2 ; f = a -> b -> a + b`, "3"},
+	{`[ 4 + 2, 5 - 1, ]`, "[ 6, 4 ]"},
+	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four"`, `"four"`},
 }
 
 func TestEvalString(t *testing.T) {

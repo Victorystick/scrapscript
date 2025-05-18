@@ -27,6 +27,8 @@ type Enum map[string]Value
 
 type Record map[string]Value
 
+type List []Value
+
 type Variant struct {
 	tag   string
 	value Value
@@ -62,6 +64,8 @@ func Equals(a, b Value) bool {
 	case Enum:
 		return a.eq(b)
 	case Record:
+		return a.eq(b)
+	case List:
 		return a.eq(b)
 	case Variant:
 		return a.eq(b)
@@ -100,6 +104,10 @@ func (i Enum) eq(other Value) bool {
 func (i Record) eq(other Value) bool {
 	o, ok := other.(Record)
 	return ok && maps.EqualFunc(i, o, Equals)
+}
+func (l List) eq(other Value) bool {
+	o, ok := other.(List)
+	return ok && slices.EqualFunc(l, o, Equals)
 }
 func (v Variant) eq(other Value) bool {
 	o, ok := other.(Variant)
@@ -161,6 +169,21 @@ func (r Record) String() string {
 		}
 	}
 	b.WriteString(" }")
+	return b.String()
+}
+func (l List) String() string {
+	var b strings.Builder
+	b.WriteString("[ ")
+	comma := len(l) - 1
+	for _, val := range l {
+		b.WriteString(val.String())
+
+		if comma > 0 {
+			comma -= 1
+			b.WriteString(", ")
+		}
+	}
+	b.WriteString(" ]")
 	return b.String()
 }
 func (v Variant) String() string {

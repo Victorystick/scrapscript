@@ -71,6 +71,9 @@ var elements = []elt{
 	{token.LBRACE, "{", operator},
 	{token.RBRACE, "}", operator},
 
+	{token.LBRACK, "[", operator},
+	{token.RBRACK, "]", operator},
+
 	{token.EOF, "", special},
 }
 

@@ -64,14 +64,16 @@ type RecordExpr struct {
 	Entries map[string]Expr
 }
 
+type ListExpr struct {
+	Pos      token.Span
+	Elements []Expr
+}
+
 type WhereExpr struct {
 	Expr Expr
 	Id   Ident
 	Val  Expr
 }
-
-// struct {
-// }
 
 func (b Ident) expr()         {}
 func (b Literal) expr()       {}
@@ -82,6 +84,7 @@ func (b CallExpr) expr()      {}
 func (b VariantExpr) expr()   {}
 func (b TypeExpr) expr()      {}
 func (b RecordExpr) expr()    {}
+func (b ListExpr) expr()      {}
 func (b WhereExpr) expr()     {}
 
 func span(start, end Expr) token.Span {
@@ -107,4 +110,5 @@ func (b *VariantExpr) Span() token.Span {
 }
 func (b TypeExpr) Span() token.Span   { return span(&b[0].Tag, &b[len(b)-1].Tag) }
 func (b RecordExpr) Span() token.Span { return b.Pos }
+func (b ListExpr) Span() token.Span   { return b.Pos }
 func (b *WhereExpr) Span() token.Span { return span(b.Expr, b.Val) }

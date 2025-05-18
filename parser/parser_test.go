@@ -87,6 +87,7 @@ func TestParseExpr(t *testing.T) {
 func TestParseRecord(t *testing.T) {
 	valid := []string{
 		`{}`,
+		`{ a = 1, }`,
 		`{ a = 1, b = "x"}`,
 	}
 
@@ -110,6 +111,9 @@ func TestParses(t *testing.T) {
 | #r n -> n * 3)
   ; hand : #l int #r int`,
 		`t ; t : #a a #b int #c byte ; a : #x #y #z`,
+		`[]`,
+		`[ "yo", 2, ]`,
+		`[ "yo", 2 ]`,
 	}
 
 	for _, src := range valid {

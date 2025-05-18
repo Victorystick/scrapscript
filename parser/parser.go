@@ -160,6 +160,9 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 	case token.LBRACE:
 		return p.parseRecord()
 
+	case token.LBRACK:
+		return p.parseList()
+
 	case token.LPAREN:
 		p.next()
 		x := p.parseExpr()
@@ -190,7 +193,8 @@ func (p *parser) parseBinaryExpr(x ast.Expr, prec int) ast.Expr {
 	}
 
 	switch p.tok {
-	case token.EOF, token.RPAREN, token.COMMA, token.RBRACE:
+	case token.EOF, token.COMMA,
+		token.RPAREN, token.RBRACE, token.RBRACK:
 		// Nothing more to parse.
 		return x
 
@@ -299,6 +303,35 @@ func (p *parser) parseRecord() *ast.RecordExpr {
 	p.next()
 
 	return &ast.RecordExpr{Pos: token.Span{Start: start, End: end}, Entries: entries}
+}
+
+func (p *parser) parseList() *ast.ListExpr {
+	if debug {
+		stack = append(stack, "parseList")
+		defer func() { stack = stack[:len(stack)-1] }()
+	}
+	p.expect(token.LBRACK)
+	start := p.span.Start
+	p.next()
+
+	es := make([]ast.Expr, 0)
+	for {
+		if p.tok == token.RBRACK {
+			break
+		}
+		es = append(es, p.parseExpr())
+
+		if p.tok != token.COMMA {
+			break
+		}
+		p.next()
+	}
+
+	p.expect(token.RBRACK)
+	end := p.span.End
+	p.next()
+
+	return &ast.ListExpr{Pos: token.Span{Start: start, End: end}, Elements: es}
 }
 
 func (p *parser) parseFuncExpr(x ast.Expr) *ast.FuncExpr {
