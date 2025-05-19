@@ -7,20 +7,17 @@ import (
 	"github.com/Victorystick/scrapscript/token"
 )
 
-type Position struct {
-	Line, Column int
-}
-
 type Scanner struct {
+	source *token.Source
+
 	src []byte // source
 	err ErrorHandler
 
 	// mutable
-	ch         rune  // current character
-	offset     int   // character offset
-	rdOffset   int   // reading offset (position after current character)
-	lineOffset int   // current line offset
-	lines      []int // indices of new lines
+	ch         rune // current character
+	offset     int  // character offset
+	rdOffset   int  // reading offset (position after current character)
+	lineOffset int  // current line offset
 }
 
 const (
@@ -28,54 +25,25 @@ const (
 	eof = -1     // end of file
 )
 
-func (s *Scanner) Init(src []byte, err ErrorHandler) {
-	s.src = src
+func (s *Scanner) Init(source *token.Source, err ErrorHandler) {
+	s.source = source
+	s.src = source.Bytes()
 	s.err = err
 
 	s.ch = ' '
 	s.offset = 0
 	s.rdOffset = 0
-	s.lines = []int{0}
 }
 
 func (s *Scanner) span(start int) token.Span {
 	return token.Span{Start: start, End: s.offset}
 }
 
-func searchInts(a []int, x int) int {
-	// This function body is a manually inlined version of:
-	//
-	//   return sort.Search(len(a), func(i int) bool { return a[i] > x }) - 1
-	//
-	// With better compiler optimizations, this may not be needed in the
-	// future, but at the moment this change improves the go/printer
-	// benchmark performance by ~30%. This has a direct impact on the
-	// speed of gofmt and thus seems worthwhile (2011-04-29).
-	// TODO(gri): Remove this when compilers have caught up.
-	i, j := 0, len(a)
-	for i < j {
-		h := int(uint(i+j) >> 1) // avoid overflow when computing h
-		// i ≤ h < j
-		if a[h] <= x {
-			i = h + 1
-		} else {
-			j = h
-		}
-	}
-	return i - 1
-}
-
-func (s *Scanner) Pos(offset int) (p Position) {
-	if i := searchInts(s.lines, offset); i >= 0 {
-		p.Line, p.Column = i+1, offset-s.lines[i]+1
-	}
-	return
-}
-
 // Only valid for the current token while scanning.
 func (s *Scanner) error(offs int, msg string) {
 	if s.err != nil {
-		s.err(Error{Position{Line: len(s.lines), Column: offs - s.lineOffset}, msg})
+		span := token.Span{Start: offs, End: offs + 1}
+		s.err(s.source.Error(span, msg))
 	}
 }
 
@@ -84,7 +52,7 @@ func (s *Scanner) next() {
 		s.offset = s.rdOffset
 		if s.ch == '\n' {
 			s.lineOffset = s.offset
-			s.lines = append(s.lines, s.offset)
+			s.source.AddLineBreak(s.offset)
 		}
 		r, w := rune(s.src[s.rdOffset]), 1
 		switch {
@@ -105,7 +73,7 @@ func (s *Scanner) next() {
 		s.offset = len(s.src)
 		if s.ch == '\n' {
 			s.lineOffset = s.offset
-			s.lines = append(s.lines, s.offset)
+			s.source.AddLineBreak(s.offset)
 		}
 		s.ch = eof
 	}

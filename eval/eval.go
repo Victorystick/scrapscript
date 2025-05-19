@@ -1,7 +1,6 @@
 package eval
 
 import (
-	"bytes"
 	"encoding/base64"
 	"fmt"
 	"reflect"
@@ -39,37 +38,24 @@ func (b Binding) Get(name string) Value {
 	return nil
 }
 
-func (c *context) get(name string) (Value, error) {
+func (c *context) ident(x *ast.Ident) (Value, error) {
+	name := c.name(x)
+
 	// Traverse the context stack.
-	for c != nil {
-		val := c.vars.Get(name)
+	context := c
+	for context != nil {
+		val := context.vars.Get(name)
 		if val != nil {
 			return val, nil
 		}
-		c = c.parent
+		context = context.parent
 	}
-	return nil, fmt.Errorf("unknown variable %s", name)
+
+	return nil, c.source.Error(x.Pos, fmt.Sprintf("unknown variable %s", name))
 }
 
 func (c *context) name(id *ast.Ident) string {
 	return c.source.GetString(id.Pos)
-}
-
-func (c *context) prettyError(span token.Span, msg string) error {
-	// TODO: improve
-	start := span.Start
-	lines := bytes.Split(c.source.Bytes(), []byte{byte('\n')})
-
-	for i, line := range lines {
-		if start >= len(line) {
-			start -= len(line) + 1 // for the newline
-			continue
-		}
-
-		return fmt.Errorf("line %d, col %d - %s", i+1, start, msg)
-	}
-
-	return fmt.Errorf("unknown - %s", msg)
 }
 
 func (c *context) sub(vars Vars) *context {
@@ -116,11 +102,7 @@ func (c *context) eval(x ast.Node) (Value, error) {
 		return c.createMatchFunc(x)
 	}
 
-	return nil, c.prettyError(x.Span(), fmt.Sprintf("unhandled node %#v", x))
-}
-
-func (c *context) ident(x *ast.Ident) (Value, error) {
-	return c.get(c.name(x))
+	return nil, c.source.Error(x.Span(), fmt.Sprintf("unhandled node %#v", x))
 }
 
 func Literal(source *token.Source, x *ast.Literal) (Value, error) {
@@ -155,7 +137,7 @@ func Literal(source *token.Source, x *ast.Literal) (Value, error) {
 		return Byte(byte(val)), nil
 	}
 
-	return nil, fmt.Errorf("unhandled literal kind %s", x.Kind)
+	return nil, source.Error(x.Pos, fmt.Sprintf("unhandled literal kind %s", x.Kind))
 }
 
 func binop[T ~int | ~float64](t token.Token, a, b T) (T, error) {

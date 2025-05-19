@@ -2,7 +2,6 @@ package parser
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 
 	"github.com/Victorystick/scrapscript/ast"
@@ -126,14 +125,11 @@ func TestParses(t *testing.T) {
 
 func writeParseError(t *testing.T, src string, err error) {
 	if e, ok := err.(scanner.Errors); ok {
-		lines := strings.Split(src, "\n")
-		first := e[0]
-		line := first.Pos.Line
-		t.Errorf("ParseExpr: %s", first.Error())
-		t.Errorf("%4d: %s", line, lines[line-1])
-		t.Error("   ", strings.Repeat(" ", first.Pos.Column), "^")
+		for _, err := range e {
+			t.Errorf("ParseExpr: %s", err.Error())
+		}
 	} else {
-		t.Errorf("ParseExpr(%q): %v", src, err)
+		t.Errorf("ParseExpr: %s", err)
 	}
 }
 

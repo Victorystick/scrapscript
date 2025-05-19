@@ -2,22 +2,15 @@ package scanner
 
 import (
 	"fmt"
+
+	"github.com/Victorystick/scrapscript/token"
 )
 
-type Error struct {
-	Pos Position
-	Msg string
-}
+type ErrorHandler func(err token.Error)
 
-func (e Error) Error() string {
-	return fmt.Sprintf("%v: %s", e.Pos, e.Msg)
-}
+type Errors []*token.Error
 
-type ErrorHandler func(err Error)
-
-type Errors []*Error
-
-func (e *Errors) Add(err Error) {
+func (e *Errors) Add(err token.Error) {
 	*e = append(*e, &err)
 }
 

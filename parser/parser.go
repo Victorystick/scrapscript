@@ -40,7 +40,7 @@ func (p *parser) bail(msg string) {
 	if debug {
 		fmt.Fprintln(os.Stderr, stack)
 	}
-	panic(scanner.Error{Pos: p.scanner.Pos(p.span.Start), Msg: msg})
+	panic(p.source.Error(p.span, msg))
 }
 
 func ParseExpr(source string) (ast.SourceExpr, error) {
@@ -51,14 +51,14 @@ func ParseExpr(source string) (ast.SourceExpr, error) {
 func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	var p parser
 
-	eh := func(e scanner.Error) {
+	eh := func(e token.Error) {
 		p.errors.Add(e)
 	}
 
 	defer func() {
 		if pnc := recover(); pnc != nil {
-			// resume same panic if it's not a bascanner.Errorilout
-			e, ok := pnc.(scanner.Error)
+			// resume same panic if it's not a token.Error.
+			e, ok := pnc.(token.Error)
 			if !ok {
 				panic(e)
 			} else if e.Msg != "" {
@@ -69,7 +69,7 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	}()
 
 	p.source = source
-	p.scanner.Init(p.source.Bytes(), eh)
+	p.scanner.Init(p.source, eh)
 
 	p.next()
 	expr := p.parseExpr()
@@ -188,7 +188,6 @@ func (p *parser) parseBinaryExpr(x ast.Expr, prec int) ast.Expr {
 	}
 
 	if p.tok.IsOperator() && p.tok.Precedence() < prec {
-		// fmt.Fprintf(os.Stderr, "Bail on %s %d\n", p.tok, prec)
 		return x
 	}
 

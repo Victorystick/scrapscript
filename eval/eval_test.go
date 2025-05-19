@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Victorystick/scrapscript/parser"
@@ -131,11 +132,11 @@ func eval(t *testing.T, source string, expected Value) {
 
 	se, err := parser.Parse(&src)
 	if err != nil {
-		t.Errorf("%s - %s", source, err)
+		t.Error(err)
 	} else {
 		val, err := Eval(se)
 		if err != nil {
-			t.Errorf("%s - %s", source, err)
+			t.Error(err)
 		} else {
 			if !val.eq(expected) {
 				t.Errorf("Expected: %#v, got: %#v", expected, val)
@@ -152,11 +153,11 @@ func evalString(t *testing.T, source, expected string, vars ...Vars) {
 
 	se, err := parser.Parse(&src)
 	if err != nil {
-		t.Errorf("%s - %s", source, err)
+		t.Error(err)
 	} else {
 		val, err := Eval(se, vars...)
 		if err != nil {
-			t.Errorf("%s - %s", source, err)
+			t.Error(err)
 		} else {
 			if val.String() != expected {
 				t.Errorf("Expected: %#v, got: %#v", expected, val.String())
@@ -177,8 +178,8 @@ func evalFailure(t *testing.T, source string, expected string) {
 		if err == nil {
 			t.Errorf("%s - should fail but got %s", source, val)
 		} else {
-			if err.Error() != expected {
-				t.Errorf("Expected: '%s', got: '%s'", expected, err.Error())
+			if !strings.Contains(err.Error(), expected) {
+				t.Errorf("Expected '%s' in error:\n%s", expected, err.Error())
 			}
 		}
 	}

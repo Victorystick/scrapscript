@@ -89,7 +89,7 @@ var source = func() []byte {
 }()
 
 func TestingErrorHandler(t *testing.T) ErrorHandler {
-	return func(e Error) {
+	return func(e token.Error) {
 		t.Error(e.Error())
 	}
 }
@@ -97,7 +97,8 @@ func TestingErrorHandler(t *testing.T) ErrorHandler {
 // Verify that calling Scan() provides the correct results.
 func TestScan(t *testing.T) {
 	var s Scanner
-	s.Init(source, TestingErrorHandler(t))
+	src := token.NewSource(source)
+	s.Init(&src, TestingErrorHandler(t))
 
 	for _, e := range elements {
 		tok, span := s.Scan()
@@ -120,11 +121,11 @@ func TestScan(t *testing.T) {
 }
 
 func TestScanExample(t *testing.T) {
-	source := []byte(`f "b" ; f =
-	| "a" -> 1 | "b" -> 2 | _ -> 0`)
+	source := token.NewSource([]byte(`f "b" ; f =
+	| "a" -> 1 | "b" -> 2 | _ -> 0`))
 
 	var s Scanner
-	s.Init(source, TestingErrorHandler(t))
+	s.Init(&source, TestingErrorHandler(t))
 
 	var ex = [...]struct {
 		tok token.Token
@@ -157,7 +158,7 @@ func TestScanExample(t *testing.T) {
 			t.Errorf("i: %d - bad token for %q: got %s, expected %s", i, e.lit, tok, e.tok)
 		}
 
-		lit := span.Get(source)
+		lit := source.GetString(span)
 		if lit != e.lit {
 			t.Errorf("i: %d - bad literal for %q: got %q, expected %q", i, e.lit, lit, e.lit)
 		}
