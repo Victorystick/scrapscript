@@ -108,7 +108,13 @@ func (p *parser) parsePlainExpr(prec int) ast.Expr {
 	left := p.parseBinaryExpr(nil, prec)
 
 	for {
-		if p.tok.IsOperator() && p.tok.Precedence() > prec {
+		if p.tok == token.LPAREN {
+			right := p.parseParenExpr()
+			left = &ast.CallExpr{
+				Fn:  left,
+				Arg: right,
+			}
+		} else if p.tok.IsOperator() && p.tok.Precedence() > prec {
 			op := p.tok
 			left = p.parseBinaryExpr(left, op.Precedence())
 		} else if p.tok != token.EOF && !p.tok.IsOperator() && token.CallPrec > prec {
@@ -122,6 +128,14 @@ func (p *parser) parsePlainExpr(prec int) ast.Expr {
 	}
 
 	return left
+}
+
+func (p *parser) parseParenExpr() ast.Expr {
+	p.next()
+	x := p.parseExpr()
+	p.expect(token.RPAREN)
+	p.next()
+	return x
 }
 
 func (p *parser) ident() *ast.Ident {
@@ -164,11 +178,7 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 		return p.parseList()
 
 	case token.LPAREN:
-		p.next()
-		x := p.parseExpr()
-		p.expect(token.RPAREN)
-		p.next()
-		return x
+		return p.parseParenExpr()
 
 	case token.PIPE:
 		return p.parseMatchFuncExpr()
@@ -192,11 +202,6 @@ func (p *parser) parseBinaryExpr(x ast.Expr, prec int) ast.Expr {
 	}
 
 	switch p.tok {
-	case token.EOF, token.COMMA,
-		token.RPAREN, token.RBRACE, token.RBRACK:
-		// Nothing more to parse.
-		return x
-
 	case token.ADD, token.SUB, token.MUL,
 		token.LT, token.GT,
 		token.RPIPE, token.LPIPE,
@@ -207,7 +212,7 @@ func (p *parser) parseBinaryExpr(x ast.Expr, prec int) ast.Expr {
 		return &ast.BinaryExpr{
 			Left:  x,
 			Op:    op,
-			Right: p.parseBinaryExpr(nil, op.Precedence()),
+			Right: p.parsePlainExpr(op.Precedence()),
 		}
 
 	case token.PICK:
@@ -224,16 +229,7 @@ func (p *parser) parseBinaryExpr(x ast.Expr, prec int) ast.Expr {
 		return p.parseFuncExpr(x)
 	}
 
-	// Don't parse a call if it has lower precedence.
-	if token.CallPrec < prec {
-		return x
-	}
-
-	// Otherwise, it's a function call. :/
-	return &ast.CallExpr{
-		Fn:  x,
-		Arg: p.parseBinaryExpr(nil, token.CallPrec-1),
-	}
+	return x
 }
 
 func (p *parser) parseWhereExpr(x ast.Expr) ast.Expr {

@@ -46,7 +46,6 @@ var failures = []struct {
 	{`f 1 ; f = a -> b`, "unknown variable b"},
 	{`f 1 ; b = 2 ; f = a -> b`, "unknown variable b"},
 	{`{} |> | { b = a } -> a`, "cannot bind to missing key b"},
-	{`f 1 2 ; f = a -> b -> a + b`, "non-func value 1"}, // Bug
 	{`[ 1, ] |> | [] -> "four"`, `[] -> "four" had no alternative for [ 1 ]`},
 }
 
@@ -108,6 +107,9 @@ var exp2str = []struct{ source, result string }{
 	{`~ff`, "~ff"},
 	{`~~abcd`, "~~abcd"},
 	{`f 1 <| 2 ; f = a -> b -> a + b`, "3"},
+	{`f 1 2 ; f = a -> b -> a + b`, "3"},
+	{`1 + 2 * floor 3.4`, "7"},
+	{`2 * ceil 2.2 + 1`, "7"},
 	{`[ 4 + 2, 5 - 1, ]`, "[ 6, 4 ]"},
 	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four"`, `"four"`},
 }

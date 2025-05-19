@@ -73,8 +73,8 @@ func init() {
 func floatToInt(round func(float64) float64) Func {
 	return func(val Value) (Value, error) {
 		if f, ok := val.(Float); ok {
-			return Float(round(float64(f))), nil
+			return Int(round(float64(f))), nil
 		}
-		return Float(0), fmt.Errorf("non-float value %T", val)
+		return Int(0), fmt.Errorf("non-float value %T", val)
 	}
 }
