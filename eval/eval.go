@@ -107,6 +107,8 @@ func (c *context) eval(x ast.Node) (Value, error) {
 
 func Literal(source *token.Source, x *ast.Literal) (Value, error) {
 	switch x.Kind {
+	case token.HOLE:
+		return Hole{}, nil
 	case token.INT:
 		i, err := strconv.Atoi(source.GetString(x.Pos))
 		if err != nil {

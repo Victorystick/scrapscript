@@ -16,6 +16,7 @@ type Value interface {
 	eq(other Value) bool
 }
 
+type Hole struct{}
 type Int int
 type Float float64
 type Text string
@@ -51,6 +52,8 @@ type ScriptFunc struct {
 
 func Equals(a, b Value) bool {
 	switch a.(type) {
+	case Hole:
+		return a.eq(b)
 	case Int:
 		return a.eq(b)
 	case Float:
@@ -77,6 +80,10 @@ func Equals(a, b Value) bool {
 	return false
 }
 
+func (h Hole) eq(other Value) bool {
+	_, ok := other.(Hole)
+	return ok
+}
 func (i Int) eq(other Value) bool {
 	o, ok := other.(Int)
 	return ok && i == o
@@ -125,6 +132,9 @@ func (sf ScriptFunc) eq(other Value) bool {
 
 // String
 
+func (h Hole) String() string {
+	return "()"
+}
 func (i Int) String() string {
 	return strconv.FormatInt(int64(i), 10)
 }

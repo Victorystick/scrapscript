@@ -162,7 +162,7 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 	switch p.tok {
 	case token.IDENT:
 		return p.ident()
-	case token.INT, token.FLOAT,
+	case token.INT, token.FLOAT, token.HOLE,
 		token.TEXT, token.BYTE, token.BYTES:
 		lit := &ast.Literal{
 			Pos:  p.span,
