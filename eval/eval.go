@@ -51,7 +51,7 @@ func (c *context) ident(x *ast.Ident) (Value, error) {
 		context = context.parent
 	}
 
-	return nil, c.source.Error(x.Pos, fmt.Sprintf("unknown variable %s", name))
+	return nil, c.error(x.Pos, fmt.Sprintf("unknown variable %s", name))
 }
 
 func (c *context) name(id *ast.Ident) string {
@@ -60,6 +60,10 @@ func (c *context) name(id *ast.Ident) string {
 
 func (c *context) sub(vars Vars) *context {
 	return &context{c.source, vars, c}
+}
+
+func (c *context) error(span token.Span, msg string) error {
+	return c.source.Error(span, msg)
 }
 
 // Eval evaluates a SourceExpr in the context of a set of variables.
@@ -95,14 +99,14 @@ func (c *context) eval(x ast.Node) (Value, error) {
 	case *ast.RecordExpr:
 		return c.record(x)
 	case *ast.ListExpr:
-		return c.list(x)
+		return c.listExpr(x)
 	case *ast.FuncExpr:
 		return c.createFunc(x)
 	case ast.MatchFuncExpr:
 		return c.createMatchFunc(x)
 	}
 
-	return nil, c.source.Error(x.Span(), fmt.Sprintf("unhandled node %#v", x))
+	return nil, c.error(x.Span(), fmt.Sprintf("unhandled node %#v", x))
 }
 
 func Literal(source *token.Source, x *ast.Literal) (Value, error) {
@@ -179,26 +183,84 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 		return nil, fmt.Errorf("cannot perform addition on %s", reflect.TypeOf(l))
 
 	case token.APPEND:
-		ls, err := c.bytes(x.Left)
+		l, err := c.eval(x.Left)
 		if err != nil {
 			return nil, err
 		}
-		r, err := c.byte(x.Right)
+
+		if bs, ok := l.(Bytes); ok {
+			r, err := c.byte(x.Right)
+			if err != nil {
+				return nil, err
+			}
+			return append(bs, byte(r)), nil
+		}
+
+		if ls, ok := l.(List); ok {
+			r, err := c.eval(x.Right)
+			if err != nil {
+				return nil, err
+			}
+			return append(ls, r), nil
+		}
+
+		return nil, fmt.Errorf("cannot append to non-list %s", reflect.TypeOf(l))
+
+	case token.PREPEND:
+		r, err := c.eval(x.Right)
 		if err != nil {
 			return nil, err
 		}
-		return append(ls, byte(r)), nil
+
+		if bs, ok := r.(Bytes); ok {
+			l, err := c.byte(x.Left)
+			if err != nil {
+				return nil, err
+			}
+			return append(Bytes{byte(l)}, bs...), nil
+		}
+
+		if ls, ok := r.(List); ok {
+			l, err := c.eval(x.Left)
+			if err != nil {
+				return nil, err
+			}
+			return append(List{l}, ls...), nil
+		}
+
+		return nil, fmt.Errorf("cannot prepend to non-list %s", reflect.TypeOf(r))
 
 	case token.CONCAT:
-		l, err := c.text(x.Left)
+		l, err := c.eval(x.Left)
 		if err != nil {
 			return nil, err
 		}
-		r, err := c.text(x.Right)
-		if err != nil {
-			return nil, err
+
+		if bs, ok := l.(Bytes); ok {
+			r, err := c.bytes(x.Right)
+			if err != nil {
+				return nil, err
+			}
+			return append(bs, r...), nil
 		}
-		return l + r, nil
+
+		if ls, ok := l.(List); ok {
+			r, err := c.list(x.Right)
+			if err != nil {
+				return nil, err
+			}
+			return append(ls, r...), nil
+		}
+
+		if tx, ok := l.(Text); ok {
+			r, err := c.text(x.Right)
+			if err != nil {
+				return nil, err
+			}
+			return tx + r, nil
+		}
+
+		return nil, fmt.Errorf("cannot append to non-list %s", reflect.TypeOf(l))
 
 	case token.RPIPE:
 		// Construct a call.
@@ -231,7 +293,8 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 		}
 		return c.pick(typ, x.Right)
 	}
-	return nil, fmt.Errorf("unhandled operator %s", x.Op)
+
+	return nil, c.error(x.Span(), fmt.Sprintf("unhandled %s operator", x.Op))
 }
 
 func (c *context) call(x *ast.CallExpr) (Value, error) {
@@ -313,7 +376,7 @@ func (c *context) record(x *ast.RecordExpr) (Record, error) {
 	return record, nil
 }
 
-func (c *context) list(x *ast.ListExpr) (List, error) {
+func (c *context) listExpr(x *ast.ListExpr) (List, error) {
 	list := make(List, len(x.Elements))
 	for i, x := range x.Elements {
 		val, err := c.eval(x)
@@ -393,7 +456,7 @@ func (c *context) fn(x ast.Node) (Func, error) {
 	if fn != nil {
 		return fn, nil
 	}
-	return nil, fmt.Errorf("non-func value %s", val)
+	return nil, c.error(x.Span(), fmt.Sprintf("non-func value %s", val))
 }
 
 func (c *context) float(x ast.Node) (Float, error) {
@@ -404,7 +467,7 @@ func (c *context) float(x ast.Node) (Float, error) {
 	if f, ok := val.(Float); ok {
 		return f, nil
 	}
-	return 0, fmt.Errorf("non-float value %s", val)
+	return 0, c.error(x.Span(), fmt.Sprintf("non-float value %s", val))
 }
 
 func (c *context) int(x ast.Node) (Int, error) {
@@ -415,7 +478,7 @@ func (c *context) int(x ast.Node) (Int, error) {
 	if i, ok := val.(Int); ok {
 		return i, nil
 	}
-	return 0, fmt.Errorf("non-int value %s", val)
+	return 0, c.error(x.Span(), fmt.Sprintf("non-int value %s", val))
 }
 
 func (c *context) text(x ast.Node) (Text, error) {
@@ -426,7 +489,7 @@ func (c *context) text(x ast.Node) (Text, error) {
 	if i, ok := val.(Text); ok {
 		return i, nil
 	}
-	return "", fmt.Errorf("non-text value %s", val)
+	return "", c.error(x.Span(), fmt.Sprintf("non-text value %s", val))
 }
 
 func (c *context) byte(x ast.Node) (Byte, error) {
@@ -437,7 +500,7 @@ func (c *context) byte(x ast.Node) (Byte, error) {
 	if i, ok := val.(Byte); ok {
 		return i, nil
 	}
-	return 0, fmt.Errorf("non-byte value %s", val)
+	return 0, c.error(x.Span(), fmt.Sprintf("non-byte value %s", val))
 }
 
 func (c *context) bytes(x ast.Node) (Bytes, error) {
@@ -448,5 +511,16 @@ func (c *context) bytes(x ast.Node) (Bytes, error) {
 	if i, ok := val.(Bytes); ok {
 		return i, nil
 	}
-	return nil, fmt.Errorf("non-bytes value %s", val)
+	return nil, c.error(x.Span(), fmt.Sprintf("non-bytes value %s", val))
+}
+
+func (c *context) list(x ast.Node) (List, error) {
+	val, err := c.eval(x)
+	if err != nil {
+		return nil, err
+	}
+	if i, ok := val.(List); ok {
+		return i, nil
+	}
+	return nil, c.error(x.Span(), fmt.Sprintf("non-list value %s", val))
 }

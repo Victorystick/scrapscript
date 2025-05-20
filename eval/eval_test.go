@@ -47,6 +47,8 @@ var failures = []struct {
 	{`f 1 ; b = 2 ; f = a -> b`, "unknown variable b"},
 	{`{} |> | { b = a } -> a`, "cannot bind to missing key b"},
 	{`[ 1, ] |> | [] -> "four"`, `[] -> "four" had no alternative for [ 1 ]`},
+	{`[] ++ ""`, `non-list value ""`},
+	{`"" ++ []`, `non-text value []`},
 }
 
 func TestLiterals(t *testing.T) {
@@ -104,6 +106,10 @@ func TestEval(t *testing.T) {
 
 var exp2str = []struct{ source, result string }{
 	{`()`, `()`},
+	// Should be bytes/to-utf8-text.
+	{`bytes-to-utf8-text <| ~~aGVsbG8gd29ybGQ= +< ~21`, `"hello world!"`},
+	{`1 >+ [2, 3] +< 4`, `[ 1, 2, 3, 4 ]`},
+	{`["prefix"] ++ ["in" ++ "fix"] +< "postfix"`, `[ "prefix", "infix", "postfix" ]`},
 	{`a ; a : #x int #y float #z`, "#x int #y float #z"},
 	{`~ff`, "~ff"},
 	{`~~abcd`, "~~abcd"},

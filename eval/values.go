@@ -182,6 +182,10 @@ func (r Record) String() string {
 	return b.String()
 }
 func (l List) String() string {
+	if len(l) == 0 {
+		return "[]"
+	}
+
 	var b strings.Builder
 	b.WriteString("[ ")
 	comma := len(l) - 1
