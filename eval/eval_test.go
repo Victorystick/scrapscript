@@ -110,9 +110,15 @@ var exp2str = []struct{ source, result string }{
 	{`bytes-to-utf8-text <| ~~aGVsbG8gd29ybGQ= +< ~21`, `"hello world!"`},
 	{`1 >+ [2, 3] +< 4`, `[ 1, 2, 3, 4 ]`},
 	{`["prefix"] ++ ["in" ++ "fix"] +< "postfix"`, `[ "prefix", "infix", "postfix" ]`},
+	// Records
 	{`rec.a ; rec = { a = 1, b = "x" }`, `1`},
 	{`{ a = 2, c = ~FF, ..g }
 	; g = { a = 1, b = "x", c = ~00 }`, `{ a = 2, b = "x", c = ~FF }`},
+	{`{ a = 2, b = 3, c = 4 } |>
+    | { a = 1, b = 2, c = 3, ..x } -> ()
+    | { a = 1, b = b,        ..x } -> ()
+    | { a = 1, b = 2,            } -> ()
+    | {               c = c, ..x } -> { c = c, x = x }`, `{ c = 4, x = { a = 2, b = 3 } }`},
 	{`a ; a : #x int #y float #z`, "#x int #y float #z"},
 	{`~ff`, "~FF"},
 	{`~~abcd`, "~~abcd"},

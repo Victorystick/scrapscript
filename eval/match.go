@@ -3,6 +3,7 @@ package eval
 import (
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/token"
@@ -87,6 +88,16 @@ func (m *matcher) match(x ast.Expr, val Value) {
 				// Recursively match further.
 				m.match(x, val)
 			}
+
+			// If there's a rest expression; clone the record, clear used keys and recurse.
+			if x.Rest != nil {
+				rest := maps.Clone(record)
+				for tag := range x.Entries {
+					delete(rest, tag)
+				}
+				m.match(x.Rest, rest)
+			}
+
 			return
 		}
 
