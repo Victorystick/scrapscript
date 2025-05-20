@@ -3,6 +3,7 @@ package eval
 import (
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"reflect"
 	"strconv"
 
@@ -97,13 +98,15 @@ func (c *context) eval(x ast.Node) (Value, error) {
 	case ast.TypeExpr:
 		return c.enum(x)
 	case *ast.RecordExpr:
-		return c.record(x)
+		return c.recordExpr(x)
 	case *ast.ListExpr:
 		return c.listExpr(x)
 	case *ast.FuncExpr:
 		return c.createFunc(x)
 	case ast.MatchFuncExpr:
 		return c.createMatchFunc(x)
+	case *ast.AccessExpr:
+		return c.access(x)
 	}
 
 	return nil, c.error(x.Span(), fmt.Sprintf("unhandled node %#v", x))
@@ -360,12 +363,19 @@ func (c *context) enum(typ ast.TypeExpr) (Enum, error) {
 	return enum, nil
 }
 
-func (c *context) record(x *ast.RecordExpr) (Record, error) {
+func (c *context) recordExpr(x *ast.RecordExpr) (Record, error) {
 	record := make(Record)
-	for tag, x := range x.Entries {
-		if _, ok := record[tag]; ok {
-			return nil, fmt.Errorf("cannot define tag %s more than once", tag)
+
+	if x.Rest != nil {
+		other, err := c.record(x.Rest)
+		if err != nil {
+			return nil, err
 		}
+		maps.Copy(record, other)
+	}
+
+	for tag, x := range x.Entries {
+		// TODO: ensure types remain the same
 		val, err := c.eval(x)
 		if err != nil {
 			return nil, err
@@ -374,6 +384,19 @@ func (c *context) record(x *ast.RecordExpr) (Record, error) {
 		record[tag] = val
 	}
 	return record, nil
+}
+
+func (c *context) access(x *ast.AccessExpr) (Value, error) {
+	r, err := c.record(x.Rec)
+	if err != nil {
+		return nil, err
+	}
+	key := c.name(&x.Key)
+	val, ok := r[key]
+	if !ok {
+		return nil, c.error(x.Key.Pos, fmt.Sprintf("record is missing property %s", key))
+	}
+	return val, nil
 }
 
 func (c *context) listExpr(x *ast.ListExpr) (List, error) {
@@ -523,4 +546,15 @@ func (c *context) list(x ast.Node) (List, error) {
 		return i, nil
 	}
 	return nil, c.error(x.Span(), fmt.Sprintf("non-list value %s", val))
+}
+
+func (c *context) record(x ast.Node) (Record, error) {
+	val, err := c.eval(x)
+	if err != nil {
+		return nil, err
+	}
+	if i, ok := val.(Record); ok {
+		return i, nil
+	}
+	return nil, c.error(x.Span(), fmt.Sprintf("non-record value %s", val))
 }

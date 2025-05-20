@@ -62,6 +62,13 @@ type TypeExpr []*VariantExpr
 type RecordExpr struct {
 	Pos     token.Span
 	Entries map[string]Expr
+	Rest    Expr // May be nil
+}
+
+type AccessExpr struct {
+	Pos token.Span
+	Rec Expr
+	Key Ident
 }
 
 type ListExpr struct {
@@ -84,6 +91,7 @@ func (b CallExpr) expr()      {}
 func (b VariantExpr) expr()   {}
 func (b TypeExpr) expr()      {}
 func (b RecordExpr) expr()    {}
+func (b AccessExpr) expr()    {}
 func (b ListExpr) expr()      {}
 func (b WhereExpr) expr()     {}
 
@@ -110,5 +118,6 @@ func (b *VariantExpr) Span() token.Span {
 }
 func (b TypeExpr) Span() token.Span   { return span(&b[0].Tag, &b[len(b)-1].Tag) }
 func (b RecordExpr) Span() token.Span { return b.Pos }
+func (b AccessExpr) Span() token.Span { return b.Pos }
 func (b ListExpr) Span() token.Span   { return b.Pos }
 func (b *WhereExpr) Span() token.Span { return span(b.Expr, b.Val) }

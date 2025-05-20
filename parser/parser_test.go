@@ -88,6 +88,7 @@ func TestParseRecord(t *testing.T) {
 		`{}`,
 		`{ a = 1, }`,
 		`{ a = 1, b = "x"}`,
+		`{ a = 1, ..other }`,
 	}
 
 	for _, src := range valid {
@@ -113,6 +114,7 @@ func TestParses(t *testing.T) {
 		`[]`,
 		`[ "yo", 2, ]`,
 		`[ "yo", 2 ]`,
+		`foo.a`,
 	}
 
 	for _, src := range valid {

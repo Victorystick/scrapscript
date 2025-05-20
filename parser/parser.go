@@ -224,6 +224,15 @@ func (p *parser) parseBinaryExpr(x ast.Expr, prec int) ast.Expr {
 			Right: p.ident(),
 		}
 
+	case token.ACCESS:
+		span := p.span
+		p.next()
+		return &ast.AccessExpr{
+			Pos: span,
+			Rec: x,
+			Key: *p.ident(),
+		}
+
 	case token.ARROW:
 		p.next()
 		return p.parseFuncExpr(x)
@@ -274,10 +283,19 @@ func (p *parser) parseRecord() *ast.RecordExpr {
 	p.next()
 
 	entries := make(map[string]ast.Expr)
+	var rest ast.Expr
 	for {
 		if p.tok == token.RBRACE {
 			break
 		}
+
+		// Is this a final spread of another record?
+		if p.tok == token.SPREAD {
+			p.next()
+			rest = p.parseExpr()
+			break
+		}
+
 		name := p.name()
 
 		p.expect(token.ASSIGN)
@@ -297,7 +315,11 @@ func (p *parser) parseRecord() *ast.RecordExpr {
 	end := p.span.End
 	p.next()
 
-	return &ast.RecordExpr{Pos: token.Span{Start: start, End: end}, Entries: entries}
+	return &ast.RecordExpr{
+		Pos:     token.Span{Start: start, End: end},
+		Entries: entries,
+		Rest:    rest,
+	}
 }
 
 func (p *parser) parseList() *ast.ListExpr {

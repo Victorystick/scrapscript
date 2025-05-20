@@ -31,6 +31,8 @@ const (
 	DEFINE // :
 	PICK   // ::
 	OPTION // #
+	ACCESS // .
+	SPREAD // ..
 
 	// Mathematic operators.
 
@@ -91,6 +93,8 @@ var tokens = [...]string{
 	DEFINE: "DEFINE",
 	PICK:   "PICK",
 	OPTION: "OPTION",
+	ACCESS: "ACCESS",
+	SPREAD: "SPREAD",
 
 	ADD: "ADD",
 	SUB: "SUB",
@@ -129,6 +133,8 @@ var operators = [...]string{
 	DEFINE: ":",
 	PICK:   "::",
 	OPTION: "#",
+	ACCESS: ".",
+	SPREAD: "..",
 
 	ADD: "+",
 	SUB: "-",
@@ -206,7 +212,7 @@ func (op Token) Precedence() int {
 		return 5
 	case MUL:
 		return 6
-	case PICK:
+	case PICK, ACCESS, SPREAD:
 		return 8
 	}
 	return BasePrec

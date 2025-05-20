@@ -302,6 +302,8 @@ func (s *Scanner) Scan() (token.Token, token.Span) {
 			return s.switch2(token.DEFINE, ':', token.PICK)
 		case '#':
 			return token.OPTION, s.span(start)
+		case '.':
+			return s.switch2(token.ACCESS, '.', token.SPREAD)
 		case '*':
 			return token.MUL, s.span(start)
 		}

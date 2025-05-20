@@ -47,6 +47,8 @@ var elements = []elt{
 	{token.DEFINE, ":", operator},
 	{token.PICK, "::", operator},
 	{token.OPTION, "#", operator},
+	{token.ACCESS, ".", operator},
+	{token.SPREAD, "..", operator},
 
 	{token.ADD, "+", operator},
 	{token.SUB, "-", operator},

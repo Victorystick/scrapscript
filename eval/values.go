@@ -145,7 +145,8 @@ func (t Text) String() string {
 	return strconv.QuoteToGraphic(string(t))
 }
 func (b Byte) String() string {
-	return "~" + strconv.FormatInt(int64(b), 16)
+	const chars = "0123456789ABCDEF"
+	return string([]byte{'~', chars[b>>4], chars[b&0xf]})
 }
 func (bs Bytes) String() string {
 	return "~~" + base64.StdEncoding.EncodeToString(bs)
@@ -168,7 +169,8 @@ func (r Record) String() string {
 	var b strings.Builder
 	b.WriteString("{ ")
 	comma := len(r) - 1
-	for key, val := range r {
+	for _, key := range slices.Sorted(maps.Keys(r)) {
+		val := r[key]
 		b.WriteString(key)
 		b.WriteString(" = ")
 		b.WriteString(val.String())
