@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/Victorystick/scrapscript/ast"
@@ -121,6 +122,19 @@ func TestParses(t *testing.T) {
 		_, err := ParseExpr(src)
 		if err != nil {
 			writeParseError(t, src, err)
+		}
+	}
+}
+
+func TestParseError(t *testing.T) {
+	examples := []struct{ source, message string }{
+		{`{ a = b ..c }`, `Expected RBRACE got SPREAD`},
+	}
+
+	for _, example := range examples {
+		_, err := ParseExpr(example.source)
+		if err == nil || !strings.Contains(err.Error(), example.message) {
+			t.Errorf("Expected error with '%s', got: %s", example.message, err)
 		}
 	}
 }

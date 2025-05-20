@@ -116,7 +116,12 @@ func (p *parser) parsePlainExpr(prec int) ast.Expr {
 			}
 		} else if p.tok.IsOperator() && p.tok.Precedence() > prec {
 			op := p.tok
-			left = p.parseBinaryExpr(left, op.Precedence())
+			val := p.parseBinaryExpr(left, op.Precedence())
+			if left == val {
+				// Break if parse binary can't parse more.
+				break
+			}
+			left = val
 		} else if p.tok != token.EOF && !p.tok.IsOperator() && token.CallPrec > prec {
 			left = &ast.CallExpr{
 				Fn:  left,
