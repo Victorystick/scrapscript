@@ -24,8 +24,21 @@ So far it supports
 * Incomplete scanner
   * the `bytes/to-utf8-text` function is available via  `bytes-to-utf8-text`
 
-* Incomplete parser
-  * `f 1 2` parses as `f (1 2)` rather than `(f 1) 2`
+* Only supports pattern matching on the argument immediately following a pipe.
+
+    ```sh
+    f 1 3
+    ; f =
+    | 1 -> 1 -> 1
+    | 1 -> 2 -> 3
+    | 3 -> 5 -> 8
+    | 5 -> 8 -> 12
+    | a -> b -> a + b
+
+    # evaluation error: function parameter must be an identifier
+    #     3: | 1 -> 1 -> 1
+    #               ^
+    ```
 
 ## Missing
 

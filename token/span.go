@@ -61,7 +61,8 @@ func (s *Source) GetLine(i int) string {
 			span.End = span.Start + offset
 		}
 	} else if i < len(s.lines) {
-		span.End = s.lines[i]
+		// Skip newline.
+		span.End = s.lines[i] - 1
 	}
 
 	return s.GetString(span)

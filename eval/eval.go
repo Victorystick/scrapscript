@@ -427,7 +427,7 @@ func (c *context) pick(enum Enum, x ast.Expr) (Value, error) {
 func (c *context) createFunc(x *ast.FuncExpr) (ScriptFunc, error) {
 	id, ok := x.Arg.(*ast.Ident)
 	if !ok {
-		return ScriptFunc{}, fmt.Errorf("unexpected non-identifier %#v", x.Arg)
+		return ScriptFunc{}, c.error(x.Arg.Span(), "function parameter must be an identifier")
 	}
 	name := c.name(id)
 	return ScriptFunc{

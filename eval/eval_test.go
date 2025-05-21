@@ -49,6 +49,7 @@ var failures = []struct {
 	{`[ 1, ] |> | [] -> "four"`, `[] -> "four" had no alternative for [ 1 ]`},
 	{`[] ++ ""`, `non-list value ""`},
 	{`"" ++ []`, `non-text value []`},
+	{`1 -> x`, `function parameter must be an identifier`},
 }
 
 func TestLiterals(t *testing.T) {
