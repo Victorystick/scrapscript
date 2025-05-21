@@ -35,7 +35,9 @@ var elements = []elt{
 	{token.IDENT, "$sha256", literal}, // Import
 	// {token.IDENT, "bytes/to-utf8-text", literal},
 	{token.INT, "13", literal},
+	{token.INT, "-13", literal},
 	{token.FLOAT, "3.7", literal},
+	{token.FLOAT, "-1.6", literal},
 	{token.TEXT, `"world"`, literal},
 	{token.BYTE, "~ca", literal},
 	{token.BYTES, "~~aGVsbG8gd29ybGQ=", literal},

@@ -176,8 +176,7 @@ func (s *Scanner) bytes() (tok token.Token, span token.Span) {
 	return token.BYTES, s.span(offs - 2)
 }
 
-func (s *Scanner) scanNumber() (tok token.Token, span token.Span) {
-	offs := s.offset
+func (s *Scanner) scanNumber(start int) (tok token.Token, span token.Span) {
 	// invalid := -1 // index of invalid digit in literal, or < 0
 
 	// integer part
@@ -197,7 +196,7 @@ func (s *Scanner) scanNumber() (tok token.Token, span token.Span) {
 		}
 	}
 
-	span = s.span(offs)
+	span = s.span(start)
 	return
 }
 
@@ -236,6 +235,10 @@ func (s *Scanner) char(tok token.Token) (token.Token, token.Span) {
 	return tok, s.span(s.offset - 1)
 }
 
+func (s *Scanner) isStartOfNumber(ch rune) bool {
+	return isDecimal(ch) || ch == '.' && isDecimal(rune(s.peek()))
+}
+
 func (s *Scanner) Scan() (token.Token, token.Span) {
 	s.skipWhitespace()
 	start := s.offset
@@ -243,8 +246,8 @@ func (s *Scanner) Scan() (token.Token, token.Span) {
 	switch ch := s.ch; {
 	case isLetter(ch):
 		return token.IDENT, s.scanIdentifier()
-	case isDecimal(ch) || ch == '.' && isDecimal(rune(s.peek())):
-		return s.scanNumber()
+	case s.isStartOfNumber(ch):
+		return s.scanNumber(start)
 	default:
 		s.next() // always make progress
 		switch ch {
@@ -283,6 +286,9 @@ func (s *Scanner) Scan() (token.Token, token.Span) {
 			}
 			return s.switch2(token.ADD, '+', token.CONCAT)
 		case '-':
+			if s.isStartOfNumber(s.ch) {
+				return s.scanNumber(start)
+			}
 			return s.switch2(token.SUB, '>', token.ARROW)
 		case '|':
 			return s.switch2(token.PIPE, '>', token.RPIPE)
