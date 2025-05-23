@@ -123,6 +123,15 @@ var exp2str = []struct{ source, result string }{
 	{`1 + 2 * floor 3.4`, "7"},
 	{`2 * ceil 2.2 + 1`, "7"},
 	{`-3 - 5`, `-8`},
+
+	// Bad parse. :/
+	{`list/map text/length <| ["hey", "beautiful"]`, `[ 3, 9 ]`},
+	{`list/map text/length`, `list/map text/length`},
+
+	{`list/fold 0 (a -> b -> a + b) <| []`, `0`},
+	{`list/fold 0 (a -> b -> a + b)`, `list/fold 0 a -> b -> a + b`},
+	{`list/fold 0 (a -> b -> a + b) <| [1, 2]`, `3`},
+
 	{`[ 4 + 2, 5 - 1, ]`, "[ 6, 4 ]"},
 	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four"`, `"four"`},
 }
