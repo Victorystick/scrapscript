@@ -68,15 +68,6 @@ func TestOperators(t *testing.T) {
 	eval(t, `3.0 - 2.0`, Float(1.0))
 }
 
-func TestBuiltins(t *testing.T) {
-	eval(t, `to-float 1 + 0.5`, Float(1.5))
-
-	// bytes/to-utf8-text
-	eval(t, `bytes-to-utf8-text ~~aGVsbG8gd29ybGQ=`, Text("hello world"))
-	eval(t, `bytes-to-utf8-text <| ~~aGVsbG8gd29ybGQ= +< ~21`, Text("hello world!"))
-	eval(t, `~~aGVsbG8gd29ybGQ= +< ~21 |> bytes-to-utf8-text`, Text("hello world!"))
-}
-
 func TestWhere(t *testing.T) {
 	eval(t, `200 + (x ; x = 150)`, Int(350))
 	eval(t, `a + b + c ; a = 1 ; b = 2 ; c = 3`, Int(6))
@@ -107,8 +98,12 @@ func TestEval(t *testing.T) {
 
 var exp2str = []struct{ source, result string }{
 	{`()`, `()`},
-	// Should be bytes/to-utf8-text.
-	{`bytes-to-utf8-text <| ~~aGVsbG8gd29ybGQ= +< ~21`, `"hello world!"`},
+
+	{`bytes/to-utf8-text <| ~~aGVsbG8gd29ybGQ= +< ~21`, `"hello world!"`},
+	{`~~aGVsbG8gd29ybGQ= +< ~21 |> bytes/to-utf8-text`, `"hello world!"`},
+	{`bytes/to-utf8-text ~~aGVsbG8gd29ybGQ=`, `"hello world"`},
+	{`bytes/from-utf8-text "hello world"`, `~~aGVsbG8gd29ybGQ=`},
+
 	{`1 >+ [2, 3] +< 4`, `[ 1, 2, 3, 4 ]`},
 	{`["prefix"] ++ ["in" ++ "fix"] +< "postfix"`, `[ "prefix", "infix", "postfix" ]`},
 	// Records

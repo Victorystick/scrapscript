@@ -103,7 +103,7 @@ func (s *Scanner) scanIdentifier() token.Span {
 	// In case we encounter a non-ASCII character, fall back on the slower path
 	// of calling into s.next().
 	for rdOffset, b := range s.src[s.rdOffset:] {
-		if 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || b == '_' || b == '-' || '0' <= b && b <= '9' {
+		if 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || b == '/' || b == '_' || b == '-' || '0' <= b && b <= '9' {
 			// Avoid assigning a rune for the common case of an ascii character.
 			continue
 		}

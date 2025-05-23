@@ -61,12 +61,18 @@ func init() {
 	define("ceil", floatToInt(math.Ceil))
 	define("floor", floatToInt(math.Floor))
 
-	// bytes -> text
-	define("bytes-to-utf8-text", func(val Value) (Value, error) {
+	// bytes <-> text
+	define("bytes/to-utf8-text", func(val Value) (Value, error) {
 		if bytes, ok := val.(Bytes); ok {
 			return Text(string([]byte(bytes))), nil
 		}
-		return nil, fmt.Errorf("cannot bytes-to-utf8-text on %T", val)
+		return nil, fmt.Errorf("cannot bytes/to-utf8-text on %T", val)
+	})
+	define("bytes/from-utf8-text", func(val Value) (Value, error) {
+		if text, ok := val.(Text); ok {
+			return Bytes(text), nil
+		}
+		return nil, fmt.Errorf("cannot bytes/from-utf8-text on %T", val)
 	})
 }
 

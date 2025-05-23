@@ -21,9 +21,6 @@ So far it supports
 
 ## Known bugs
 
-* Incomplete scanner
-  * the `bytes/to-utf8-text` function is available via  `bytes-to-utf8-text`
-
 * Only supports pattern matching on the argument immediately following a pipe.
 
     ```sh
