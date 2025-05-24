@@ -28,6 +28,11 @@ func (m *matcher) error(err error) {
 	panic(bail{})
 }
 
+// Abandons matching, creating an error pointing at the culprit span.
+func (m *matcher) errorf(span token.Span, format string, args ...any) {
+	m.error(m.source.Error(span, fmt.Sprintf(format, args...)))
+}
+
 // Matches an expression onto val returning new bindings.
 // It is a match if err is nil.
 func Match(source *token.Source, x ast.Expr, val Value) (vars Variables, err error) {
@@ -51,7 +56,15 @@ func (m *matcher) match(x ast.Expr, val Value) {
 	switch x := x.(type) {
 	case *ast.Ident:
 		name := m.source.GetString(x.Pos)
-		m.set(name, val)
+		// Ignore _.
+		if name == "_" {
+			return
+		}
+
+		if _, ok := m.vars[name]; ok {
+			m.errorf(x.Pos, "cannot bind %s twice", name)
+		}
+		m.vars[name] = val
 		return
 
 	case *ast.Literal:
@@ -83,7 +96,8 @@ func (m *matcher) match(x ast.Expr, val Value) {
 			for tag, x := range x.Entries {
 				val, ok := record[tag]
 				if !ok {
-					m.error(fmt.Errorf("cannot bind to missing key %s", tag))
+					// TODO: should point to the key, not the value (x).
+					m.errorf(x.Span(), "cannot bind to missing key %s", tag)
 				}
 				// Recursively match further.
 				m.match(x, val)
@@ -122,16 +136,4 @@ func (m *matcher) match(x ast.Expr, val Value) {
 	}
 
 	m.err = ErrNoMatch
-}
-
-func (m *matcher) set(name string, val Value) {
-	// Ignore _.
-	if name == "_" {
-		return
-	}
-
-	if _, ok := m.vars[name]; ok {
-		m.error(fmt.Errorf("cannot bind %s twice", name))
-	}
-	m.vars[name] = val
 }

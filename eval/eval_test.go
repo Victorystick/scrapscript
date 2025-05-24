@@ -51,6 +51,8 @@ var failures = []struct {
 	{`"" ++ []`, `non-text value []`},
 	{`1 -> x`, `function parameter must be an identifier`},
 	{`hand::left 5 ; hand : #l int #r int`, `left isn't one of the valid tags: l, r`},
+	{`{ a = 2 } |> | { a = a, b = a } -> ()`, `cannot bind to missing key b`},
+	{`{ a = 2, b = 1 } |> | { a = a, b = a } -> ()`, `cannot bind a twice`},
 }
 
 func TestLiterals(t *testing.T) {
