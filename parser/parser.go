@@ -122,7 +122,7 @@ func (p *parser) parsePlainExpr(prec int) ast.Expr {
 				break
 			}
 			left = val
-		} else if p.tok != token.EOF && !p.tok.IsOperator() && token.CallPrec > prec {
+		} else if p.tok != token.EOF && (!p.tok.IsOperator() || startsSimpleValue(p.tok)) && token.CallPrec > prec {
 			left = &ast.CallExpr{
 				Fn:  left,
 				Arg: p.parseBinaryExpr(nil, token.CallPrec-1),
@@ -157,6 +157,19 @@ func (p *parser) name() string {
 	name := p.source.GetString(p.span)
 	p.next()
 	return name
+}
+
+// Returns true if `tok` is the start of a simple value.
+func startsSimpleValue(tok token.Token) bool {
+	switch tok {
+	case token.IDENT,
+		token.INT, token.FLOAT, token.HOLE,
+		token.TEXT, token.BYTE, token.BYTES,
+		// Or a record, list or parens expression.
+		token.LBRACE, token.LBRACK, token.LPAREN:
+		return true
+	}
+	return false
 }
 
 func (p *parser) parseUnaryExpr() ast.Expr {
