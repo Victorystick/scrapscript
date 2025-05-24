@@ -70,19 +70,10 @@ func (c *context) error(span token.Span, msg string) error {
 }
 
 // Eval evaluates a SourceExpr in the context of a set of variables.
-func Eval(se ast.SourceExpr, vars ...Vars) (Value, error) {
-	ctx := &context{&se.Source, builtIns, nil}
-
-	for _, vs := range vars {
-		ctx = ctx.sub(vs)
-	}
+func Eval(se ast.SourceExpr, vars Vars) (Value, error) {
+	ctx := &context{&se.Source, vars, nil}
 
 	return ctx.eval(se.Expr)
-}
-
-// Defines a function binding. Should not have side-effects.
-func FuncBinding(name string, fn Func) Vars {
-	return Binding{name, BuiltInFunc{name, fn}}
 }
 
 func (c *context) eval(x ast.Node) (Value, error) {

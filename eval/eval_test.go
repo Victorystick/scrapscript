@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -166,7 +167,7 @@ func eval(t *testing.T, source string, expected Value) {
 	if err != nil {
 		t.Error(err)
 	} else {
-		val, err := Eval(se)
+		val, err := Eval(se, builtIns)
 		if err != nil {
 			t.Error(err)
 		} else {
@@ -180,14 +181,18 @@ func eval(t *testing.T, source string, expected Value) {
 // Evaluates an expression and compares the string representation of the
 // result with a target string; optionally with some additional variables
 // in scope.
-func evalString(t *testing.T, source, expected string, vars ...Vars) {
+func evalString(t *testing.T, source, expected string, override ...Vars) {
 	src := token.NewSource([]byte(source))
 
 	se, err := parser.Parse(&src)
 	if err != nil {
 		t.Error(err)
 	} else {
-		val, err := Eval(se, vars...)
+		var vars Vars = builtIns
+		if len(override) > 0 {
+			vars = override[0]
+		}
+		val, err := Eval(se, vars)
 		if err != nil {
 			t.Error(err)
 		} else {
@@ -206,7 +211,7 @@ func evalFailure(t *testing.T, source string, expected string) {
 	if err != nil {
 		t.Errorf("%s - %s", source, err)
 	} else {
-		val, err := Eval(se)
+		val, err := Eval(se, builtIns)
 		if err == nil {
 			t.Errorf("%s - should fail but got %s", source, val)
 		} else {
@@ -215,4 +220,30 @@ func evalFailure(t *testing.T, source string, expected string) {
 			}
 		}
 	}
+}
+
+func TestEvalImport(t *testing.T) {
+	env := NewEnvironment(MapFetcher{
+		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447": `3 + $sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445`,
+		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445": `2`,
+	})
+
+	val, err := env.Eval([]byte(`$sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447 - 1`))
+	if err != nil {
+		t.Error(err)
+	} else {
+		if val.String() != "4" {
+			t.Errorf("Expected: %#v, got: %#v", "4", val.String())
+		}
+	}
+}
+
+type MapFetcher map[string]string
+
+func (mf MapFetcher) FetchSha256(key string) ([]byte, error) {
+	source, ok := mf[key]
+	if !ok {
+		return nil, fmt.Errorf("can't import '%s'", key)
+	}
+	return []byte(source), nil
 }
