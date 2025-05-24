@@ -109,13 +109,14 @@ var exp2str = []struct{ source, result string }{
 	{`["prefix"] ++ ["in" ++ "fix"] +< "postfix"`, `[ "prefix", "infix", "postfix" ]`},
 	// Records
 	{`rec.a ; rec = { a = 1, b = "x" }`, `1`},
-	{`{ a = 2, c = ~FF, ..g }
+	{`{ ..g, a = 2, c = ~FF }
 	; g = { a = 1, b = "x", c = ~00 }`, `{ a = 2, b = "x", c = ~FF }`},
+	{`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`, `{ a = 1, b = "x", c = 1 }`},
 	{`{ a = 2, b = 3, c = 4 } |>
-    | { a = 1, b = 2, c = 3, ..x } -> ()
-    | { a = 1, b = b,        ..x } -> ()
-    | { a = 1, b = 2,            } -> ()
-    | {               c = c, ..x } -> { c = c, x = x }`, `{ c = 4, x = { a = 2, b = 3 } }`},
+    | { ..x, a = 1, b = 2, c = 3 } -> ()
+    | {      a = 1, b = b,       } -> ()
+    | {      a = 1, b = 2,       } -> ()
+    | { ..x,               c = c } -> { c = c, x = x }`, `{ c = 4, x = { a = 2, b = 3 } }`},
 	{`a ; a : #x int #y float #z`, "#x int #y float #z"},
 	{`~ff`, "~FF"},
 	{`~~abcd`, "~~abcd"},

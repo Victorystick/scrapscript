@@ -300,18 +300,24 @@ func (p *parser) parseRecord() *ast.RecordExpr {
 	start := p.span.Start
 	p.next()
 
-	entries := make(map[string]ast.Expr)
+	// Do we start with a spread?
 	var rest ast.Expr
+	if p.tok == token.SPREAD {
+		p.next()
+		rest = p.parseExpr()
+		p.expect(token.COMMA)
+		p.next()
+	}
+
+	entries := make(map[string]ast.Expr)
 	for {
 		if p.tok == token.RBRACE {
 			break
 		}
 
-		// Is this a final spread of another record?
+		// Is this a misplaced spread? Let's tell the user.
 		if p.tok == token.SPREAD {
-			p.next()
-			rest = p.parseExpr()
-			break
+			p.bail("A spread must be first in a record.")
 		}
 
 		name := p.name()

@@ -89,7 +89,8 @@ func TestParseRecord(t *testing.T) {
 		`{}`,
 		`{ a = 1, }`,
 		`{ a = 1, b = "x"}`,
-		`{ a = 1, ..other }`,
+		`{ ..other, a = 1, b = "x"}`,
+		`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`,
 	}
 
 	for _, src := range valid {
@@ -129,6 +130,7 @@ func TestParses(t *testing.T) {
 func TestParseError(t *testing.T) {
 	examples := []struct{ source, message string }{
 		{`{ a = b ..c }`, `Expected RBRACE got SPREAD`},
+		{`{ a = 1, ..other }`, `A spread must be first in a record.`},
 	}
 
 	for _, example := range examples {
