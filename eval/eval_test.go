@@ -50,6 +50,7 @@ var failures = []struct {
 	{`[] ++ ""`, `non-list value ""`},
 	{`"" ++ []`, `non-text value []`},
 	{`1 -> x`, `function parameter must be an identifier`},
+	{`hand::left 5 ; hand : #l int #r int`, `left isn't one of the valid tags: l, r`},
 }
 
 func TestLiterals(t *testing.T) {
@@ -123,6 +124,11 @@ var exp2str = []struct{ source, result string }{
 	{`1 + 2 * floor 3.4`, "7"},
 	{`2 * ceil 2.2 + 1`, "7"},
 	{`-3 - 5`, `-8`},
+
+	{`(hand::l 5 |>
+			| #l n -> n * 2
+			| #r n -> n * 3)
+	; hand : #l int #r int`, `10`},
 
 	{`list/map text/length ["hey", "beautiful"]`, `[ 3, 9 ]`},
 	{`list/map text/length`, `list/map text/length`},

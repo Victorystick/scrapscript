@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/token"
@@ -421,7 +423,8 @@ func (c *context) pick(enum Enum, x ast.Expr) (Value, error) {
 	if typ, ok := enum[str]; ok {
 		return typ, nil
 	}
-	return nil, fmt.Errorf("cannot pick non-tag %s", str)
+	tags := strings.Join(slices.Sorted(maps.Keys(enum)), ", ")
+	return nil, c.error(x.Span(), fmt.Sprintf("%s isn't one of the valid tags: %s", str, tags))
 }
 
 func (c *context) createFunc(x *ast.FuncExpr) (ScriptFunc, error) {
