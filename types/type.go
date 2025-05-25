@@ -36,6 +36,25 @@ func (ref TypeRef) extract() (tag, int) {
 	return tag, index
 }
 
+func (ref TypeRef) hasTag(t tag) bool {
+	return tag(ref&0x0f) == t
+}
+
+// IsList returns true if the TypeRef is a list.
+func (ref TypeRef) IsList() bool {
+	return ref.hasTag(listTag)
+}
+
+// IsFunction returns true if the TypeRef is a function.
+func (ref TypeRef) IsFunction() bool {
+	return ref.hasTag(funcTag)
+}
+
+// IsGeneric returns true if the TypeRef is a generic.
+func (ref TypeRef) IsGeneric() bool {
+	return ref.hasTag(genericTag)
+}
+
 const (
 	// Shortcut to the TypeRef for Never.
 	NeverRef TypeRef = TypeRef(int(primitiveTag) | (iota << 4)) // Inlined makeTypeRef
