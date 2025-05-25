@@ -7,6 +7,9 @@ import (
 	"os"
 
 	"github.com/Victorystick/scrapscript"
+	"github.com/Victorystick/scrapscript/parser"
+	"github.com/Victorystick/scrapscript/token"
+	"github.com/Victorystick/scrapscript/types"
 	"github.com/Victorystick/scrapscript/yards"
 )
 
@@ -14,6 +17,7 @@ type Command func(args []string)
 
 var commands = map[string]Command{
 	"eval": eval,
+	"type": inferType,
 }
 
 func main() {
@@ -56,4 +60,13 @@ func eval(args []string) {
 	}
 
 	fmt.Println(val.String())
+}
+
+func inferType(args []string) {
+	input := must(io.ReadAll(os.Stdin))
+	source := token.NewSource(input)
+
+	se := must(parser.Parse(&source))
+	reg, types := types.Infer(se)
+	fmt.Println(reg.String(types[se.Expr]))
 }
