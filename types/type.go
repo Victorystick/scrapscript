@@ -15,6 +15,7 @@ const (
 	funcTag
 	enumTag
 	recordTag
+	genericTag
 )
 
 // Efficiently encodes a type reference within a Registry.
@@ -57,6 +58,7 @@ var primitiveNames = [...]string{
 	"byte",
 	"bytes",
 }
+var genericNames = "abcdefghijklmnopqrstuvwxyz"
 
 type FuncRef struct {
 	Arg, Result TypeRef
@@ -73,6 +75,11 @@ type Registry struct {
 	// Enums and records are maps to TypeRefs.
 	enums   []MapRef
 	records []MapRef
+}
+
+// Returns the number of types in the registry, for debugging.
+func (c *Registry) Size() int {
+	return len(c.lists) + len(c.funcs) + len(c.enums) + len(c.records)
 }
 
 // Strings returns a string representation for TypeRef.
@@ -111,6 +118,8 @@ func (c *Registry) string(b *strings.Builder, ref TypeRef, nesting int) {
 		c.enumStr(b, index)
 	case recordTag:
 		c.recordStr(b, index)
+	case genericTag:
+		b.WriteByte(genericNames[index])
 	default:
 		// The invalid type.
 		panic("bad type-ref")
@@ -172,6 +181,51 @@ func (c *Registry) GetRecord(ref TypeRef) MapRef {
 		return nil
 	}
 	return c.records[index]
+}
+
+// Generic returns the TypeRef for a generic index.
+func (c *Registry) Generic(index int) TypeRef {
+	if index < 0 || len(genericNames) <= index {
+		panic("You need how many generics?!")
+	}
+	return makeTypeRef(genericTag, index)
+}
+
+// ResolveGeneric replaces all occurrences in `target` of `generic` with `resolved`.
+func (c *Registry) ResolveGeneric(target, generic, resolved TypeRef) TypeRef {
+	// Base case: the target is the generic we want to replace.
+	if target == generic {
+		return resolved
+	}
+
+	tag, index := target.extract()
+	switch tag {
+	case listTag:
+		return c.List(
+			c.ResolveGeneric(c.lists[index], generic, resolved),
+		)
+	case funcTag:
+		fn := c.funcs[index]
+		return c.Func(
+			c.ResolveGeneric(fn.Arg, generic, resolved),
+			c.ResolveGeneric(fn.Result, generic, resolved),
+		)
+	case enumTag:
+		ref := make(MapRef, len(c.enums[index]))
+		for k, v := range c.enums[index] {
+			ref[k] = c.ResolveGeneric(v, generic, resolved)
+		}
+		return c.Enum(ref)
+	case recordTag:
+		ref := make(MapRef, len(c.records[index]))
+		for k, v := range c.records[index] {
+			ref[k] = c.ResolveGeneric(v, generic, resolved)
+		}
+		return c.Record(ref)
+	}
+
+	// Else, the target remains unchanged.
+	return target
 }
 
 func findOrAdd[T comparable](ls *[]T, tag tag, el T) TypeRef {
