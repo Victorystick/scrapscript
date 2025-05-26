@@ -138,8 +138,13 @@ func (h Hole) String() string {
 func (i Int) String() string {
 	return strconv.FormatInt(int64(i), 10)
 }
-func (f Float) String() string {
-	return strconv.FormatFloat(float64(f), 'f', -1, 64)
+func (f Float) String() (res string) {
+	res = strconv.FormatFloat(float64(f), 'f', -1, 64)
+	// Ensure we always have a decimal.
+	if strings.IndexByte(res, '.') < 0 {
+		res += ".0"
+	}
+	return
 }
 func (t Text) String() string {
 	return strconv.QuoteToGraphic(string(t))

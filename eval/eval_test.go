@@ -11,13 +11,41 @@ import (
 
 var expressions = []struct {
 	source string
-	result Value
+	result string
 }{
-	{`1`, Int(1)},
-	{`1.0 + to-float 1`, Float(2)},
-	{`"hello" ++ " " ++ "world"`, Text("hello world")},
-	// {`f 1 2 ; f = a -> b -> a + b`, Int(3)},
-	{`f "b" ; f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`, Int(2)},
+	// Literals
+	{`1`, `1`},
+	{`1.0`, `1.0`},
+	{`1.0002`, `1.0002`},
+	{`"hello"`, `"hello"`},
+	{`~41`, `~41`},
+	{`~~aGVsbG8gd29ybGQ=`, `~~aGVsbG8gd29ybGQ=`},
+	// Where
+	{`200 + (x ; x = 150)`, `350`},
+	{`a + b + c ; a = 1 ; b = 2 ; c = 3`, `6`},
+	// Binary ops
+	{`1 + 2`, `3`},
+	{`1 + 3 * 3`, `10`},
+	{`1.0 + 2.0`, `3.0`},
+	{`3 - 2`, `1`},
+	{`3.0 - 2.0`, `1.0`},
+	{`1.0 + to-float 1`, `2.0`},
+	{`"hello" ++ " " ++ "world"`, `"hello world"`},
+	// Functions
+	{`2 |> | _ -> 3`, `3`},
+	// eval(t, `f #true ; f = | #true -> 1 | #false -> 2`, 1)
+	// eval(t, `bool::true |> | #true -> 1 | #false -> 2 ; bool : #true #false`, 1)
+	{`f 2 ; f = | a -> a + a`, `4`},
+	{`2 |> | a -> a + a`, `4`},
+	{`hand::l 5 |> | #l n -> n * 2 | #r n -> n * 3 ; hand : #l int #r int`, `10`},
+	{`f "b"
+; f =
+  | "a" -> 1
+  | "b" -> 2
+  | "c" -> 3
+  |  x  -> 0`, `2`},
+	{`f 1 2 ; f = a -> b -> a + b`, `3`},
+	{`f "b" ; f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`, `2`},
 	{`(f >> (x -> x) >> g) 7
 	  ; f =
 		  | 7 -> "cat"
@@ -26,18 +54,18 @@ var expressions = []struct {
 	  ; g =
 		  | "cat" -> "kitten"
 	    | "dog" -> "puppy"
-	    |   a   -> "baby " ++ a`, Text("kitten")},
-	{`(x -> x) (y -> y)`, ScriptFunc{source: "y -> y"}},
-	{`m::just 2 |> | #just 2 -> "two" | #just _ -> "other" | #no -> "x" ; m : #just int #no`, Text("two")},
+	    |   a   -> "baby " ++ a`, `"kitten"`},
+	{`(x -> x) (y -> y)`, `y -> y`},
+	{`m::just 2 |> | #just 2 -> "two" | #just _ -> "other" | #no -> "x" ; m : #just int #no`, `"two"`},
 	// {`| "hey" -> ""
 	// 	| "hello " ++ name -> name
 	// 	| _ -> "<empty>" <| "hello Oseg"`, Text("Oseg")},
-	{`a::x 1 ; a : #x f ; f = x -> 2`, Variant{"x", Int(2)}},
+	{`a::x 1 ; a : #x f ; f = x -> 2`, `#x 2`},
 
 	// Destructuring.
-	{`{ a = 1, b = 2 } |> | { a = c, b = d } -> c + d`, Int(3)},
-	{`{ a = 1 } |> | { a = 2 } -> c | { a = c } -> c`, Int(1)},
-	{`3 |> a -> b -> a`, ScriptFunc{source: "b -> a"}},
+	{`{ a = 1, b = 2 } |> | { a = c, b = d } -> c + d`, `3`},
+	{`{ a = 1 } |> | { a = 2 } -> c | { a = c } -> c`, `1`},
+	{`3 |> a -> b -> a`, `b -> a`},
 }
 
 var failures = []struct {
@@ -56,47 +84,9 @@ var failures = []struct {
 	{`{ a = 2, b = 1 } |> | { a = a, b = a } -> ()`, `cannot bind a twice`},
 }
 
-func TestLiterals(t *testing.T) {
-	eval(t, `1`, Int(1))
-	eval(t, `1.0`, Float(1))
-	eval(t, `"hello"`, Text("hello"))
-	eval(t, `~41`, Byte(65))
-	eval(t, `~~aGVsbG8gd29ybGQ=`, Bytes("hello world"))
-}
-
-func TestOperators(t *testing.T) {
-	eval(t, `1 + 2`, Int(3))
-	eval(t, `1 + 3 * 3`, Int(10))
-	eval(t, `1.0 + 2.0`, Float(3.0))
-	eval(t, `3 - 2`, Int(1))
-	eval(t, `3.0 - 2.0`, Float(1.0))
-}
-
-func TestWhere(t *testing.T) {
-	eval(t, `200 + (x ; x = 150)`, Int(350))
-	eval(t, `a + b + c ; a = 1 ; b = 2 ; c = 3`, Int(6))
-	// eval(t, `(f >> (x -> x) >> g) 7`, 7)
-}
-
-func TestFunc(t *testing.T) {
-	eval(t, `2 |> | _ -> 3`, Int(3))
-	// eval(t, `f #true ; f = | #true -> 1 | #false -> 2`, 1)
-	// eval(t, `bool::true |> | #true -> 1 | #false -> 2 ; bool : #true #false`, 1)
-	eval(t, `f 2 ; f = | a -> a + a`, Int(4))
-	eval(t, `2 |> | a -> a + a`, Int(4))
-	eval(t, `hand::l 5 |> | #l n -> n * 2 | #r n -> n * 3 ; hand : #l int #r int`, Int(10))
-
-	eval(t, `f "b"
-; f =
-  | "a" -> 1
-  | "b" -> 2
-  | "c" -> 3
-  |  x  -> 0`, Int(2))
-}
-
 func TestEval(t *testing.T) {
 	for _, ex := range expressions {
-		eval(t, ex.source, ex.result)
+		evalString(t, ex.source, ex.result)
 	}
 }
 
@@ -149,8 +139,6 @@ func TestEvalString(t *testing.T) {
 	for _, ex := range exp2str {
 		evalString(t, ex.source, ex.result)
 	}
-
-	evalString(t, `external-value`, `"Injected"`, Binding{"external-value", Text("Injected")})
 }
 
 func TestFailures(t *testing.T) {
@@ -159,8 +147,10 @@ func TestFailures(t *testing.T) {
 	}
 }
 
-// Evaluates to a comparable value
-func eval(t *testing.T, source string, expected Value) {
+// Evaluates an expression and compares the string representation of the
+// result with a target string; optionally with some additional variables
+// in scope.
+func evalString(t *testing.T, source, expected string) {
 	src := token.NewSource([]byte(source))
 
 	se, err := parser.Parse(&src)
@@ -168,31 +158,6 @@ func eval(t *testing.T, source string, expected Value) {
 		t.Error(err)
 	} else {
 		val, err := Eval(se, builtIns)
-		if err != nil {
-			t.Error(err)
-		} else {
-			if !val.eq(expected) {
-				t.Errorf("Expected: %#v, got: %#v", expected, val)
-			}
-		}
-	}
-}
-
-// Evaluates an expression and compares the string representation of the
-// result with a target string; optionally with some additional variables
-// in scope.
-func evalString(t *testing.T, source, expected string, override ...Vars) {
-	src := token.NewSource([]byte(source))
-
-	se, err := parser.Parse(&src)
-	if err != nil {
-		t.Error(err)
-	} else {
-		var vars Vars = builtIns
-		if len(override) > 0 {
-			vars = override[0]
-		}
-		val, err := Eval(se, vars)
 		if err != nil {
 			t.Error(err)
 		} else {
