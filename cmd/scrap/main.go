@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/Victorystick/scrapscript"
+	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/parser"
 	"github.com/Victorystick/scrapscript/token"
 	"github.com/Victorystick/scrapscript/types"
@@ -16,7 +17,7 @@ import (
 type Command func(args []string)
 
 var commands = map[string]Command{
-	"eval": eval,
+	"eval": evaluate,
 	"type": inferType,
 }
 
@@ -43,7 +44,7 @@ func must[T any](val T, err error) T {
 	return val
 }
 
-func eval(args []string) {
+func evaluate(args []string) {
 	fetcher := must(yards.NewDefaultCacheFetcher(
 		// Don't cache invalid scraps, but trust the local cache for now.
 		yards.Validate(
@@ -52,14 +53,15 @@ func eval(args []string) {
 	))
 
 	input := must(io.ReadAll(os.Stdin))
-	val := must(scrapscript.Eval(input, fetcher))
+	env := eval.NewEnvironment(fetcher)
+	val := must(env.Eval(input))
 
 	if len(args) >= 2 && args[0] == "apply" {
-		fn := must(scrapscript.Eval([]byte(args[1]), fetcher))
+		fn := must(env.Eval([]byte(args[1])))
 		val = must(scrapscript.Call(fn, val))
 	}
 
-	fmt.Println(val.String())
+	fmt.Println(env.Scrap(val))
 }
 
 func inferType(args []string) {

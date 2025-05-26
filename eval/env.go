@@ -83,3 +83,14 @@ func (e *Environment) Eval(script []byte) (Value, error) {
 
 	return Eval(se, &e.reg, e.vars)
 }
+
+// Scrap renders a Value as self-contained scrapscript program.
+func (e *Environment) Scrap(value Value) string {
+	if vr, ok := value.(Variant); ok {
+		if vr.value == nil {
+			return fmt.Sprintf("(%s)::%s", e.reg.String(vr.typ), vr.tag)
+		}
+		return fmt.Sprintf("(%s)::%s %s", e.reg.String(vr.typ), vr.tag, e.Scrap(vr.value))
+	}
+	return value.String()
+}
