@@ -178,7 +178,9 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 			}
 			return binop(x.Op, lf, rf)
 		}
-		return nil, fmt.Errorf("cannot perform addition on %s", reflect.TypeOf(l))
+		return nil, c.error(x.Span(),
+			fmt.Sprintf("cannot perform addition on %s",
+				c.reg.String(l.Type())))
 
 	case token.APPEND:
 		l, err := c.eval(x.Left)
@@ -199,7 +201,18 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			return append(ls, r), nil
+			typ := c.reg.GetList(ls.typ)
+			if r.Type() != typ {
+				// Special-case empty lists, which have type never.
+				if typ == types.NeverRef {
+					typ = r.Type()
+				} else {
+					return nil, c.error(x.Right.Span(),
+						fmt.Sprintf("cannot append %s to %s",
+							c.reg.String(r.Type()), c.reg.String(ls.typ)))
+				}
+			}
+			return List{c.reg.List(typ), append(ls.elements, r)}, nil
 		}
 
 		return nil, fmt.Errorf("cannot append to non-list %s", reflect.TypeOf(l))
@@ -223,7 +236,18 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			return append(List{l}, ls...), nil
+			typ := c.reg.GetList(ls.typ)
+			if l.Type() != typ {
+				// Special-case empty lists, which have type never.
+				if typ == types.NeverRef {
+					typ = r.Type()
+				} else {
+					return nil, c.error(x.Left.Span(),
+						fmt.Sprintf("cannot prepend %s to %s",
+							c.reg.String(l.Type()), c.reg.String(ls.typ)))
+				}
+			}
+			return List{c.reg.List(typ), append([]Value{l}, ls.elements...)}, nil
 		}
 
 		return nil, fmt.Errorf("cannot prepend to non-list %s", reflect.TypeOf(r))
@@ -247,7 +271,17 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			return append(ls, r...), nil
+
+			// Special-case empty lists.
+			typ := ls.typ // a list type
+			if typ != r.typ {
+				if c.reg.GetList(typ) == types.NeverRef {
+					typ = r.typ
+				} else if c.reg.GetList(r.typ) != types.NeverRef {
+					return nil, c.error(x.Left.Span(), fmt.Sprintf("cannot concat %s to %s", c.reg.String(ls.typ), c.reg.String(r.typ)))
+				}
+			}
+			return List{typ, append(ls.elements, r.elements...)}, nil
 		}
 
 		if tx, ok := l.(Text); ok {
@@ -419,17 +453,27 @@ func (c *context) access(x *ast.AccessExpr) (Value, error) {
 	return val, nil
 }
 
-func (c *context) listExpr(x *ast.ListExpr) (List, error) {
-	list := make(List, len(x.Elements))
+func (c *context) listExpr(x *ast.ListExpr) (ls List, err error) {
+	elements := make([]Value, len(x.Elements))
+	typ := types.NeverRef
 	for i, x := range x.Elements {
-		val, err := c.eval(x)
+		var val Value
+		val, err = c.eval(x)
 		if err != nil {
-			return nil, err
+			return
 		}
 
-		list[i] = val
+		elements[i] = val
+		if val.Type() != typ {
+			if typ == types.NeverRef {
+				typ = val.Type()
+			} else {
+				err = c.error(x.Span(), fmt.Sprintf("list elements must all be of type %s, got %s", c.reg.String(typ), c.reg.String(val.Type())))
+				return
+			}
+		}
 	}
-	return list, nil
+	return List{c.reg.List(typ), elements}, nil
 }
 
 func (c *context) pick(pick *ast.BinaryExpr, x ast.Expr) (Value, error) {
@@ -447,7 +491,7 @@ func (c *context) pick(pick *ast.BinaryExpr, x ast.Expr) (Value, error) {
 	if tagTyp, ok := enum[tag]; ok {
 		if tagTyp == types.NeverRef {
 			if x == nil {
-				return Variant{Type(ref), tag, nil}, nil
+				return Variant{ref, tag, nil}, nil
 			} else {
 				return nil, c.error(x.Span(), fmt.Sprintf("#%s does not take a value", tag))
 			}
@@ -459,8 +503,12 @@ func (c *context) pick(pick *ast.BinaryExpr, x ast.Expr) (Value, error) {
 				if err != nil {
 					return nil, err
 				}
-				// TODO verify type.
-				return Variant{Type(ref), tag, val}, nil
+				if val.Type() != tagTyp {
+					return nil, c.error(pick.Right.Span(),
+						fmt.Sprintf("#%s requires a value of type %s, got %s",
+							tag, c.reg.String(tagTyp), c.reg.String(val.Type())))
+				}
+				return Variant{ref, tag, val}, nil
 			}
 		}
 	}
@@ -582,15 +630,17 @@ func (c *context) bytes(x ast.Node) (Bytes, error) {
 	return nil, c.error(x.Span(), fmt.Sprintf("non-bytes value %s", val))
 }
 
-func (c *context) list(x ast.Node) (List, error) {
-	val, err := c.eval(x)
+func (c *context) list(x ast.Node) (l List, err error) {
+	var val Value
+	val, err = c.eval(x)
 	if err != nil {
-		return nil, err
+		return
 	}
 	if i, ok := val.(List); ok {
 		return i, nil
 	}
-	return nil, c.error(x.Span(), fmt.Sprintf("non-list value %s", val))
+	err = c.error(x.Span(), fmt.Sprintf("non-list value %s", val))
+	return
 }
 
 func (c *context) record(x ast.Node) (Record, error) {

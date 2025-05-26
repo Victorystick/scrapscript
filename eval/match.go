@@ -117,14 +117,14 @@ func (m *matcher) match(x ast.Expr, val Value) {
 
 	case *ast.ListExpr:
 		if list, ok := val.(List); ok {
-			if len(x.Elements) != len(list) {
+			if len(x.Elements) != len(list.elements) {
 				m.err = ErrNoMatch
 				return
 			}
 
 			for index, x := range x.Elements {
 				// Recursively match further.
-				m.match(x, list[index])
+				m.match(x, list.elements[index])
 			}
 			return
 		}

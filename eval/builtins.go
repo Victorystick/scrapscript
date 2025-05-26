@@ -43,14 +43,16 @@ func bindBuiltIns(reg *types.Registry) Variables {
 					return nil, fmt.Errorf("expected list, but got %T", val)
 				}
 
-				results := make(List, len(ls))
-				for i, v := range ls {
-					results[i], err = fn(v)
+				results := List{elements: make([]Value, len(ls.elements))}
+				for i, v := range ls.elements {
+					val, err = fn(v)
 					if err != nil {
 						return nil, err
 					}
+					results.elements[i] = val
+					// TODO: propagate the new type.
 				}
-				return List(results), nil
+				return results, nil
 			},
 		}, nil
 	})
@@ -73,7 +75,7 @@ func bindBuiltIns(reg *types.Registry) Variables {
 							return nil, fmt.Errorf("expected list, but got %T", val)
 						}
 						var mid Value
-						for _, v := range ls {
+						for _, v := range ls.elements {
 							mid, err = fn(acc)
 							if err != nil {
 								return nil, err

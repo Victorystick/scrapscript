@@ -14,6 +14,7 @@ import (
 // Values
 
 type Value interface {
+	Type() types.TypeRef
 	String() string
 	eq(other Value) bool
 }
@@ -30,10 +31,13 @@ type Type types.TypeRef
 
 type Record map[string]Value
 
-type List []Value
+type List struct {
+	typ      types.TypeRef
+	elements []Value
+}
 
 type Variant struct {
-	typ   Type
+	typ   types.TypeRef
 	tag   string
 	value Value
 }
@@ -108,9 +112,9 @@ func (bs Bytes) eq(other Value) bool {
 	o, ok := other.(Bytes)
 	return ok && bytes.Equal(bs, o)
 }
-func (i Type) eq(other Value) bool {
+func (t Type) eq(other Value) bool {
 	o, ok := other.(Type)
-	return ok && i == o
+	return ok && t == o
 }
 func (i Record) eq(other Value) bool {
 	o, ok := other.(Record)
@@ -118,7 +122,7 @@ func (i Record) eq(other Value) bool {
 }
 func (l List) eq(other Value) bool {
 	o, ok := other.(List)
-	return ok && slices.EqualFunc(l, o, Equals)
+	return ok && slices.EqualFunc(l.elements, o.elements, Equals)
 }
 func (v Variant) eq(other Value) bool {
 	o, ok := other.(Variant)
@@ -132,6 +136,29 @@ func (sf ScriptFunc) eq(other Value) bool {
 	o, ok := other.(ScriptFunc)
 	// TODO: This is very incomplete.
 	return ok && sf.source == o.source
+}
+
+// Type
+func (h Hole) Type() types.TypeRef   { return types.HoleRef }
+func (i Int) Type() types.TypeRef    { return types.IntRef }
+func (f Float) Type() types.TypeRef  { return types.FloatRef }
+func (t Text) Type() types.TypeRef   { return types.TextRef }
+func (b Byte) Type() types.TypeRef   { return types.ByteRef }
+func (bs Bytes) Type() types.TypeRef { return types.BytesRef }
+func (t Type) Type() types.TypeRef {
+	// TODO: Should a type return itself, or a special type?
+	return types.NeverRef
+}
+func (i Record) Type() types.TypeRef {
+	// TODO: implement
+	return types.NeverRef
+}
+func (l List) Type() types.TypeRef         { return l.typ }
+func (v Variant) Type() types.TypeRef      { return v.typ }
+func (bf BuiltInFunc) Type() types.TypeRef { return bf.typ }
+func (sf ScriptFunc) Type() types.TypeRef {
+	// TODO: implement
+	return types.NeverRef
 }
 
 // String
@@ -182,14 +209,14 @@ func (r Record) String() string {
 	return b.String()
 }
 func (l List) String() string {
-	if len(l) == 0 {
+	if len(l.elements) == 0 {
 		return "[]"
 	}
 
 	var b strings.Builder
 	b.WriteString("[ ")
-	comma := len(l) - 1
-	for _, val := range l {
+	comma := len(l.elements) - 1
+	for _, val := range l.elements {
 		b.WriteString(val.String())
 
 		if comma > 0 {
