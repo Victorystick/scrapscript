@@ -179,8 +179,8 @@ func (c *context) enum(x ast.TypeExpr) TypeRef {
 	for _, v := range x {
 		name := c.source.GetString(v.Tag.Pos)
 		vRef := NeverRef
-		if v.Val != nil {
-			vRef = c.infer(v.Val)
+		if v.Typ != nil {
+			vRef = c.infer(v.Typ)
 		}
 		ref[name] = vRef
 	}

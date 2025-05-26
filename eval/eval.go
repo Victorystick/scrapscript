@@ -11,10 +11,12 @@ import (
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/token"
+	"github.com/Victorystick/scrapscript/types"
 )
 
 type context struct {
 	source *token.Source
+	reg    *types.Registry
 	vars   Vars
 	parent *context
 }
@@ -62,7 +64,7 @@ func (c *context) name(id *ast.Ident) string {
 }
 
 func (c *context) sub(vars Vars) *context {
-	return &context{c.source, vars, c}
+	return &context{c.source, c.reg, vars, c}
 }
 
 func (c *context) error(span token.Span, msg string) error {
@@ -70,8 +72,8 @@ func (c *context) error(span token.Span, msg string) error {
 }
 
 // Eval evaluates a SourceExpr in the context of a set of variables.
-func Eval(se ast.SourceExpr, vars Vars) (Value, error) {
-	ctx := &context{&se.Source, vars, nil}
+func Eval(se ast.SourceExpr, reg *types.Registry, vars Vars) (Value, error) {
+	ctx := &context{&se.Source, reg, vars, nil}
 
 	return ctx.eval(se.Expr)
 }
@@ -279,21 +281,19 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 		return c.compose(x.Right, x.Left)
 
 	case token.PICK:
-		l, err := c.eval(x.Left)
-		if err != nil {
-			return nil, err
-		}
-		typ, ok := l.(Enum)
-		if !ok {
-			return nil, fmt.Errorf("cannot pick tag of non-type %s", l)
-		}
-		return c.pick(typ, x.Right)
+		return c.pick(x, nil)
 	}
 
 	return nil, c.error(x.Span(), fmt.Sprintf("unhandled %s operator", x.Op))
 }
 
 func (c *context) call(x *ast.CallExpr) (Value, error) {
+	if bin, ok := x.Fn.(*ast.BinaryExpr); ok {
+		if bin.Op == token.PICK {
+			return c.pick(bin, x.Arg)
+		}
+	}
+
 	fn, err := c.fn(x.Fn)
 	if err != nil {
 		return nil, err
@@ -326,34 +326,61 @@ func (c *context) compose(first, second ast.Expr) (Value, error) {
 	}, nil
 }
 
-func (c *context) enum(typ ast.TypeExpr) (Enum, error) {
-	enum := make(Enum)
+func (c *context) enum(typ ast.TypeExpr) (Type, error) {
+	enum := make(types.MapRef, len(typ))
 	for _, v := range typ {
 		tag := c.name(&v.Tag)
 		if _, ok := enum[tag]; ok {
-			return nil, fmt.Errorf("cannot define tag %s more than once", tag)
-		}
-		if v.Val == nil {
-			enum[tag] = Variant{tag, nil}
-			continue
-		}
-		fn, err := c.fn(v.Val)
-		if err != nil {
-			return nil, err
+			return Type(types.NeverRef), c.error(v.Tag.Pos, fmt.Sprintf("cannot define tag #%s more than once", tag))
 		}
 
-		enum[tag] = ScriptFunc{
-			source: c.source.GetString(v.Span()),
-			fn: func(value Value) (Value, error) {
-				val, err := fn(value)
-				if err != nil {
-					return nil, err
-				}
-				return Variant{tag, val}, nil
-			},
+		ref := types.NeverRef
+		if v.Typ != nil {
+			val, err := c.typeRef(v.Typ)
+			if err != nil {
+				return Type(types.NeverRef), err
+			}
+			ref = val
 		}
+		enum[tag] = ref
 	}
-	return enum, nil
+	return Type(c.reg.Enum(enum)), nil
+}
+
+// typeRef returns the TypeRef of the type expression it is called with.
+func (c *context) typeRef(x ast.Expr) (ref types.TypeRef, err error) {
+	switch x := x.(type) {
+	case *ast.Ident:
+		var val Value
+		val, err = c.ident(x)
+		if err != nil {
+			return
+		}
+		t, ok := val.(Type)
+		if !ok {
+			return ref, c.error(x.Span(), fmt.Sprintf("required a type, got %s", val))
+		}
+		ref = types.TypeRef(t)
+		return
+
+	case *ast.FuncExpr:
+		var argRef, bodyRef types.TypeRef
+		argRef, err = c.typeRef(x.Arg)
+		if err != nil {
+			return
+		}
+		bodyRef, err = c.typeRef(x.Body)
+		if err != nil {
+			return
+		}
+		ref = c.reg.Func(argRef, bodyRef)
+		return
+
+		// TODO: Handle other expression types.
+	}
+
+	err = c.error(x.Span(), fmt.Sprintf("%s does not evaluate to a type", c.source.GetString(x.Span())))
+	return
 }
 
 func (c *context) recordExpr(x *ast.RecordExpr) (Record, error) {
@@ -405,17 +432,41 @@ func (c *context) listExpr(x *ast.ListExpr) (List, error) {
 	return list, nil
 }
 
-func (c *context) pick(enum Enum, x ast.Expr) (Value, error) {
-	tag, ok := x.(*ast.Ident)
+func (c *context) pick(pick *ast.BinaryExpr, x ast.Expr) (Value, error) {
+	ref, err := c.typeRef(pick.Left)
+	if err != nil {
+		return nil, err
+	}
+	// This is always the case for a pick expression. Let's update the ast/parser.
+	id, ok := pick.Right.(*ast.Ident)
 	if !ok {
-		return nil, fmt.Errorf("cannot pick using non-identifier %#v", x)
+		return nil, c.error(pick.Right.Span(), fmt.Sprintf("cannot pick using non-identifier %#v", pick))
 	}
-	str := c.name(tag)
-	if typ, ok := enum[str]; ok {
-		return typ, nil
+	tag := c.name(id)
+	enum := c.reg.GetEnum(ref)
+	if tagTyp, ok := enum[tag]; ok {
+		if tagTyp == types.NeverRef {
+			if x == nil {
+				return Variant{Type(ref), tag, nil}, nil
+			} else {
+				return nil, c.error(x.Span(), fmt.Sprintf("#%s does not take a value", tag))
+			}
+		} else {
+			if x == nil {
+				return nil, c.error(pick.Right.Span(), fmt.Sprintf("#%s requires a value of type %s", tag, c.reg.String(tagTyp)))
+			} else {
+				val, err := c.eval(x)
+				if err != nil {
+					return nil, err
+				}
+				// TODO verify type.
+				return Variant{Type(ref), tag, val}, nil
+			}
+		}
 	}
-	tags := strings.Join(slices.Sorted(maps.Keys(enum)), ", ")
-	return nil, c.error(x.Span(), fmt.Sprintf("%s isn't one of the valid tags: %s", str, tags))
+
+	tags := strings.Join(slices.Sorted(maps.Keys(enum)), ", #")
+	return nil, c.error(pick.Span(), fmt.Sprintf("#%s isn't one of the valid tags: #%s", tag, tags))
 }
 
 func (c *context) createFunc(x *ast.FuncExpr) (ScriptFunc, error) {

@@ -5,25 +5,29 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"maps"
 
 	"github.com/Victorystick/scrapscript/parser"
 	"github.com/Victorystick/scrapscript/token"
+	"github.com/Victorystick/scrapscript/types"
 	"github.com/Victorystick/scrapscript/yards"
 )
 
 type Environment struct {
+	reg  types.Registry
 	vars Variables
 }
 
 func NewEnvironment(fetcher yards.Fetcher) *Environment {
 	env := &Environment{}
-	env.vars = maps.Clone(builtIns)
+	env.vars = bindBuiltIns(&env.reg)
 
 	if fetcher != nil {
 		// TODO: Don't inline this. :/
 		env.vars["$sha256"] = BuiltInFunc{
 			name: "$sha256",
+			// We must special-case import functions, since their type is dependent
+			// on their returned value.
+			typ: env.reg.Func(types.BytesRef, types.NeverRef),
 			fn: func(v Value) (Value, error) {
 				bs, ok := v.(Bytes)
 				if !ok {
@@ -77,5 +81,5 @@ func (e *Environment) Eval(script []byte) (Value, error) {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
 
-	return Eval(se, e.vars)
+	return Eval(se, &e.reg, e.vars)
 }

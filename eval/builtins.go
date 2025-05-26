@@ -3,53 +3,33 @@ package eval
 import (
 	"fmt"
 	"math"
+
+	"github.com/Victorystick/scrapscript/types"
 )
 
-var builtIns = make(Variables)
+func bindBuiltIns(reg *types.Registry) Variables {
+	var builtIns = make(Variables)
 
-func builtin(name string, val Value) {
-	builtIns[name] = val
-}
+	define := func(name string, typ types.TypeRef, val Func) {
+		builtIns[name] = BuiltInFunc{name, typ, val}
+	}
 
-func define(name string, val Func) {
-	builtin(name, BuiltInFunc{name, val})
-}
+	// Built-in types
+	builtIns["()"] = Type(types.HoleRef)
+	builtIns["int"] = Type(types.IntRef)
+	builtIns["float"] = Type(types.FloatRef)
+	builtIns["text"] = Type(types.TextRef)
+	builtIns["byte"] = Type(types.ByteRef)
+	builtIns["bytes"] = Type(types.BytesRef)
 
-func init() {
-	// type validators
-	define("int", func(val Value) (Value, error) {
-		if _, ok := val.(Int); !ok {
-			return nil, fmt.Errorf("passed %T where int was expected", val)
-		}
-		return val, nil
-	})
-	define("float", func(val Value) (Value, error) {
-		if _, ok := val.(Float); !ok {
-			return nil, fmt.Errorf("passed %T where float was expected", val)
-		}
-		return val, nil
-	})
-	define("text", func(val Value) (Value, error) {
-		if _, ok := val.(Text); !ok {
-			return nil, fmt.Errorf("passed %T where text was expected", val)
-		}
-		return val, nil
-	})
-	define("byte", func(val Value) (Value, error) {
-		if _, ok := val.(Byte); !ok {
-			return nil, fmt.Errorf("passed %T where byte was expected", val)
-		}
-		return val, nil
-	})
-	define("bytes", func(val Value) (Value, error) {
-		if _, ok := val.(Bytes); !ok {
-			return nil, fmt.Errorf("passed %T where bytes was expected", val)
-		}
-		return val, nil
-	})
+	a := reg.Generic(0)
+	b := reg.Generic(1)
+	aToB := reg.Func(a, b)
+	aList := reg.List(a)
+	bList := reg.List(b)
 
 	// Lists
-	define("list/map", func(val Value) (Value, error) {
+	define("list/map", reg.Func(aToB, reg.Func(aList, bList)), func(val Value) (Value, error) {
 		fn := Callable(val)
 		if fn == nil {
 			// TODO: need more context to give better error messages.
@@ -74,7 +54,8 @@ func init() {
 			},
 		}, nil
 	})
-	define("list/fold", func(acc Value) (Value, error) {
+	// TODO: type
+	define("list/fold", types.NeverRef, func(acc Value) (Value, error) {
 		source := "list/fold " + acc.String()
 		return ScriptFunc{
 			source: source,
@@ -115,7 +96,7 @@ func init() {
 	})
 
 	// Text
-	define("text/length", func(val Value) (Value, error) {
+	define("text/length", reg.Func(types.TextRef, types.IntRef), func(val Value) (Value, error) {
 		text, ok := val.(Text)
 		if !ok {
 			return nil, fmt.Errorf("expected text, but got %T", val)
@@ -124,7 +105,7 @@ func init() {
 	})
 
 	// int -> float
-	define("to-float", func(val Value) (Value, error) {
+	define("to-float", reg.Func(types.IntRef, types.FloatRef), func(val Value) (Value, error) {
 		if i, ok := val.(Int); ok {
 			return Float(float64(i)), nil
 		}
@@ -132,26 +113,29 @@ func init() {
 	})
 
 	// float -> int
-	define("round", floatToInt(math.Round))
-	define("ceil", floatToInt(math.Ceil))
-	define("floor", floatToInt(math.Floor))
+	floatToInt := reg.Func(types.FloatRef, types.IntRef)
+	define("round", floatToInt, roundFunc(math.Round))
+	define("ceil", floatToInt, roundFunc(math.Ceil))
+	define("floor", floatToInt, roundFunc(math.Floor))
 
 	// bytes <-> text
-	define("bytes/to-utf8-text", func(val Value) (Value, error) {
+	define("bytes/to-utf8-text", reg.Func(types.BytesRef, types.TextRef), func(val Value) (Value, error) {
 		if bytes, ok := val.(Bytes); ok {
 			return Text(string([]byte(bytes))), nil
 		}
 		return nil, fmt.Errorf("cannot bytes/to-utf8-text on %T", val)
 	})
-	define("bytes/from-utf8-text", func(val Value) (Value, error) {
+	define("bytes/from-utf8-text", reg.Func(types.TextRef, types.BytesRef), func(val Value) (Value, error) {
 		if text, ok := val.(Text); ok {
 			return Bytes(text), nil
 		}
 		return nil, fmt.Errorf("cannot bytes/from-utf8-text on %T", val)
 	})
+
+	return builtIns
 }
 
-func floatToInt(round func(float64) float64) Func {
+func roundFunc(round func(float64) float64) Func {
 	return func(val Value) (Value, error) {
 		if f, ok := val.(Float); ok {
 			return Int(round(float64(f))), nil

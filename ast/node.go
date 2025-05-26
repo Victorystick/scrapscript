@@ -53,7 +53,7 @@ type CallExpr struct {
 
 type VariantExpr struct {
 	Tag Ident
-	Val Expr
+	Typ Expr
 }
 
 // A name-matched VariantExpr
@@ -111,8 +111,8 @@ func (b *CallExpr) Span() token.Span     { return span(b.Fn, b.Arg) }
 func (b *VariantExpr) Span() token.Span {
 	// Skip 1 char back for #.
 	end := b.Tag.Span().End
-	if b.Val != nil {
-		end = b.Val.Span().End
+	if b.Typ != nil {
+		end = b.Typ.Span().End
 	}
 	return token.Span{Start: b.Tag.Span().Start - 1, End: end}
 }

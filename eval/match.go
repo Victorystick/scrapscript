@@ -87,7 +87,7 @@ func (m *matcher) match(x ast.Expr, val Value) {
 		if val, ok := val.(Variant); ok && m.source.GetString(x.Tag.Pos) == val.tag {
 			// TODO: handle nil
 			// Recursively match further.
-			m.match(x.Val, val.value)
+			m.match(x.Typ, val.value)
 			return
 		}
 

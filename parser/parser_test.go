@@ -131,6 +131,7 @@ func TestParseError(t *testing.T) {
 	examples := []struct{ source, message string }{
 		{`{ a = b ..c }`, `Expected RBRACE got SPREAD`},
 		{`{ a = 1, ..other }`, `A spread must be first in a record.`},
+		{`a::1 ; a : #a`, `Expected IDENT got INT`},
 	}
 
 	for _, example := range examples {

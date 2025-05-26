@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/Victorystick/scrapscript/types"
 )
 
 // Values
@@ -23,14 +25,15 @@ type Text string
 type Byte byte
 type Bytes []byte
 
-// Is expected to contain functions.
-type Enum map[string]Value
+// A named type that may be referenced in e.g. a pick expression.
+type Type types.TypeRef
 
 type Record map[string]Value
 
 type List []Value
 
 type Variant struct {
+	typ   Type
 	tag   string
 	value Value
 }
@@ -41,6 +44,7 @@ type Func func(Value) (Value, error)
 // A built-in function.
 type BuiltInFunc struct {
 	name string
+	typ  types.TypeRef
 	fn   Func
 }
 
@@ -64,7 +68,7 @@ func Equals(a, b Value) bool {
 		return a.eq(b)
 	case Bytes:
 		return a.eq(b)
-	case Enum:
+	case Type:
 		return a.eq(b)
 	case Record:
 		return a.eq(b)
@@ -104,9 +108,9 @@ func (bs Bytes) eq(other Value) bool {
 	o, ok := other.(Bytes)
 	return ok && bytes.Equal(bs, o)
 }
-func (i Enum) eq(other Value) bool {
-	o, ok := other.(Enum)
-	return ok && maps.EqualFunc(i, o, Equals)
+func (i Type) eq(other Value) bool {
+	o, ok := other.(Type)
+	return ok && i == o
 }
 func (i Record) eq(other Value) bool {
 	o, ok := other.(Record)
@@ -156,19 +160,8 @@ func (b Byte) String() string {
 func (bs Bytes) String() string {
 	return "~~" + base64.StdEncoding.EncodeToString(bs)
 }
-func (e Enum) String() string {
-	var b strings.Builder
-	space := len(e) - 1
-	for _, key := range slices.Sorted(maps.Keys(e)) {
-		val := e[key]
-		b.WriteString(val.String())
-
-		if space > 0 {
-			space -= 1
-			b.WriteByte(' ')
-		}
-	}
-	return b.String()
+func (t Type) String() string {
+	return "<type>"
 }
 func (r Record) String() string {
 	var b strings.Builder
