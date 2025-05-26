@@ -417,27 +417,59 @@ func (c *context) typeRef(x ast.Expr) (ref types.TypeRef, err error) {
 	return
 }
 
-func (c *context) recordExpr(x *ast.RecordExpr) (Record, error) {
-	record := make(Record)
+func (c *context) recordExpr(x *ast.RecordExpr) (r Record, err error) {
+	// New record.
+	if x.Rest == nil {
+		ref := make(types.MapRef, len(x.Entries))
+		values := make(map[string]Value, len(x.Entries))
 
-	if x.Rest != nil {
-		other, err := c.record(x.Rest)
-		if err != nil {
-			return nil, err
+		for tag, x := range x.Entries {
+			var val Value
+			val, err = c.eval(x)
+			if err != nil {
+				return
+			}
+
+			ref[tag] = val.Type()
+			values[tag] = val
 		}
-		maps.Copy(record, other)
+		r = Record{c.reg.Record(ref), values}
+		return
 	}
+
+	// Record based on another.
+	var other Record
+	other, err = c.record(x.Rest)
+	if err != nil {
+		return
+	}
+	ref := c.reg.GetRecord(other.typ)
+	values := maps.Clone(other.values)
 
 	for tag, x := range x.Entries {
-		// TODO: ensure types remain the same
-		val, err := c.eval(x)
+		var val Value
+		val, err = c.eval(x)
 		if err != nil {
-			return nil, err
+			return
 		}
 
-		record[tag] = val
+		typ, ok := ref[tag]
+		if !ok {
+			err = c.error(x.Span(),
+				fmt.Sprintf("cannot set key %s not in the base record", tag))
+			return
+		}
+		if val.Type() != typ {
+			err = c.error(x.Span(),
+				fmt.Sprintf("cannot change type of key %s from %s to %s",
+					tag, c.reg.String(typ), c.reg.String(val.Type())))
+			return
+		}
+
+		values[tag] = val
 	}
-	return record, nil
+
+	return Record{other.typ, values}, nil
 }
 
 func (c *context) access(x *ast.AccessExpr) (Value, error) {
@@ -446,9 +478,10 @@ func (c *context) access(x *ast.AccessExpr) (Value, error) {
 		return nil, err
 	}
 	key := c.name(&x.Key)
-	val, ok := r[key]
+	val, ok := r.values[key]
 	if !ok {
-		return nil, c.error(x.Key.Pos, fmt.Sprintf("record is missing property %s", key))
+		return nil, c.error(x.Key.Pos,
+			fmt.Sprintf("record %s has no key %s", r, key))
 	}
 	return val, nil
 }
@@ -537,7 +570,7 @@ func (c *context) createMatchFunc(x ast.MatchFuncExpr) (ScriptFunc, error) {
 		source: source,
 		fn: func(a Value) (Value, error) {
 			for _, alt := range x {
-				matches, err := Match(c.source, alt.Arg, a)
+				matches, err := Match(c.source, c.reg, alt.Arg, a)
 				if err != nil {
 					if err == ErrNoMatch {
 						continue
@@ -643,13 +676,15 @@ func (c *context) list(x ast.Node) (l List, err error) {
 	return
 }
 
-func (c *context) record(x ast.Node) (Record, error) {
-	val, err := c.eval(x)
+func (c *context) record(x ast.Node) (r Record, err error) {
+	var val Value
+	val, err = c.eval(x)
 	if err != nil {
-		return nil, err
+		return
 	}
-	if i, ok := val.(Record); ok {
-		return i, nil
+	if r, ok := val.(Record); ok {
+		return r, nil
 	}
-	return nil, c.error(x.Span(), fmt.Sprintf("non-record value %s", val))
+	err = c.error(x.Span(), fmt.Sprintf("non-record value %s", val))
+	return
 }

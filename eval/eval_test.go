@@ -89,6 +89,9 @@ var failures = []struct {
 	{`["a"] +< ~be`, `cannot append byte to list text`},
 	{`1 >+ [~~abcd]`, `cannot prepend int to list bytes`},
 	{`[1, 1.2]`, `list elements must all be of type int, got float`},
+	{`{ b = 1 }.a`, `record { b = 1 } has no key a`},
+	{`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`, `cannot set key b not in the base record`},
+	{`{ ..{ a = 2 }, a = "x"}`, `cannot change type of key a from int to text`},
 }
 
 func TestEval(t *testing.T) {
@@ -115,7 +118,7 @@ var exp2str = []struct{ source, result string }{
 	{`rec.a ; rec = { a = 1, b = "x" }`, `1`},
 	{`{ ..g, a = 2, c = ~FF }
 	; g = { a = 1, b = "x", c = ~00 }`, `{ a = 2, b = "x", c = ~FF }`},
-	{`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`, `{ a = 1, b = "x", c = 1 }`},
+	{`{ ..{ a = 2, c = 1 }, a = 1 }`, `{ a = 1, c = 1 }`},
 	{`{ a = 2, b = 3, c = 4 } |>
     | { ..x, a = 1, b = 2, c = 3 } -> ()
     | {      a = 1, b = b,       } -> ()

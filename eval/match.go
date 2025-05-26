@@ -7,6 +7,7 @@ import (
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/token"
+	"github.com/Victorystick/scrapscript/types"
 )
 
 type bail struct{}
@@ -18,6 +19,7 @@ var (
 
 type matcher struct {
 	source *token.Source
+	reg    *types.Registry
 	vars   Variables
 	err    error
 }
@@ -35,8 +37,8 @@ func (m *matcher) errorf(span token.Span, format string, args ...any) {
 
 // Matches an expression onto val returning new bindings.
 // It is a match if err is nil.
-func Match(source *token.Source, x ast.Expr, val Value) (vars Variables, err error) {
-	m := matcher{source, make(Variables), err}
+func Match(source *token.Source, reg *types.Registry, x ast.Expr, val Value) (vars Variables, err error) {
+	m := matcher{source, reg, make(Variables), err}
 
 	defer func() {
 		if pnc := recover(); pnc != nil {
@@ -94,7 +96,7 @@ func (m *matcher) match(x ast.Expr, val Value) {
 	case *ast.RecordExpr:
 		if record, ok := val.(Record); ok {
 			for tag, x := range x.Entries {
-				val, ok := record[tag]
+				val, ok := record.values[tag]
 				if !ok {
 					// TODO: should point to the key, not the value (x).
 					m.errorf(x.Span(), "cannot bind to missing key %s", tag)
@@ -105,11 +107,13 @@ func (m *matcher) match(x ast.Expr, val Value) {
 
 			// If there's a rest expression; clone the record, clear used keys and recurse.
 			if x.Rest != nil {
-				rest := maps.Clone(record)
+				ref := maps.Clone(m.reg.GetRecord(record.typ))
+				rest := maps.Clone(record.values)
 				for tag := range x.Entries {
+					delete(ref, tag)
 					delete(rest, tag)
 				}
-				m.match(x.Rest, rest)
+				m.match(x.Rest, Record{m.reg.Record(ref), rest})
 			}
 
 			return

@@ -29,7 +29,10 @@ type Bytes []byte
 // A named type that may be referenced in e.g. a pick expression.
 type Type types.TypeRef
 
-type Record map[string]Value
+type Record struct {
+	typ    types.TypeRef
+	values map[string]Value
+}
 
 type List struct {
 	typ      types.TypeRef
@@ -118,11 +121,13 @@ func (t Type) eq(other Value) bool {
 }
 func (i Record) eq(other Value) bool {
 	o, ok := other.(Record)
-	return ok && maps.EqualFunc(i, o, Equals)
+	return ok && i.typ == o.typ &&
+		maps.EqualFunc(i.values, o.values, Equals)
 }
 func (l List) eq(other Value) bool {
 	o, ok := other.(List)
-	return ok && slices.EqualFunc(l.elements, o.elements, Equals)
+	return ok && l.typ == o.typ &&
+		slices.EqualFunc(l.elements, o.elements, Equals)
 }
 func (v Variant) eq(other Value) bool {
 	o, ok := other.(Variant)
@@ -149,10 +154,7 @@ func (t Type) Type() types.TypeRef {
 	// TODO: Should a type return itself, or a special type?
 	return types.NeverRef
 }
-func (i Record) Type() types.TypeRef {
-	// TODO: implement
-	return types.NeverRef
-}
+func (r Record) Type() types.TypeRef       { return r.typ }
 func (l List) Type() types.TypeRef         { return l.typ }
 func (v Variant) Type() types.TypeRef      { return v.typ }
 func (bf BuiltInFunc) Type() types.TypeRef { return bf.typ }
@@ -193,9 +195,9 @@ func (t Type) String() string {
 func (r Record) String() string {
 	var b strings.Builder
 	b.WriteString("{ ")
-	comma := len(r) - 1
-	for _, key := range slices.Sorted(maps.Keys(r)) {
-		val := r[key]
+	comma := len(r.values) - 1
+	for _, key := range slices.Sorted(maps.Keys(r.values)) {
+		val := r.values[key]
 		b.WriteString(key)
 		b.WriteString(" = ")
 		b.WriteString(val.String())
