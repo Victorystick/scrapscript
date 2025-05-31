@@ -69,6 +69,10 @@ func inferType(args []string) {
 	source := token.NewSource(input)
 
 	se := must(parser.Parse(&source))
-	reg, types := types.Infer(se)
-	fmt.Println(reg.String(types[se.Expr]))
+	str, err := types.Infer(se)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println(str)
 }

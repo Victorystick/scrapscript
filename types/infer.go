@@ -7,8 +7,6 @@ import (
 	"github.com/Victorystick/scrapscript/token"
 )
 
-type ExprTypes map[ast.Expr]TypeRef
-
 type Scope[T any] struct {
 	parent *Scope[T]
 	name   string
@@ -16,29 +14,42 @@ type Scope[T any] struct {
 }
 
 func (s *Scope[T]) Lookup(name string) (res T) {
+	if bound := s.Get(name); bound != nil {
+		res = bound.val
+	}
+	return
+}
+
+func (s *Scope[T]) Get(name string) *Scope[T] {
 	for s != nil {
 		if s.name == name {
-			return s.val
+			return s
 		}
 		s = s.parent
 	}
-	return
+	return nil
 }
 
 func (s *Scope[T]) Bind(name string, val T) *Scope[T] {
 	return &Scope[T]{s, name, val}
 }
 
+type TypeScope = *Scope[TypeRef]
+
 type context struct {
 	source   token.Source
-	reg      Registry
-	types    ExprTypes
-	scope    *Scope[TypeRef]
+	reg      *Registry
+	scope    TypeScope
 	generics int // The number of generics currently in use.
 }
 
-func (c *context) bind(name string, ref TypeRef) {
+func (c *context) bail(span token.Span, msg string) {
+	panic(c.source.Error(span, msg))
+}
+
+func (c *context) bind(name string, ref TypeRef) TypeScope {
 	c.scope = c.scope.Bind(name, ref)
+	return c.scope
 }
 
 func (c *context) generic() (ref TypeRef) {
@@ -51,19 +62,39 @@ func (c *context) ungeneric() {
 	c.generics -= 1
 }
 
-func Infer(se ast.SourceExpr) (Registry, ExprTypes) {
-	context := context{
-		types:  make(ExprTypes),
-		source: se.Source,
-	}
+func Infer(se ast.SourceExpr) (string, error) {
+	var reg Registry
+	var scope TypeScope
 
 	for _, p := range primitives {
-		context.bind(context.reg.String(p), p)
+		scope = scope.Bind(reg.String(p), p)
 	}
 
-	context.types[se.Expr] = context.infer(se.Expr)
+	ref, err := InferInScope(&reg, scope, se)
+	if err != nil {
+		return "", nil
+	}
+	return reg.String(ref), nil
+}
 
-	return context.reg, context.types
+func InferInScope(reg *Registry, scope TypeScope, se ast.SourceExpr) (ref TypeRef, err error) {
+	context := context{
+		source: se.Source,
+		reg:    reg,
+		scope:  scope,
+	}
+
+	defer func() {
+		if pnc := recover(); pnc != nil {
+			if e, ok := pnc.(token.Error); ok {
+				err = e
+			} else {
+				panic(pnc)
+	}
+		}
+	}()
+
+	return context.infer(se.Expr), err
 }
 
 func (c *context) infer(expr ast.Expr) TypeRef {
@@ -84,8 +115,10 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 		// Must track the depth of generics.
 		generic := c.generic()
 		defer c.ungeneric()
-		c.bind(c.source.GetString(x.Arg.Span()), generic)
-		return c.reg.Func(generic, c.infer(x.Body))
+		// Hold onto the binding, in case inferring the body rebinds its type.
+		binding := c.bind(c.source.GetString(x.Arg.Span()), generic)
+		ret := c.infer(x.Body)
+		return c.reg.Func(binding.val, ret)
 	case *ast.CallExpr:
 		// Special-case pick with a value.
 		if pick, ok := x.Fn.(*ast.BinaryExpr); ok && pick.Op == token.PICK {
@@ -93,19 +126,34 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 		}
 
 		typ := c.infer(x.Fn)
+		arg := c.infer(x.Arg)
+
 		if !typ.IsFunction() {
-			panic(fmt.Sprintf("cannot call non function %s", c.reg.String(typ)))
+			id, ok := x.Fn.(*ast.Ident)
+			if ok && typ.IsGeneric() {
+				name := c.source.GetString(id.Pos)
+				s := c.scope.Get(name)
+				if s != nil {
+					// Let's steal the now unused (?) generic.
+					s.val = c.reg.Func(arg, typ)
+					// fmt.Fprintln(os.Stderr, "name", name, "is", c.reg.String(s.val))
+					return typ
+				}
+
+				// Let's try to rebind a type.
+			}
+
+			c.bail(x.Span(), fmt.Sprintf("cannot call non-function %s", c.reg.String(typ)))
 		}
 		fn := c.reg.GetFunc(typ)
 
-		arg := c.infer(x.Arg)
-		if fn.Arg == arg {
-			return fn.Result
-		} else if fn.Arg.IsGeneric() {
-			return c.reg.ResolveGeneric(fn.Result, fn.Arg, arg)
+		ref := c.call(fn, arg)
+		if ref != NeverRef {
+			return ref
 		}
 
-		panic("can't infer call expression")
+		c.bail(x.Span(), fmt.Sprintf("cannot call %s with %s", c.reg.String(typ), c.reg.String(arg)))
+
 	case *ast.BinaryExpr:
 		left := c.infer(x.Left)
 		right := c.infer(x.Right)
@@ -129,6 +177,45 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 	panic(fmt.Sprintf("can't infer node %T", expr))
 }
 
+func (c *context) call(fn FuncRef, arg TypeRef) TypeRef {
+	if c.isAssignable(fn.Arg, arg) {
+		return fn.Result
+	}
+
+	if fn.Arg.IsGeneric() {
+		return c.reg.ResolveGeneric(fn.Result, fn.Arg, arg)
+	}
+
+	if fn.Arg.IsFunction() && arg.IsFunction() {
+		afn := c.reg.GetFunc(fn.Arg)
+		bfn := c.reg.GetFunc(arg)
+
+		// If completely generic, replace with arg.
+		if afn.Arg.IsGeneric() && afn.Result.IsGeneric() {
+			res := c.reg.ResolveGeneric(fn.Result, afn.Result, bfn.Result)
+			return c.reg.ResolveGeneric(res, afn.Arg, bfn.Arg)
+		}
+	}
+
+	return NeverRef
+}
+
+func (c *context) isAssignable(a, b TypeRef) bool {
+	if a == b {
+		return true
+	}
+
+	aTag, _ := a.extract()
+	switch aTag {
+	case listTag:
+		if b.IsList() && c.reg.GetList(b) == NeverRef {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (c *context) where(x *ast.WhereExpr) TypeRef {
 	name := c.source.GetString(x.Id.Pos)
 	c.bind(name, c.infer(x.Val))
@@ -142,12 +229,29 @@ func (c *context) list(x *ast.ListExpr) (res TypeRef) {
 			continue
 		} else if res == NeverRef {
 			res = typ
+		} else if typ.IsGeneric() {
+			c.rebind(v, res)
 		} else {
 			// Bad list.
 			return NeverRef
 		}
 	}
 	return c.reg.List(res)
+}
+
+// Re-binds the type of expresion x, or fails.
+func (c *context) rebind(x ast.Expr, ref TypeRef) {
+	name := c.source.GetString(x.Span())
+	_, ok := x.(*ast.Ident)
+	if ok {
+		s := c.scope.Get(name)
+		if s != nil {
+			// Let's steal the now unused (?) generic.
+			s.val = ref
+			return
+		}
+	}
+	c.bail(x.Span(), fmt.Sprintf("can't rebind type of non-identifier %s", name))
 }
 
 func (c *context) record(x *ast.RecordExpr) TypeRef {

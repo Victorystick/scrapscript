@@ -43,10 +43,49 @@ func TestInfer(t *testing.T) {
 
 	for _, ex := range examples {
 		se := must(parser.ParseExpr(ex.source))
-		reg, types := Infer(se)
-		typ := reg.String(types[se.Expr])
-		if typ != ex.typ {
-			t.Errorf("Expected %s, got %s", ex.typ, typ)
+		typ, err := Infer(se)
+		if err != nil {
+			t.Error(err)
+		} else {
+			if typ != ex.typ {
+				t.Errorf("Expected %s, got %s", ex.typ, typ)
+			}
+		}
+	}
+}
+
+func TestInferInScope(t *testing.T) {
+	reg := Registry{}
+	var scope *Scope[TypeRef]
+
+	scope = scope.Bind("len", reg.Func(reg.List(reg.Generic(0)), IntRef))
+
+	examples := []struct{ source, typ string }{
+		{`len`, `list a -> int`},
+		{`len []`, `int`},
+		{`f -> a -> [ a ]`, `a -> b -> list b`},
+		{`(f -> a -> [ a ]) "a"`, `b -> list b`},
+		{`(f -> a -> [ a ]) "a" 3`, `list int`},
+		{`f -> a -> ([ b, b ] ; b = (f a))`, `(b -> a) -> b -> list a`},
+		// If used the same, arguments must be the same.
+		{`a -> b -> [ a, b ]`, `a -> a -> list a`},
+		{`(a -> b -> [ a, b ]) 1`, `int -> list int`},
+
+		{`(f -> a -> ([ b, b ] ; b = (f a))) len`, `list a -> list int`},
+		{`(f -> a -> ([ b, b ] ; b = (f a))) len []`, `list int`},
+		// {`twice ; twice = f -> a -> f (f a)`, `(a -> a) -> a -> a`},
+	}
+
+	for _, ex := range examples {
+		se := must(parser.ParseExpr(ex.source))
+		ref, err := InferInScope(&reg, scope, se)
+		if err != nil {
+			t.Error(err)
+		} else {
+			typ := reg.String(ref)
+			if typ != ex.typ {
+				t.Errorf("Expected %s, got %s", ex.typ, typ)
+			}
 		}
 	}
 }
