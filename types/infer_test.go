@@ -37,7 +37,7 @@ func TestInfer(t *testing.T) {
 		{`_ -> _ -> "hi"`, `a -> b -> text`},
 		{`(_ -> "hi") ()`, `text`},
 		{`a -> b -> { a = a, b = b }`, `a -> b -> { a : a, b : b }`},
-		{`(a -> b -> { a = a, b = b }) 1`, `b -> { a : int, b : b }`},
+		{`(a -> b -> { a = a, b = b }) 1`, `a -> { a : int, b : a }`},
 		{`(a -> b -> { a = a, b = b }) 1 "yo" `, `{ a : int, b : text }`},
 	}
 
@@ -58,15 +58,15 @@ func TestInferInScope(t *testing.T) {
 	reg := Registry{}
 	var scope *Scope[TypeRef]
 
-	scope = scope.Bind("len", reg.Func(reg.List(reg.Generic(0)), IntRef))
+	scope = scope.Bind("len", reg.Func(reg.List(reg.Unbound()), IntRef))
 
 	examples := []struct{ source, typ string }{
 		{`len`, `list a -> int`},
 		{`len []`, `int`},
 		{`f -> a -> [ a ]`, `a -> b -> list b`},
-		{`(f -> a -> [ a ]) "a"`, `b -> list b`},
+		{`(f -> a -> [ a ]) "a"`, `a -> list a`},
 		{`(f -> a -> [ a ]) "a" 3`, `list int`},
-		{`f -> a -> ([ b, b ] ; b = (f a))`, `(b -> a) -> b -> list a`},
+		{`f -> a -> ([ b, b ] ; b = (f a))`, `(a -> b) -> a -> list b`},
 		// If used the same, arguments must be the same.
 		{`a -> b -> [ a, b ]`, `a -> a -> list a`},
 		{`(a -> b -> [ a, b ]) 1`, `int -> list int`},

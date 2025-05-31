@@ -22,8 +22,8 @@ func bindBuiltIns(reg *types.Registry) Variables {
 	builtIns["byte"] = Type(types.ByteRef)
 	builtIns["bytes"] = Type(types.BytesRef)
 
-	a := reg.Generic(0)
-	b := reg.Generic(1)
+	a := reg.Unbound()
+	b := reg.Unbound()
 	aToB := reg.Func(a, b)
 	aList := reg.List(a)
 	bList := reg.List(b)

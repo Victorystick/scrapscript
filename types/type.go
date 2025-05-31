@@ -15,7 +15,7 @@ const (
 	funcTag
 	enumTag
 	recordTag
-	genericTag
+	unboundTag
 )
 
 // Efficiently encodes a type reference within a Registry.
@@ -50,9 +50,9 @@ func (ref TypeRef) IsFunction() bool {
 	return ref.hasTag(funcTag)
 }
 
-// IsGeneric returns true if the TypeRef is a generic.
-func (ref TypeRef) IsGeneric() bool {
-	return ref.hasTag(genericTag)
+// IsUnbound returns true if the TypeRef is an unbound type.
+func (ref TypeRef) IsUnbound() bool {
+	return ref.hasTag(unboundTag)
 }
 
 const (
@@ -77,7 +77,6 @@ var primitiveNames = [...]string{
 	"byte",
 	"bytes",
 }
-var genericNames = "abcdefghijklmnopqrstuvwxyz"
 
 type FuncRef struct {
 	Arg, Result TypeRef
@@ -87,6 +86,8 @@ type MapRef map[string]TypeRef
 
 // Contains the types of a running application.
 type Registry struct {
+	// The number of unique unbound types.
+	unbound int
 	// Lists just have a TypeRef.
 	lists []TypeRef
 	// Functions map one TypeRef to another.
@@ -103,46 +104,10 @@ func (c *Registry) Size() int {
 
 // Strings returns a string representation for TypeRef.
 func (c *Registry) String(ref TypeRef) string {
-	var b strings.Builder
-	c.string(&b, ref, 0)
-	return b.String()
-}
-
-func (c *Registry) string(b *strings.Builder, ref TypeRef, nesting int) {
-	tag, index := ref.extract()
-	switch tag {
-	case primitiveTag:
-		b.WriteString(primitiveNames[index])
-	case listTag:
-		if nesting > 1 {
-			b.WriteByte('(')
-		}
-		b.WriteString("list ")
-		c.string(b, c.lists[index], 2)
-		if nesting > 1 {
-			b.WriteByte(')')
-		}
-	case funcTag:
-		fn := c.funcs[index]
-		if nesting > 0 {
-			b.WriteByte('(')
-		}
-		c.string(b, fn.Arg, 1)
-		b.WriteString(" -> ")
-		c.string(b, fn.Result, 0)
-		if nesting > 0 {
-			b.WriteByte(')')
-		}
-	case enumTag:
-		c.enumStr(b, index)
-	case recordTag:
-		c.recordStr(b, index)
-	case genericTag:
-		b.WriteByte(genericNames[index])
-	default:
-		// The invalid type.
-		panic("bad type-ref")
-	}
+	var s stringer
+	s.reg = c
+	s.string(ref, 0)
+	return s.String()
 }
 
 // List returns the TypeRef for a list type.
@@ -202,18 +167,18 @@ func (c *Registry) GetRecord(ref TypeRef) MapRef {
 	return c.records[index]
 }
 
-// Generic returns the TypeRef for a generic index.
-func (c *Registry) Generic(index int) TypeRef {
-	if index < 0 || len(genericNames) <= index {
-		panic("You need how many generics?!")
-	}
-	return makeTypeRef(genericTag, index)
+// Unbound returns a new unbound TypeRef.
+func (c *Registry) Unbound() (ref TypeRef) {
+	ref = makeTypeRef(unboundTag, c.unbound)
+	c.unbound += 1
+	// fmt.
+	return
 }
 
-// ResolveGeneric replaces all occurrences in `target` of `generic` with `resolved`.
-func (c *Registry) ResolveGeneric(target, generic, resolved TypeRef) TypeRef {
-	// Base case: the target is the generic we want to replace.
-	if target == generic {
+// Bind replaces all occurrences of `unbound` with `resolved` in the `target` type.
+func (c *Registry) Bind(target, unbound, resolved TypeRef) TypeRef {
+	// Base case: the target is the unbound we want to replace.
+	if target == unbound {
 		return resolved
 	}
 
@@ -221,24 +186,24 @@ func (c *Registry) ResolveGeneric(target, generic, resolved TypeRef) TypeRef {
 	switch tag {
 	case listTag:
 		return c.List(
-			c.ResolveGeneric(c.lists[index], generic, resolved),
+			c.Bind(c.lists[index], unbound, resolved),
 		)
 	case funcTag:
 		fn := c.funcs[index]
 		return c.Func(
-			c.ResolveGeneric(fn.Arg, generic, resolved),
-			c.ResolveGeneric(fn.Result, generic, resolved),
+			c.Bind(fn.Arg, unbound, resolved),
+			c.Bind(fn.Result, unbound, resolved),
 		)
 	case enumTag:
 		ref := make(MapRef, len(c.enums[index]))
 		for k, v := range c.enums[index] {
-			ref[k] = c.ResolveGeneric(v, generic, resolved)
+			ref[k] = c.Bind(v, unbound, resolved)
 		}
 		return c.Enum(ref)
 	case recordTag:
 		ref := make(MapRef, len(c.records[index]))
 		for k, v := range c.records[index] {
-			ref[k] = c.ResolveGeneric(v, generic, resolved)
+			ref[k] = c.Bind(v, unbound, resolved)
 		}
 		return c.Record(ref)
 	}
@@ -271,8 +236,63 @@ func findOrAddMap(ls *[]MapRef, tag tag, el MapRef) TypeRef {
 	return makeTypeRef(tag, i)
 }
 
-func (c *Registry) enumStr(b *strings.Builder, index int) {
-	e := c.enums[index]
+var unboundNames = "abcdefghijklmnopqrstuvwxyz"
+
+type stringer struct {
+	strings.Builder
+	reg *Registry
+	// Mapping from unbound index to
+	unbounds []int
+}
+
+func (b *stringer) unbound(index int) {
+	i := slices.Index(b.unbounds, index)
+	if i == -1 {
+		i = len(b.unbounds)
+		b.unbounds = append(b.unbounds, index)
+	}
+	b.WriteByte(unboundNames[i])
+}
+
+func (b *stringer) string(ref TypeRef, nesting int) {
+	tag, index := ref.extract()
+	switch tag {
+	case primitiveTag:
+		b.WriteString(primitiveNames[index])
+	case listTag:
+		if nesting > 1 {
+			b.WriteByte('(')
+		}
+		b.WriteString("list ")
+		b.string(b.reg.lists[index], 2)
+		if nesting > 1 {
+			b.WriteByte(')')
+		}
+	case funcTag:
+		fn := b.reg.funcs[index]
+		if nesting > 0 {
+			b.WriteByte('(')
+		}
+		b.string(fn.Arg, 1)
+		b.WriteString(" -> ")
+		b.string(fn.Result, 0)
+		if nesting > 0 {
+			b.WriteByte(')')
+		}
+	case enumTag:
+		b.enum(index)
+	case recordTag:
+		b.record(index)
+	case unboundTag:
+		b.unbound(index)
+	default:
+		// The invalid type.
+		panic("bad type-ref")
+	}
+}
+
+func (b *stringer) enum(index int) {
+	e := b.reg.enums[index]
 	space := len(e) - 1
 	for _, key := range slices.Sorted(maps.Keys(e)) {
 		b.WriteByte('#')
@@ -281,7 +301,7 @@ func (c *Registry) enumStr(b *strings.Builder, index int) {
 		// Special-case never.
 		if e[key] != NeverRef {
 			b.WriteByte(' ')
-			c.string(b, e[key], 1)
+			b.string(e[key], 1)
 		}
 
 		if space > 0 {
@@ -291,14 +311,14 @@ func (c *Registry) enumStr(b *strings.Builder, index int) {
 	}
 }
 
-func (c *Registry) recordStr(b *strings.Builder, index int) {
-	r := c.records[index]
+func (b *stringer) record(index int) {
+	r := b.reg.records[index]
 	b.WriteString("{ ")
 	comma := len(r) - 1
 	for _, key := range slices.Sorted(maps.Keys(r)) {
 		b.WriteString(key)
 		b.WriteString(" : ")
-		c.string(b, r[key], 1)
+		b.string(r[key], 1)
 
 		if comma > 0 {
 			comma -= 1

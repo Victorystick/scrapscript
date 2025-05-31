@@ -34,13 +34,20 @@ func (s *Scope[T]) Bind(name string, val T) *Scope[T] {
 	return &Scope[T]{s, name, val}
 }
 
+func (s *Scope[T]) Rebind(name string, val T) bool {
+	if bound := s.Get(name); bound != nil {
+		bound.val = val
+		return true
+	}
+	return false
+}
+
 type TypeScope = *Scope[TypeRef]
 
 type context struct {
-	source   token.Source
-	reg      *Registry
-	scope    TypeScope
-	generics int // The number of generics currently in use.
+	source token.Source
+	reg    *Registry
+	scope  TypeScope
 }
 
 func (c *context) bail(span token.Span, msg string) {
@@ -50,16 +57,6 @@ func (c *context) bail(span token.Span, msg string) {
 func (c *context) bind(name string, ref TypeRef) TypeScope {
 	c.scope = c.scope.Bind(name, ref)
 	return c.scope
-}
-
-func (c *context) generic() (ref TypeRef) {
-	ref = c.reg.Generic(c.generics)
-	c.generics += 1
-	return
-}
-
-func (c *context) ungeneric() {
-	c.generics -= 1
 }
 
 func Infer(se ast.SourceExpr) (string, error) {
@@ -72,7 +69,7 @@ func Infer(se ast.SourceExpr) (string, error) {
 
 	ref, err := InferInScope(&reg, scope, se)
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 	return reg.String(ref), nil
 }
@@ -90,7 +87,7 @@ func InferInScope(reg *Registry, scope TypeScope, se ast.SourceExpr) (ref TypeRe
 				err = e
 			} else {
 				panic(pnc)
-	}
+			}
 		}
 	}()
 
@@ -112,11 +109,9 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 	case ast.TypeExpr:
 		return c.enum(x)
 	case *ast.FuncExpr:
-		// Must track the depth of generics.
-		generic := c.generic()
-		defer c.ungeneric()
+		unbound := c.reg.Unbound()
 		// Hold onto the binding, in case inferring the body rebinds its type.
-		binding := c.bind(c.source.GetString(x.Arg.Span()), generic)
+		binding := c.bind(c.source.GetString(x.Arg.Span()), unbound)
 		ret := c.infer(x.Body)
 		return c.reg.Func(binding.val, ret)
 	case *ast.CallExpr:
@@ -129,14 +124,13 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 		arg := c.infer(x.Arg)
 
 		if !typ.IsFunction() {
+			// If the argument is an unbound identifier, rebind it.
 			id, ok := x.Fn.(*ast.Ident)
-			if ok && typ.IsGeneric() {
+			if ok && typ.IsUnbound() {
 				name := c.source.GetString(id.Pos)
-				s := c.scope.Get(name)
-				if s != nil {
-					// Let's steal the now unused (?) generic.
-					s.val = c.reg.Func(arg, typ)
-					// fmt.Fprintln(os.Stderr, "name", name, "is", c.reg.String(s.val))
+				// Let's steal the now unused (?) unbound.
+				fn := c.reg.Func(arg, typ)
+				if c.scope.Rebind(name, fn) {
 					return typ
 				}
 
@@ -164,7 +158,7 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 			if left == TextRef {
 				if right == TextRef {
 					return TextRef
-				} else if right.IsGeneric() {
+				} else if right.IsUnbound() {
 
 				} else {
 					return NeverRef
@@ -182,18 +176,18 @@ func (c *context) call(fn FuncRef, arg TypeRef) TypeRef {
 		return fn.Result
 	}
 
-	if fn.Arg.IsGeneric() {
-		return c.reg.ResolveGeneric(fn.Result, fn.Arg, arg)
+	if fn.Arg.IsUnbound() {
+		return c.reg.Bind(fn.Result, fn.Arg, arg)
 	}
 
 	if fn.Arg.IsFunction() && arg.IsFunction() {
 		afn := c.reg.GetFunc(fn.Arg)
 		bfn := c.reg.GetFunc(arg)
 
-		// If completely generic, replace with arg.
-		if afn.Arg.IsGeneric() && afn.Result.IsGeneric() {
-			res := c.reg.ResolveGeneric(fn.Result, afn.Result, bfn.Result)
-			return c.reg.ResolveGeneric(res, afn.Arg, bfn.Arg)
+		// If completely unbound, replace with arg.
+		if afn.Arg.IsUnbound() && afn.Result.IsUnbound() {
+			res := c.reg.Bind(fn.Result, afn.Result, bfn.Result)
+			return c.reg.Bind(res, afn.Arg, bfn.Arg)
 		}
 	}
 
@@ -229,7 +223,7 @@ func (c *context) list(x *ast.ListExpr) (res TypeRef) {
 			continue
 		} else if res == NeverRef {
 			res = typ
-		} else if typ.IsGeneric() {
+		} else if typ.IsUnbound() {
 			c.rebind(v, res)
 		} else {
 			// Bad list.

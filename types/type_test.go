@@ -85,53 +85,53 @@ func TestRecord(t *testing.T) {
 func TestGeneric(t *testing.T) {
 	reg := Registry{}
 
-	a := reg.Generic(0)
-	b := reg.Generic(1)
+	a := reg.Unbound()
+	b := reg.Unbound()
 
 	listFold := reg.Func(b, reg.Func(reg.Func(b, reg.Func(a, b)), reg.Func(reg.List(a), b)))
-	Eq(t, reg.String(listFold), "b -> (b -> a -> b) -> list a -> b")
+	Eq(t, reg.String(listFold), "a -> (a -> b -> a) -> list b -> a")
 
 	listMap := reg.Func(reg.Func(a, b), reg.Func(reg.List(a), reg.List(b)))
 	Eq(t, reg.String(listMap), "(a -> b) -> list a -> list b")
 }
 
-func TestResolveGeneric(t *testing.T) {
+func TestBind(t *testing.T) {
 	reg := Registry{}
 
-	a := reg.Generic(0)
+	a := reg.Unbound()
 	Eq(t, reg.String(a), "a")
-	Eq(t, reg.ResolveGeneric(a, a, IntRef), IntRef)
+	Eq(t, reg.Bind(a, a, IntRef), IntRef)
 
 	id := reg.Func(a, a)
 	Eq(t, reg.String(id), "a -> a")
 	Eq(t, reg.Size(), 1)
 
-	inc := reg.ResolveGeneric(id, a, IntRef)
+	inc := reg.Bind(id, a, IntRef)
 	Eq(t, reg.String(inc), "int -> int")
 	Eq(t, reg.Size(), 2)
 
-	b := reg.Generic(1)
+	b := reg.Unbound()
 	listMap := reg.Func(reg.Func(a, b), reg.Func(reg.List(a), reg.List(b)))
 	Eq(t, reg.String(listMap), "(a -> b) -> list a -> list b")
 	Eq(t, reg.Size(), 7)
 
 	// Replace b -> int.
-	listMapBInt := reg.ResolveGeneric(listMap, b, IntRef)
+	listMapBInt := reg.Bind(listMap, b, IntRef)
 	Eq(t, reg.String(listMapBInt), "(a -> int) -> list a -> list int")
 	Eq(t, reg.Size(), 11)
 
 	// Now also a -> int.
-	listMapABInt := reg.ResolveGeneric(listMapBInt, a, IntRef)
+	listMapABInt := reg.Bind(listMapBInt, a, IntRef)
 	Eq(t, reg.String(listMapABInt), "(int -> int) -> list int -> list int")
 	Eq(t, reg.Size(), 13)
 
 	// Let's go the other way, replace a -> int.
-	listMapAInt := reg.ResolveGeneric(listMap, a, IntRef)
-	Eq(t, reg.String(listMapAInt), "(int -> b) -> list int -> list b")
+	listMapAInt := reg.Bind(listMap, a, IntRef)
+	Eq(t, reg.String(listMapAInt), "(int -> a) -> list int -> list a")
 	Eq(t, reg.Size(), 16)
 
 	// Returns same type if resolved the other way.
-	Eq(t, listMapABInt, reg.ResolveGeneric(listMapAInt, b, IntRef))
+	Eq(t, listMapABInt, reg.Bind(listMapAInt, b, IntRef))
 	Eq(t, reg.Size(), 16)
 
 	record := reg.Record(MapRef{"kind": IntRef, "a": a, "b": b})
@@ -141,8 +141,8 @@ func TestResolveGeneric(t *testing.T) {
 	// TODO: Don't sort order of record keys.
 	Eq(t, reg.String(recordToEnum), "{ a : a, b : b, kind : int } -> #a a #b b")
 
-	recordToEnumAInt := reg.ResolveGeneric(recordToEnum, a, IntRef)
-	Eq(t, reg.String(recordToEnumAInt), "{ a : int, b : b, kind : int } -> #a int #b b")
+	recordToEnumAInt := reg.Bind(recordToEnum, a, IntRef)
+	Eq(t, reg.String(recordToEnumAInt), "{ a : int, b : a, kind : int } -> #a int #b a")
 
 }
 
