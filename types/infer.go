@@ -226,6 +226,7 @@ func (c *context) list(x *ast.ListExpr) (res TypeRef) {
 		} else if typ.IsUnbound() {
 			c.rebind(v, res)
 		} else {
+c.bail(v.Span(), "list elements must all be of type "+c.reg.String(res))
 			// Bad list.
 			return NeverRef
 		}
@@ -254,12 +255,17 @@ func (c *context) record(x *ast.RecordExpr) TypeRef {
 		rest := c.infer(x.Rest)
 		rec := c.reg.GetRecord(rest)
 		if rec == nil {
-			// TODO: better error handling?
-			return NeverRef
+			c.bail(x.Rest.Span(), fmt.Sprintf("cannot spread from non-record type %s", c.reg.String(rest)))
 		}
 		for k, v := range x.Entries {
-			if ref, ok := rec[k]; !ok || ref != c.infer(v) {
-				return NeverRef
+			expected, ok := rec[k]
+			if !ok {
+				c.bail(v.Span(), fmt.Sprintf("cannot set %s not in the base record", k))
+
+			}
+			actual := c.infer(v)
+			if actual != expected {
+				c.bail(v.Span(), fmt.Sprintf("type of %s must be %s, not %s", k, c.reg.String(expected), c.reg.String(actual)))
 			}
 		}
 		return rest

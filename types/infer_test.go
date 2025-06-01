@@ -1,6 +1,7 @@
 package types
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Victorystick/scrapscript/parser"
@@ -21,12 +22,9 @@ func TestInfer(t *testing.T) {
 		// Lists
 		{`[]`, `list never`}, // empty list has no values
 		{`[1, 2]`, `list int`},
-		{`[1, 1.0]`, `never`}, // bad list
 		// Records
 		{`{ a = 1 }`, `{ a : int }`},
 		{`{ ..base, a = ~01 } ; base = { a = ~00 }`, `{ a : byte }`},
-		{`{ ..base, a = 1 } ; base = { a = ~00 }`, `never`}, // change type
-		{`{ ..1, a = 1 }`, `never`},                         // bad spread
 		// Enums
 		{`bool ; bool : #true #false`, `#false #true`},
 		{`e ; e : #l int #r`, `#l int #r`},
@@ -50,6 +48,30 @@ func TestInfer(t *testing.T) {
 			if typ != ex.typ {
 				t.Errorf("Expected %s, got %s", ex.typ, typ)
 			}
+		}
+	}
+}
+
+func TestInferFailure(t *testing.T) {
+	examples := []struct{ source, message string }{
+		// Lists
+		{`[1, 1.0]`, `list elements must all be of type int`},
+		// Records
+		{`{ ..base, a = 1 } ; base = { a = ~00 }`, `type of a must be byte, not int`},
+		{`{ ..1, a = 1 }`, `cannot spread from non-record type int`},
+		// Enums
+	}
+
+	for _, ex := range examples {
+		se := must(parser.ParseExpr(ex.source))
+		_, err := Infer(se)
+		if err != nil {
+			str := err.Error()
+			if !strings.Contains(str, ex.message) {
+				t.Errorf("Expected '%s' to be in error:\n%s", ex.message, str)
+			}
+		} else {
+			t.Errorf("Expected '%s' error for script:\n%s", ex.message, ex.source)
 		}
 	}
 }
