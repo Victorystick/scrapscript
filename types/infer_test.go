@@ -20,7 +20,7 @@ func TestInfer(t *testing.T) {
 		{`5`, `int`},
 		{`a ; a = 5`, `int`},
 		// Lists
-		{`[]`, `list never`}, // empty list has no values
+		{`[]`, `list a`}, // empty list has an unbound type for its values
 		{`[1, 2]`, `list int`},
 		// Records
 		{`{ a = 1 }`, `{ a : int }`},
@@ -60,6 +60,10 @@ func TestInferFailure(t *testing.T) {
 		{`{ ..base, a = 1 } ; base = { a = ~00 }`, `type of a must be byte, not int`},
 		{`{ ..1, a = 1 }`, `cannot spread from non-record type int`},
 		// Enums
+		{`1::a`, `1 isn't an enum`},
+		{`a::a ; a : #b`, `#a isn't a valid option for enum #b`},
+		{`a::b 1 ; a : #b`, `#b doesn't take any value`},
+		{`a::b 1 ; a : #b text`, `cannot assign int to #b which needs text`},
 	}
 
 	for _, ex := range examples {

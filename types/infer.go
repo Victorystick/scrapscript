@@ -202,7 +202,7 @@ func (c *context) isAssignable(a, b TypeRef) bool {
 	aTag, _ := a.extract()
 	switch aTag {
 	case listTag:
-		if b.IsList() && c.reg.GetList(b) == NeverRef {
+		if b.IsList() && c.reg.GetList(b).IsUnbound() {
 			return true
 		}
 	}
@@ -226,10 +226,13 @@ func (c *context) list(x *ast.ListExpr) (res TypeRef) {
 		} else if typ.IsUnbound() {
 			c.rebind(v, res)
 		} else {
-c.bail(v.Span(), "list elements must all be of type "+c.reg.String(res))
+			c.bail(v.Span(), "list elements must all be of type "+c.reg.String(res))
 			// Bad list.
 			return NeverRef
 		}
+	}
+	if res == NeverRef {
+		res = c.reg.Unbound()
 	}
 	return c.reg.List(res)
 }
@@ -297,27 +300,34 @@ func (c *context) pick(x *ast.BinaryExpr, val ast.Expr) TypeRef {
 	ref := c.scope.Lookup(name)
 	enum := c.reg.GetEnum(ref)
 	if enum == nil {
-		// TODO: better error handling?
-		return NeverRef
+		c.bail(x.Left.Span(), fmt.Sprintf("%s isn't an enum", name))
 	}
 
 	if id, ok := x.Right.(*ast.Ident); ok {
 		tag := c.source.GetString(id.Span())
 		typ, ok := enum[tag]
 		if !ok {
-			// TODO: better error handling?
-			return NeverRef
+			c.bail(id.Span(),
+				fmt.Sprintf("#%s isn't a valid option for enum %s",
+					tag, c.reg.String(ref)))
 		}
 
 		// We expect no value.
 		if typ == NeverRef {
 			// But there was one.
 			if val != nil {
+				c.bail(val.Span(), fmt.Sprintf("#%s doesn't take any value", tag))
+			}
+		} else {
+			valRef := c.infer(val)
+			// TODO: check assignability instead
+			if typ != valRef {
+				// Wrong type.
+				c.bail(val.Span(),
+					fmt.Sprintf("cannot assign %s to #%s which needs %s",
+						c.reg.String(valRef), tag, c.reg.String(typ)))
 				return NeverRef
 			}
-		} else if typ != c.infer(val) {
-			// Wrong type.
-			return NeverRef
 		}
 
 		return ref
