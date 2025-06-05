@@ -90,7 +90,7 @@ func (c *context) eval(x ast.Node) (Value, error) {
 		return c.call(x)
 	case *ast.WhereExpr:
 		return c.where(x)
-	case ast.TypeExpr:
+	case ast.EnumExpr:
 		return c.enum(x)
 	case *ast.RecordExpr:
 		return c.recordExpr(x)
@@ -360,7 +360,7 @@ func (c *context) compose(first, second ast.Expr) (Value, error) {
 	}, nil
 }
 
-func (c *context) enum(typ ast.TypeExpr) (Type, error) {
+func (c *context) enum(typ ast.EnumExpr) (Type, error) {
 	enum := make(types.MapRef, len(typ))
 	for _, v := range typ {
 		tag := c.name(&v.Tag)

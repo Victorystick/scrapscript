@@ -37,6 +37,8 @@ func TestInfer(t *testing.T) {
 		{`a -> b -> { a = a, b = b }`, `a -> b -> { a : a, b : b }`},
 		{`(a -> b -> { a = a, b = b }) 1`, `a -> { a : int, b : a }`},
 		{`(a -> b -> { a = a, b = b }) 1 "yo" `, `{ a : int, b : text }`},
+		{`a ; a : int = 1`, `int`},
+		{`a -> a + 1`, `int -> int`},
 	}
 
 	for _, ex := range examples {
@@ -64,6 +66,9 @@ func TestInferFailure(t *testing.T) {
 		{`a::a ; a : #b`, `#a isn't a valid option for enum #b`},
 		{`a::b 1 ; a : #b`, `#b doesn't take any value`},
 		{`a::b 1 ; a : #b text`, `cannot assign int to #b which needs text`},
+		{`1 + ~dd`, `expected int, got byte`},
+		{`a ; a : int = 1.0`, `cannot assign float to int`},
+		{`f ; f : int -> text = a -> 1`, `cannot assign a -> int to int -> text`},
 	}
 
 	for _, ex := range examples {
@@ -110,7 +115,7 @@ func TestInferInScope(t *testing.T) {
 		} else {
 			typ := reg.String(ref)
 			if typ != ex.typ {
-				t.Errorf("Expected %s, got %s", ex.typ, typ)
+				t.Errorf("Invalid type for '%s'\n  expected: %s\n       got: %s", ex.source, ex.typ, typ)
 			}
 		}
 	}

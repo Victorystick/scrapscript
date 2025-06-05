@@ -65,6 +65,8 @@ var expressions = []struct {
 	{`{ a = 1, b = 2 } |> | { a = c, b = d } -> c + d`, `3`},
 	{`{ a = 1 } |> | { a = 2 } -> c | { a = c } -> c`, `1`},
 	{`3 |> a -> b -> a`, `b -> a`},
+
+	{`#true #false`, `<type>`}, // TODO: should be `#true #false`
 }
 
 var failures = []struct {

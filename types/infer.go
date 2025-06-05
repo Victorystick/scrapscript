@@ -106,7 +106,7 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 		return c.list(x)
 	case *ast.RecordExpr:
 		return c.record(x)
-	case ast.TypeExpr:
+	case ast.EnumExpr:
 		return c.enum(x)
 	case *ast.FuncExpr:
 		unbound := c.reg.Unbound()
@@ -164,11 +164,36 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 					return NeverRef
 				}
 			}
+		case token.ADD:
+			if left == IntRef {
+				return c.ensure(x.Right, right, IntRef)
+			}
+			if right == IntRef {
+				return c.ensure(x.Left, left, IntRef)
+			}
 		}
 		panic(fmt.Sprintf("can't infer binary expression %s", x.Op.String()))
 	}
 
 	panic(fmt.Sprintf("can't infer node %T", expr))
+}
+
+func (c *context) ensure(x ast.Expr, got, want TypeRef) TypeRef {
+	if got == want {
+		return got
+	}
+
+	if got.IsUnbound() {
+		c.rebind(x, want)
+		return want
+	}
+
+	if c.isAssignable(want, got) {
+		return got
+	}
+
+	c.bail(x.Span(), fmt.Sprintf("expected %s, got %s", c.reg.String(want), c.reg.String(got)))
+	return NeverRef
 }
 
 func (c *context) call(fn FuncRef, arg TypeRef) TypeRef {
@@ -212,8 +237,40 @@ func (c *context) isAssignable(a, b TypeRef) bool {
 
 func (c *context) where(x *ast.WhereExpr) TypeRef {
 	name := c.source.GetString(x.Id.Pos)
-	c.bind(name, c.infer(x.Val))
+	if x.Typ == nil {
+		// If there is no type annotation, we can infer it from the value.
+		c.bind(name, c.infer(x.Val))
+		return c.infer(x.Expr)
+	}
+
+	tRef := c.typ(x.Typ)
+	vRef := c.infer(x.Val)
+	if tRef != vRef {
+		c.bail(x.Val.Span(), fmt.Sprintf("cannot assign %s to %s", c.reg.String(vRef), c.reg.String(tRef)))
+	}
+
+	c.bind(name, tRef)
 	return c.infer(x.Expr)
+}
+
+func (c *context) typ(x ast.Expr) TypeRef {
+	switch x := x.(type) {
+	case *ast.Ident:
+		name := c.source.GetString(x.Pos)
+		ref := c.scope.Lookup(name)
+		if ref == NeverRef {
+			c.bail(x.Span(), fmt.Sprintf("unknown type %s", name))
+		}
+		return ref
+	case *ast.FuncExpr:
+		return c.reg.Func(
+			c.typ(x.Arg),
+			c.typ(x.Body),
+		)
+	}
+
+	c.bail(x.Span(), fmt.Sprintf("cannot infer type of %T", x))
+	return NeverRef
 }
 
 func (c *context) list(x *ast.ListExpr) (res TypeRef) {
@@ -281,7 +338,7 @@ func (c *context) record(x *ast.RecordExpr) TypeRef {
 	return c.reg.Record(ref)
 }
 
-func (c *context) enum(x ast.TypeExpr) TypeRef {
+func (c *context) enum(x ast.EnumExpr) TypeRef {
 	ref := make(MapRef, len(x))
 	for _, v := range x {
 		name := c.source.GetString(v.Tag.Pos)

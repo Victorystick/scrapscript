@@ -201,6 +201,9 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 
 	case token.PIPE:
 		return p.parseMatchFuncExpr()
+
+	case token.OPTION:
+		return p.parseEnum()
 	}
 
 	p.unexpected()
@@ -269,13 +272,20 @@ func (p *parser) parseWhereExpr(x ast.Expr) ast.Expr {
 	id := ast.Ident{Pos: p.span}
 	p.next()
 
+	var typ ast.Expr
 	if p.tok == token.DEFINE {
 		p.next()
-		return &ast.WhereExpr{
-			Expr: x,
-			Id:   id,
-			Val:  p.parseType(),
+
+		if p.tok == token.OPTION {
+			return &ast.WhereExpr{
+				Expr: x,
+				Id:   id,
+				Val:  p.parseEnum(),
+			}
 		}
+
+		// TODO: only allow a subset of expressions here.
+		typ = p.parseBinaryExpr(nil, token.BasePrec)
 	}
 
 	p.expect(token.ASSIGN)
@@ -285,6 +295,7 @@ func (p *parser) parseWhereExpr(x ast.Expr) ast.Expr {
 		return &ast.WhereExpr{
 			Expr: x,
 			Id:   id,
+			Typ:  typ,
 			Val:  p.parseMatchFuncExpr(),
 		}
 	}
@@ -292,6 +303,7 @@ func (p *parser) parseWhereExpr(x ast.Expr) ast.Expr {
 	return &ast.WhereExpr{
 		Expr: x,
 		Id:   id,
+		Typ:  typ,
 		Val:  p.parseBinaryExpr(nil, token.BasePrec),
 	}
 }
@@ -414,13 +426,13 @@ func (p *parser) parseMatchFuncExpr() ast.Expr {
 	return exprs
 }
 
-func (p *parser) parseType() ast.TypeExpr {
+func (p *parser) parseEnum() ast.EnumExpr {
 	if debug {
-		stack = append(stack, "parseType")
+		stack = append(stack, "parseEnum")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
 	// We guess there'll be about 2 branches.
-	exprs := make(ast.TypeExpr, 0, 2)
+	exprs := make(ast.EnumExpr, 0, 2)
 
 	for p.tok == token.OPTION {
 		variant := p.parseVariant()

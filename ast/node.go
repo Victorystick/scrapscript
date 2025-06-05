@@ -57,7 +57,7 @@ type VariantExpr struct {
 }
 
 // A name-matched VariantExpr
-type TypeExpr []*VariantExpr
+type EnumExpr []*VariantExpr
 
 type RecordExpr struct {
 	Pos     token.Span
@@ -79,6 +79,7 @@ type ListExpr struct {
 type WhereExpr struct {
 	Expr Expr
 	Id   Ident
+	Typ  Expr // Optional type annotation.
 	Val  Expr
 }
 
@@ -89,7 +90,7 @@ func (b FuncExpr) expr()      {}
 func (b MatchFuncExpr) expr() {}
 func (b CallExpr) expr()      {}
 func (b VariantExpr) expr()   {}
-func (b TypeExpr) expr()      {}
+func (b EnumExpr) expr()      {}
 func (b RecordExpr) expr()    {}
 func (b AccessExpr) expr()    {}
 func (b ListExpr) expr()      {}
@@ -116,7 +117,7 @@ func (b *VariantExpr) Span() token.Span {
 	}
 	return token.Span{Start: b.Tag.Span().Start - 1, End: end}
 }
-func (b TypeExpr) Span() token.Span   { return span(&b[0].Tag, &b[len(b)-1].Tag) }
+func (b EnumExpr) Span() token.Span   { return span(&b[0].Tag, &b[len(b)-1].Tag) }
 func (b RecordExpr) Span() token.Span { return b.Pos }
 func (b AccessExpr) Span() token.Span { return b.Pos }
 func (b ListExpr) Span() token.Span   { return b.Pos }

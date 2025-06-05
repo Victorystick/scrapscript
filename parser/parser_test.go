@@ -117,6 +117,8 @@ func TestParses(t *testing.T) {
 		`[ "yo", 2, ]`,
 		`[ "yo", 2 ]`,
 		`foo.a`,
+		`inc ; inc : int -> int = a -> a + 1`,
+		`#true #false`,
 	}
 
 	for _, src := range valid {
