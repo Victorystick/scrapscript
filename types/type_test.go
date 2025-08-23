@@ -146,6 +146,87 @@ func TestBind(t *testing.T) {
 
 }
 
+func TestSubstitute(t *testing.T) {
+	reg := Registry{}
+
+	x := reg.Var()
+	Eq(t, reg.substitute(x, Subst{{x, IntRef}}), IntRef)
+
+	Eq(t, reg.substitute(reg.Func(x, x), Subst{{x, IntRef}}), reg.Func(IntRef, IntRef))
+
+	y := reg.Var()
+	Eq(t, reg.substitute(reg.Func(x, y), Subst{{x, IntRef}}), reg.Func(IntRef, y))
+
+	// A Scheme is represented by an unbound variable.
+	// These are left untouched. (forall x. x) untouched.
+	a := reg.Unbound()
+	Eq(t, reg.substitute(a, Subst{{x, IntRef}}), a)
+
+	Eq(t, reg.substitute(reg.Func(x, y), Subst{{a, IntRef}, {y, TextRef}}), reg.Func(x, TextRef))
+
+	// Other...
+	b := reg.Unbound()
+	f := reg.Func(a, b)
+	Eq(t, reg.String(f), "a -> b")
+
+	l := reg.List(a)
+	Eq(t, reg.String(l), "list a")
+
+	g := reg.Instantiate(f)
+	h := reg.Instantiate(f)
+	Eq(t, reg.String(f), "a -> b")
+	Eq(t, reg.String(g), "$2 -> $3")
+	Eq(t, reg.String(h), "$4 -> $5")
+
+	Eq(t, reg.String(reg.Instantiate(l)), "list $6")
+
+	gFn := reg.GetFunc(g)
+
+	subst := Subst{
+		{replace: gFn.Arg, with: IntRef},
+	}
+
+	Eq(t, reg.substitute(g, subst), reg.Func(IntRef, gFn.Result))
+	Eq(t, reg.substitute(h, subst), h)
+}
+
+func TestCompose(t *testing.T) {
+	reg := Registry{}
+
+	t1 := reg.Var()
+	t2 := reg.Var()
+
+	s1 := Subst{{t2, IntRef}}
+	Eq(t, s1.String(&reg), "$1: int")
+
+	s2 := Subst{{t1, reg.Func(IntRef, t2)}}
+	Eq(t, s2.String(&reg), "$0: int -> $1")
+
+	Eq(t, reg.Compose(nil, nil).String(&reg), "")
+	Eq(t, reg.Compose(s1, nil).String(&reg), "$1: int")
+	Eq(t, reg.Compose(nil, s1).String(&reg), "$1: int")
+
+	Eq(t, reg.Compose(s1, s2).String(&reg), "$0: int -> int, $1: int")
+}
+
+func TestUnify(t *testing.T) {
+	reg := Registry{}
+
+	a := reg.Var()
+	Eq(t, reg.Unify(a, IntRef).String(&reg), "$0: int")
+
+	a = reg.Var()
+	Eq(t, reg.Unify(reg.Func(a, IntRef), reg.Func(TextRef, IntRef)).String(&reg), "$1: text")
+
+	a = reg.Var()
+	b := reg.Var()
+	Eq(t, reg.Unify(reg.Func(a, b), reg.Func(b, a)).String(&reg), "$2: $3")
+
+	a = reg.Var()
+	b = reg.Var()
+	Eq(t, reg.Unify(reg.Func(a, IntRef), reg.Func(HoleRef, b)).String(&reg), "$5: int, $4: ()")
+}
+
 func Neq[T comparable](t *testing.T, a, b T) {
 	if a == b {
 		t.Errorf("Expected %v NOT to be %v", a, b)
