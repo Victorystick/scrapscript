@@ -58,8 +58,7 @@ var expressions = []struct {
 	// 	| "hello " ++ name -> name
 	// 	| _ -> "<empty>" <| "hello Oseg"`, Text("Oseg")},
 	{`box::empty ; box : #empty`, `#empty`},
-	// TODO: Cannot infer type of `n -> x * 2`.
-	// {`typ::fun (n -> x * 2) ; typ : #fun (int -> int)`, `#fun n -> x * 2`},
+	{`typ::fun (x -> x * 2) ; typ : #fun (int -> int)`, `#fun x -> x * 2`},
 
 	// Destructuring.
 	{`{ a = 1, b = 2 } |> | { a = c, b = d } -> c + d`, `3`},

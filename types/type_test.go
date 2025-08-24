@@ -95,55 +95,75 @@ func TestGeneric(t *testing.T) {
 	Eq(t, reg.String(listMap), "(a -> b) -> list a -> list b")
 }
 
-func TestBind(t *testing.T) {
+func TestInstantiate(t *testing.T) {
 	reg := Registry{}
 
+	// A Scheme is represented by an unbound variable.
+	// These are left untouched. (forall x. x) untouched.
 	a := reg.Unbound()
-	Eq(t, reg.String(a), "a")
-	Eq(t, reg.Bind(a, a, IntRef), IntRef)
-
-	id := reg.Func(a, a)
-	Eq(t, reg.String(id), "a -> a")
-	Eq(t, reg.Size(), 1)
-
-	inc := reg.Bind(id, a, IntRef)
-	Eq(t, reg.String(inc), "int -> int")
-	Eq(t, reg.Size(), 2)
-
 	b := reg.Unbound()
-	listMap := reg.Func(reg.Func(a, b), reg.Func(reg.List(a), reg.List(b)))
-	Eq(t, reg.String(listMap), "(a -> b) -> list a -> list b")
-	Eq(t, reg.Size(), 7)
+	f := reg.Func(a, b)
+	Eq(t, reg.String(f), "a -> b")
 
-	// Replace b -> int.
-	listMapBInt := reg.Bind(listMap, b, IntRef)
-	Eq(t, reg.String(listMapBInt), "(a -> int) -> list a -> list int")
-	Eq(t, reg.Size(), 11)
+	l := reg.List(a)
+	Eq(t, reg.String(l), "list a")
 
-	// Now also a -> int.
-	listMapABInt := reg.Bind(listMapBInt, a, IntRef)
-	Eq(t, reg.String(listMapABInt), "(int -> int) -> list int -> list int")
-	Eq(t, reg.Size(), 13)
+	g := reg.Instantiate(f)
+	h := reg.Instantiate(f)
+	Eq(t, reg.String(g), "$0 -> $1")
+	Eq(t, reg.String(h), "$2 -> $3")
 
-	// Let's go the other way, replace a -> int.
-	listMapAInt := reg.Bind(listMap, a, IntRef)
-	Eq(t, reg.String(listMapAInt), "(int -> a) -> list int -> list a")
-	Eq(t, reg.Size(), 16)
+	Eq(t, reg.String(reg.Instantiate(l)), "list $4")
+}
 
-	// Returns same type if resolved the other way.
-	Eq(t, listMapABInt, reg.Bind(listMapAInt, b, IntRef))
-	Eq(t, reg.Size(), 16)
+func TestGetVar(t *testing.T) {
+	reg := Registry{}
 
-	record := reg.Record(MapRef{"kind": IntRef, "a": a, "b": b})
-	enum := reg.Enum(MapRef{"a": a, "b": b})
-	recordToEnum := reg.Func(record, enum)
+	a := reg.Var()
+	b := reg.Var()
+	c := reg.Var()
+	reg.bind(a, b)
+	reg.bind(b, c)
+	reg.bind(c, IntRef)
 
-	// TODO: Don't sort order of record keys.
-	Eq(t, reg.String(recordToEnum), "{ a : a, b : b, kind : int } -> #a a #b b")
+	Eq(t, reg.GetVar(a), IntRef)
+}
 
-	recordToEnumAInt := reg.Bind(recordToEnum, a, IntRef)
-	Eq(t, reg.String(recordToEnumAInt), "{ a : int, b : a, kind : int } -> #a int #b a")
+func TestResolve(t *testing.T) {
+	reg := Registry{}
 
+	a := reg.Var()
+	b := reg.Var()
+
+	Eq(t, reg.Resolve(a), a)
+	Eq(t, reg.Resolve(b), b)
+	Eq(t, reg.IsFree(a), true)
+	Eq(t, reg.IsFree(b), true)
+
+	reg.bind(a, b)
+
+	Eq(t, reg.IsFree(a), true)
+	Eq(t, reg.IsFree(b), true)
+	Eq(t, reg.Resolve(a), b)
+	Eq(t, reg.Resolve(b), b)
+
+	reg.bind(b, IntRef)
+
+	Eq(t, reg.IsFree(a), false)
+	Eq(t, reg.IsFree(b), false)
+	Eq(t, reg.Resolve(a), IntRef)
+	Eq(t, reg.Resolve(b), IntRef)
+}
+
+func TestUnify_J(t *testing.T) {
+	reg := Registry{}
+
+	res := reg.Var()
+	a := reg.Var()
+	fn := reg.Func(a, reg.List(a))
+	reg.unify(fn, reg.Func(IntRef, res))
+
+	Eq(t, reg.String(res), "list int")
 }
 
 func Neq[T comparable](t *testing.T, a, b T) {

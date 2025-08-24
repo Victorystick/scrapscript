@@ -158,11 +158,7 @@ func (s *Scanner) bytes() (tok token.Token, span token.Span) {
 		s.next()
 	}
 
-	if s.offset-offs < 2 {
-		s.error(s.offset, "too short base64 string")
-		tok = token.BAD
-		return
-	}
+	// The two chars `~~` encodes an empty byte array.
 
 	for (s.offset-offs)%4 > 0 {
 		if s.ch != '=' {

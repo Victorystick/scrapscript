@@ -41,6 +41,7 @@ var elements = []elt{
 	{token.TEXT, `"world"`, literal},
 	{token.BYTE, "~ca", literal},
 	{token.BYTES, "~~aGVsbG8gd29ybGQ=", literal},
+	{token.BYTES, "~~", literal},
 
 	// Operators and delimiters
 	{token.ASSIGN, "=", operator},

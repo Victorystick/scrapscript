@@ -536,11 +536,6 @@ func (c *context) pick(pick *ast.BinaryExpr, x ast.Expr) (Value, error) {
 				if err != nil {
 					return nil, err
 				}
-				if val.Type() != tagTyp {
-					return nil, c.error(pick.Right.Span(),
-						fmt.Sprintf("#%s requires a value of type %s, got %s",
-							tag, c.reg.String(tagTyp), c.reg.String(val.Type())))
-				}
 				return Variant{ref, tag, val}, nil
 			}
 		}
