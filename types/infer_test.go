@@ -73,6 +73,8 @@ func TestInfer(t *testing.T) {
 		// If used the same, arguments must be the same.
 		{`a -> b -> [ a, b ]`, `$1 -> $1 -> list $1`},
 		{`(a -> b -> [ a, b ]) 1`, `int -> list int`},
+
+		{`typ::fun (x -> x * 2) ; typ : #fun (int -> int)`, `#fun (int -> int)`},
 	}
 
 	for _, ex := range examples {
@@ -103,7 +105,7 @@ func TestInferFailure(t *testing.T) {
 		{`1::a`, `1 isn't an enum`},
 		{`a::a ; a : #b`, `#a isn't a valid option for enum #b`},
 		{`a::b 1 ; a : #b`, `#b doesn't take any value`},
-		{`a::b 1 ; a : #b text`, `cannot assign int to #b which needs text`},
+		{`a::b 1 ; a : #b text`, `cannot unify 'int' with 'text'`},
 		{`1 + ~dd`, `cannot unify 'byte' with 'int'`},
 		{`a ; a : int = 1.0`, `cannot unify 'float' with 'int'`},
 		{`f ; f : int -> text = a -> 1`, `cannot unify 'int' with 'text'`},

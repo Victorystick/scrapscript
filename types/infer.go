@@ -317,14 +317,7 @@ func (c *context) pick(x *ast.BinaryExpr, val ast.Expr) TypeRef {
 			}
 		} else {
 			valRef := c.infer(val)
-			// TODO: check assignability instead
-			if typ != valRef {
-				// Wrong type.
-				c.bail(val.Span(),
-					fmt.Sprintf("cannot assign %s to #%s which needs %s",
-						c.reg.String(valRef), tag, c.reg.String(typ)))
-				return NeverRef
-			}
+			c.ensure(val, valRef, typ)
 		}
 
 		return ref
