@@ -19,6 +19,13 @@ So far it supports
         | scrap eval apply 'n -> n + 1'
     ```
 
+* `scrap type` to infer the type of a script passed over standard input.
+
+    ```sh
+    $ echo 'list/fold 0 (total -> text -> total + text/length text)' | scrap type
+    list text -> int
+    ```
+
 ## Known bugs
 
 * Only supports pattern matching on the argument immediately following a pipe.
