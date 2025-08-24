@@ -25,23 +25,45 @@ func TestInfer(t *testing.T) {
 		{`[1, 2]`, `list int`},
 		// Records
 		{`{ a = 1 }`, `{ a : int }`},
-		// {`{ ..base, a = ~01 } ; base = { a = ~00 }`, `{ a : byte }`},
+		{`{ ..base, a = ~01 } ; base = { a = ~00 }`, `{ a : byte }`},
 		// // Enums
-		// {`bool ; bool : #true #false`, `#false #true`},
-		// {`e ; e : #l int #r`, `#l int #r`},
-		// {`e::r ; e : #l int #r`, `#l int #r`},
-		// {`e::l 4 ; e : #l int #r`, `#l int #r`},
+		{`bool ; bool : #true #false`, `#false #true`},
+		{`e ; e : #l int #r`, `#l int #r`},
+		{`e::r ; e : #l int #r`, `#l int #r`},
+		{`e::l 4 ; e : #l int #r`, `#l int #r`},
 		// Functions
 		{`a -> a`, `$0 -> $0`},
 		{`_ -> "hi"`, `$0 -> text`},
 		{`_ -> _ -> "hi"`, `$0 -> $1 -> text`},
 		{`(_ -> "hi") ()`, `text`},
+
+		// Prepend and append
+		{`a -> a >+ []`, `$1 -> list $1`},
+		{`a -> a +< int`, `list int -> list int`},
+		{`a -> a >+ ~~1111`, `byte -> bytes`},
+		{`a -> a +< ~ff`, `bytes -> bytes`},
+
+		// Concat
+		{`"hi " ++ "you!"`, `text`},
+		{`[] ++ [1]`, `list int`},
+		{`~~1111 ++ ~~`, `bytes`},
+		{`a -> b -> a ++ b`, `list $2 -> list $2 -> list $2`},
+
+		// Math
+		{`a -> 1.0 + a`, `float -> float`},
+		{`4 - 3`, `int`},
+		{`a -> b -> a * b`, `int -> int -> int`}, // Default to int.
+
 		{`a -> b -> { a = a, b = b }`, `$0 -> $1 -> { a : $0, b : $1 }`},
 		{`(a -> b -> { a = a, b = b }) 1`, `$2 -> { a : int, b : $2 }`},
 		{`(a -> b -> { a = a, b = b }) 1 "yo" `, `{ a : int, b : text }`},
 		{`a ; a : int = 1`, `int`},
 		{`a -> a + 1`, `int -> int`},
 		{`b -> (a ; a : int = b)`, `int -> int`},
+
+		{`f -> f (f 1)`, `(int -> int) -> int`},
+		{`a -> f -> f (f a)`, `$2 -> ($2 -> $2) -> $2`},
+		{`f -> a -> f (f a)`, `($2 -> $2) -> $2 -> $2`},
 
 		{`f -> a -> [ a ]`, `$0 -> $1 -> list $1`},
 		{`(f -> a -> [ a ]) "a"`, `$2 -> list $2`},
@@ -72,17 +94,21 @@ func TestInferFailure(t *testing.T) {
 		{`b ; a = b -> b`, `unbound variable: b`},
 		// Lists
 		{`[1, 1.0]`, `cannot unify 'int' with 'float'`},
-		// // Records
-		// {`{ ..base, a = 1 } ; base = { a = ~00 }`, `type of a must be byte, not int`},
-		// {`{ ..1, a = 1 }`, `cannot spread from non-record type int`},
-		// // Enums
-		// {`1::a`, `1 isn't an enum`},
-		// {`a::a ; a : #b`, `#a isn't a valid option for enum #b`},
-		// {`a::b 1 ; a : #b`, `#b doesn't take any value`},
-		// {`a::b 1 ; a : #b text`, `cannot assign int to #b which needs text`},
+		{`[4] ++ ["text"]`, `cannot unify 'int' with 'text'`},
+		{`4 ++ 6`, `cannot unify 'int' with 'list $0'`},
+		// Records
+		{`{ ..base, a = 1 } ; base = { a = ~00 }`, `type of a must be byte, not int`},
+		{`{ ..1, a = 1 }`, `cannot spread from non-record type int`},
+		// Enums
+		{`1::a`, `1 isn't an enum`},
+		{`a::a ; a : #b`, `#a isn't a valid option for enum #b`},
+		{`a::b 1 ; a : #b`, `#b doesn't take any value`},
+		{`a::b 1 ; a : #b text`, `cannot assign int to #b which needs text`},
 		{`1 + ~dd`, `cannot unify 'byte' with 'int'`},
 		{`a ; a : int = 1.0`, `cannot unify 'float' with 'int'`},
 		{`f ; f : int -> text = a -> 1`, `cannot unify 'int' with 'text'`},
+		// Math
+		{`1 + 1.0`, `cannot unify 'int' with 'float'`},
 	}
 
 	for _, ex := range examples {
@@ -105,12 +131,9 @@ func TestInferInScope(t *testing.T) {
 		{`len []`, `int`},
 		{`(f -> a -> ([ b, b ] ; b = (f a))) len`, `list $4 -> list int`},
 		{`(f -> a -> ([ b, b ] ; b = (f a))) len []`, `list int`},
-		{`f -> f (f 1)`, `(int -> int) -> int`},
-		// {`twice ; twice = f -> a -> f (f a)`, `(a -> a) -> a -> a`},
 
 		{`{ a = id 1, b = id "" }`, `{ a : int, b : text }`},
-		// Custom functions don't work, since var/unbound are different.
-		// {`{ a = id2 1, b = id2 "" } ; id2 = a -> a`, `{ a : int, b : text }`},
+		{`{ a = id2 1, b = id2 "" } ; id2 = a -> a`, `{ a : int, b : text }`},
 	}
 
 	for _, ex := range examples {

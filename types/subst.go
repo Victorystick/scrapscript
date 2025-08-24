@@ -21,6 +21,15 @@ func (s Subst) binds(target TypeRef) bool {
 	return false
 }
 
+func (s Subst) bound(target TypeRef) TypeRef {
+	for _, s := range s {
+		if s.replace == target {
+			return s.with
+		}
+	}
+	return NeverRef
+}
+
 func (s *Subst) bind(replace, with TypeRef) {
 	*s = append(*s, Sub{replace, with})
 }
