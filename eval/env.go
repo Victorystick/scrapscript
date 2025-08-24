@@ -20,8 +20,11 @@ type Scrap struct {
 type Sha256Hash = [32]byte
 
 type Environment struct {
-	fetcher     yards.Fetcher
-	reg         types.Registry
+	fetcher yards.Fetcher
+	reg     types.Registry
+	// The TypeScope and Variables match each other's contents.
+	// One is used for type inference, the other for evaluation.
+	typeScope   types.TypeScope
 	vars        Variables
 	scraps      map[Sha256Hash]*Scrap
 	evalImport  EvalImport
@@ -30,7 +33,9 @@ type Environment struct {
 
 func NewEnvironment() *Environment {
 	env := &Environment{}
-	env.vars = bindBuiltIns(&env.reg)
+	typeScope, vars := bindBuiltIns(&env.reg)
+	env.typeScope = typeScope
+	env.vars = vars
 	env.scraps = make(map[Sha256Hash]*Scrap)
 	env.evalImport = func(algo string, hash []byte) (Value, error) {
 		scrap, err := env.fetch(algo, hash)
@@ -104,9 +109,7 @@ func (e *Environment) Eval(scrap *Scrap) (Value, error) {
 
 func (e *Environment) infer(scrap *Scrap) (types.TypeRef, error) {
 	if scrap.typ == types.NeverRef {
-		// TODO: Add a complete type scope.
-		scope := types.DefaultScope(&e.reg)
-		ref, err := types.Infer(&e.reg, scope, scrap.expr, e.inferImport)
+		ref, err := types.Infer(&e.reg, e.typeScope, scrap.expr, e.inferImport)
 		scrap.typ = ref
 		return ref, err
 	}

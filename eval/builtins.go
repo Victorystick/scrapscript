@@ -3,15 +3,18 @@ package eval
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/Victorystick/scrapscript/types"
 )
 
-func bindBuiltIns(reg *types.Registry) Variables {
+func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
+	var scope types.TypeScope
 	var builtIns = make(Variables)
 
 	define := func(name string, typ types.TypeRef, val Func) {
 		builtIns[name] = BuiltInFunc{name, typ, val}
+		scope = scope.Bind(name, typ)
 	}
 
 	// Built-in types
@@ -27,8 +30,16 @@ func bindBuiltIns(reg *types.Registry) Variables {
 	aToB := reg.Func(a, b)
 	aList := reg.List(a)
 	bList := reg.List(b)
+	textList := reg.List(types.TextRef)
 
 	// Lists
+	define("list/length", reg.Func(aList, types.IntRef), func(val Value) (Value, error) {
+		ls, ok := val.(List)
+		if !ok {
+			return nil, fmt.Errorf("expected list, but got %T", val)
+		}
+		return Int(len(ls.elements)), nil
+	})
 	define("list/map", reg.Func(aToB, reg.Func(aList, bList)), func(val Value) (Value, error) {
 		fn := Callable(val)
 		if fn == nil {
@@ -56,8 +67,8 @@ func bindBuiltIns(reg *types.Registry) Variables {
 			},
 		}, nil
 	})
-	// TODO: type
-	define("list/fold", types.NeverRef, func(acc Value) (Value, error) {
+	accum := reg.Func(a, reg.Func(b, a))
+	define("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), func(acc Value) (Value, error) {
 		source := "list/fold " + acc.String()
 		return ScriptFunc{
 			source: source,
@@ -96,6 +107,22 @@ func bindBuiltIns(reg *types.Registry) Variables {
 			},
 		}, nil
 	})
+	define("list/repeat", reg.Func(types.IntRef, reg.Func(a, aList)), func(val Value) (Value, error) {
+		n, ok := val.(Int)
+		if !ok {
+			return nil, fmt.Errorf("expected int, but got %T", val)
+		}
+		return ScriptFunc{
+			source: "list/repeat " + val.String(),
+			fn: func(val Value) (v Value, err error) {
+				elems := make([]Value, int(n))
+				for i := range elems {
+					elems[i] = val
+				}
+				return List{val.Type(), elems}, nil
+			},
+		}, nil
+	})
 
 	// Text
 	define("text/length", reg.Func(types.TextRef, types.IntRef), func(val Value) (Value, error) {
@@ -104,6 +131,46 @@ func bindBuiltIns(reg *types.Registry) Variables {
 			return nil, fmt.Errorf("expected text, but got %T", val)
 		}
 		return Int(len(text)), nil
+	})
+	define("text/repeat", reg.Func(types.IntRef, reg.Func(types.TextRef, types.TextRef)), func(val Value) (Value, error) {
+		n, ok := val.(Int)
+		if !ok {
+			return nil, fmt.Errorf("expected int, but got %T", val)
+		}
+		return ScriptFunc{
+			source: "text/repeat " + val.String(),
+			fn: func(val Value) (v Value, err error) {
+				text, ok := val.(Text)
+				if !ok {
+					return nil, fmt.Errorf("expected text, but got %T", val)
+				}
+				return Text(strings.Repeat(string(text), int(n))), nil
+			},
+		}, nil
+	})
+	define("text/join", reg.Func(types.TextRef, reg.Func(textList, types.TextRef)), func(val Value) (Value, error) {
+		sep, ok := val.(Text)
+		if !ok {
+			return nil, fmt.Errorf("expected text, but got %T", val)
+		}
+		return ScriptFunc{
+			source: "text/join " + val.String(),
+			fn: func(val Value) (v Value, err error) {
+				ls, ok := val.(List)
+				if !ok {
+					return nil, fmt.Errorf("expected list, but got %T", val)
+				}
+				elems := make([]string, len(ls.elements))
+				for i, v := range ls.elements {
+					text, ok := v.(Text)
+					if !ok {
+						return nil, fmt.Errorf("expected text, but got %T", v)
+					}
+					elems[i] = string(text)
+				}
+				return Text(strings.Join(elems, string(sep))), nil
+			},
+		}, nil
 	})
 
 	// int -> float
@@ -134,7 +201,7 @@ func bindBuiltIns(reg *types.Registry) Variables {
 		return nil, fmt.Errorf("cannot bytes/from-utf8-text on %T", val)
 	})
 
-	return builtIns
+	return scope, builtIns
 }
 
 func roundFunc(round func(float64) float64) Func {

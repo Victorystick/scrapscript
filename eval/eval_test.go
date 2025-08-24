@@ -66,6 +66,13 @@ var expressions = []struct {
 	{`3 |> a -> b -> a`, `b -> a`},
 
 	{`#true #false`, `<type>`}, // TODO: should be `#true #false`
+
+	{`list/repeat 2`, `list/repeat 2`},
+	{`text/repeat 3`, `text/repeat 3`},
+	{`text/join " "`, `text/join " "`},
+
+	{`"hi " ++ text/repeat 3 "a" ++ "ron"`, `"hi aaaron"`},
+	{`"yo" |> list/repeat 2 |> text/join " "`, `"yo yo"`},
 }
 
 var failures = []struct {
@@ -145,6 +152,7 @@ var exp2str = []struct{ source, result string }{
 	{`list/fold 0 (a -> b -> a + b) []`, `0`},
 	{`list/fold 0 (a -> b -> a + b)`, `list/fold 0 a -> b -> a + b`},
 	{`list/fold 0 (a -> b -> a + b) [1, 2]`, `3`},
+	{`list/fold 0 (a -> b -> a + text/length b) ["hey", "beautiful"]`, `12`},
 
 	{`[ 4 + 2, 5 - 1, ]`, "[ 6, 4 ]"},
 	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four"`, `"four"`},
