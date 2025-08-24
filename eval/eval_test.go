@@ -162,11 +162,19 @@ func TestFailures(t *testing.T) {
 	}
 }
 
+func eval(e *Environment, source string) (Value, error) {
+	scrap, err := e.Read([]byte(source))
+	if err != nil {
+		return nil, err
+	}
+	return e.Eval(scrap)
+}
+
 // Evaluates an expression and compares the string representation of the
 // result with a target string; optionally with some additional variables
 // in scope.
 func evalString(t *testing.T, source, expected string) {
-	val, err := NewEnvironment(nil).Eval([]byte(source))
+	val, err := eval(NewEnvironment(), source)
 
 	if err != nil {
 		t.Error(err)
@@ -179,7 +187,7 @@ func evalString(t *testing.T, source, expected string) {
 
 // Evaluates to a comparable value
 func evalFailure(t *testing.T, source string, expected string) {
-	val, err := NewEnvironment(nil).Eval([]byte(source))
+	val, err := eval(NewEnvironment(), source)
 
 	if err == nil {
 		t.Errorf("%s - should fail but got %s", source, val)
@@ -191,12 +199,13 @@ func evalFailure(t *testing.T, source string, expected string) {
 }
 
 func TestEvalImport(t *testing.T) {
-	env := NewEnvironment(MapFetcher{
+	env := NewEnvironment()
+	env.UseFetcher(MapFetcher{
 		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447": `3 + $sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445`,
 		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445": `2`,
 	})
 
-	val, err := env.Eval([]byte(`$sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447 - 1`))
+	val, err := eval(env, `$sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447 - 1`)
 	if err != nil {
 		t.Error(err)
 	} else {

@@ -32,7 +32,8 @@ var elements = []elt{
 	// Special tokens
 	{token.IDENT, "hello", literal},
 	{token.IDENT, "f", literal},
-	{token.IDENT, "$sha256", literal}, // Import
+	{token.IMPORT, "$", operator},    // Import
+	{token.IDENT, "sha256", literal}, // Hash algo
 	{token.IDENT, "bytes/to-utf8-text", literal},
 	{token.INT, "13", literal},
 	{token.INT, "-13", literal},

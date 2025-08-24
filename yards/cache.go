@@ -26,12 +26,19 @@ func (c *cachingFetcher) FetchSha256(key string) ([]byte, error) {
 	return bs, os.WriteFile(filepath.Join(c.path, key), bs, 0644)
 }
 
-func NewCacheFetcher(pathname string, fetcher Fetcher) Fetcher {
+func NewCacheFetcher(pathname string, fetcher Fetcher) (Fetcher, error) {
+	// Create the cache directory if it doesn't exist.
+	if _, err := os.Stat(pathname); os.IsNotExist(err) {
+		err = os.MkdirAll(pathname, 0700)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &cachingFetcher{
 		path:     pathname,
 		main:     ByDirectory(os.DirFS(pathname)),
 		fallback: fetcher,
-	}
+	}, nil
 }
 
 func NewDefaultCacheFetcher(fetcher Fetcher) (Fetcher, error) {
@@ -40,5 +47,5 @@ func NewDefaultCacheFetcher(fetcher Fetcher) (Fetcher, error) {
 		return nil, err
 	}
 
-	return NewCacheFetcher(filepath.Join(dir, "scrapscript"), fetcher), nil
+	return NewCacheFetcher(filepath.Join(dir, "scrapscript/sha256"), fetcher)
 }

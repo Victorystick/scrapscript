@@ -83,6 +83,14 @@ type WhereExpr struct {
 	Val  Expr
 }
 
+type ImportExpr struct {
+	Pos token.Span
+	// Typically "sha256".
+	HashAlgo string
+	// Any literal, typically a byte-string.
+	Value Literal
+}
+
 func (b Ident) expr()         {}
 func (b Literal) expr()       {}
 func (b BinaryExpr) expr()    {}
@@ -95,6 +103,7 @@ func (b RecordExpr) expr()    {}
 func (b AccessExpr) expr()    {}
 func (b ListExpr) expr()      {}
 func (b WhereExpr) expr()     {}
+func (b ImportExpr) expr()    {}
 
 func span(start, end Expr) token.Span {
 	return token.Span{
@@ -122,3 +131,4 @@ func (b RecordExpr) Span() token.Span { return b.Pos }
 func (b AccessExpr) Span() token.Span { return b.Pos }
 func (b ListExpr) Span() token.Span   { return b.Pos }
 func (b *WhereExpr) Span() token.Span { return span(b.Expr, b.Val) }
+func (b ImportExpr) Span() token.Span { return b.Pos }

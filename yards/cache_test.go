@@ -17,9 +17,12 @@ func TestCache(t *testing.T) {
 		t.Error("expected not to read key1")
 	}
 
-	f := NewCacheFetcher(root, ByDirectory(fstest.MapFS{
+	f, err := NewCacheFetcher(root, ByDirectory(fstest.MapFS{
 		"key1": {Data: []byte("first")},
 	}))
+	if err != nil {
+		t.Error("could not create cache directory")
+	}
 
 	bs, err := f.FetchSha256("key1")
 	if err != nil {

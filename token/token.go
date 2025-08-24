@@ -20,6 +20,9 @@ const (
 	begin_operators
 	HOLE // ()
 
+	// Import
+	IMPORT
+
 	// Where clauses.
 
 	ASSIGN // =
@@ -90,6 +93,8 @@ var tokens = [...]string{
 	WHERE:  "WHERE",
 	COMMA:  "COMMA",
 
+	IMPORT: "IMPORT",
+
 	DEFINE: "DEFINE",
 	PICK:   "PICK",
 	OPTION: "OPTION",
@@ -129,6 +134,8 @@ var operators = [...]string{
 	ASSIGN: "=",
 	WHERE:  ";",
 	COMMA:  ",",
+
+	IMPORT: "$",
 
 	DEFINE: ":",
 	PICK:   "::",

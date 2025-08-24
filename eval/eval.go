@@ -2,6 +2,7 @@ package eval
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"reflect"
@@ -14,11 +15,14 @@ import (
 	"github.com/Victorystick/scrapscript/types"
 )
 
+type EvalImport func(algo string, hash []byte) (Value, error)
+
 type context struct {
-	source *token.Source
-	reg    *types.Registry
-	vars   Vars
-	parent *context
+	source     *token.Source
+	reg        *types.Registry
+	vars       Vars
+	evalImport EvalImport
+	parent     *context
 }
 
 type Vars interface {
@@ -64,7 +68,7 @@ func (c *context) name(id *ast.Ident) string {
 }
 
 func (c *context) sub(vars Vars) *context {
-	return &context{c.source, c.reg, vars, c}
+	return &context{c.source, c.reg, vars, c.evalImport, c}
 }
 
 func (c *context) error(span token.Span, msg string) error {
@@ -72,8 +76,8 @@ func (c *context) error(span token.Span, msg string) error {
 }
 
 // Eval evaluates a SourceExpr in the context of a set of variables.
-func Eval(se ast.SourceExpr, reg *types.Registry, vars Vars) (Value, error) {
-	ctx := &context{&se.Source, reg, vars, nil}
+func Eval(se ast.SourceExpr, reg *types.Registry, vars Vars, evalImport EvalImport) (Value, error) {
+	ctx := &context{&se.Source, reg, vars, evalImport, nil}
 
 	return ctx.eval(se.Expr)
 }
@@ -102,6 +106,12 @@ func (c *context) eval(x ast.Node) (Value, error) {
 		return c.createMatchFunc(x)
 	case *ast.AccessExpr:
 		return c.access(x)
+	case *ast.ImportExpr:
+		bs, err := hex.DecodeString(c.source.GetString(x.Value.Pos.TrimStart(2)))
+		if err != nil {
+			return nil, c.error(x.Span(), fmt.Sprintf("bad import hash %#v", x))
+		}
+		return c.evalImport(x.HashAlgo, bs)
 	}
 
 	return nil, c.error(x.Span(), fmt.Sprintf("unhandled node %#v", x))

@@ -204,6 +204,9 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 
 	case token.OPTION:
 		return p.parseEnum()
+
+	case token.IMPORT:
+		return p.parseImport()
 	}
 
 	p.unexpected()
@@ -470,5 +473,31 @@ func (p *parser) parseVariant() *ast.VariantExpr {
 	return &ast.VariantExpr{
 		Tag: id,
 		Typ: typ,
+	}
+}
+
+func (p *parser) parseImport() *ast.ImportExpr {
+	start := p.span.Start
+
+	// Eat $.
+	p.next()
+
+	// Hash algo.
+	p.expect(token.IDENT)
+	algo := p.source.GetString(p.span)
+	p.next()
+
+	p.expect(token.BYTES)
+	bytes := ast.Literal{
+		Pos:  p.span,
+		Kind: p.tok,
+	}
+	end := p.span.End
+	p.next()
+
+	return &ast.ImportExpr{
+		Pos:      token.Span{Start: start, End: end},
+		HashAlgo: algo,
+		Value:    bytes,
 	}
 }
