@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -79,12 +80,14 @@ func TestInfer(t *testing.T) {
 
 	for _, ex := range examples {
 		se := must(parser.ParseExpr(ex.source))
-		typ, err := Infer(se)
+		var reg Registry
+		typ, err := Infer(&reg, DefaultScope(&reg), se, nil)
 		if err != nil {
 			t.Error(err)
 		} else {
-			if typ != ex.typ {
-				t.Errorf("Expected %s, got %s", ex.typ, typ)
+			typStr := reg.String(typ)
+			if typStr != ex.typ {
+				t.Errorf("Expected %s, got %s", ex.typ, typStr)
 			}
 		}
 	}
@@ -111,11 +114,14 @@ func TestInferFailure(t *testing.T) {
 		{`f ; f : int -> text = a -> 1`, `cannot unify 'int' with 'text'`},
 		// Math
 		{`1 + 1.0`, `cannot unify 'int' with 'float'`},
+		// No imports.
+		{`$sha256~~`, `<internal error> missing infer import function`},
 	}
 
 	for _, ex := range examples {
+		var reg Registry
 		se := must(parser.ParseExpr(ex.source))
-		_, err := Infer(se)
+		_, err := Infer(&reg, DefaultScope(&reg), se, nil)
 		if err != nil {
 			str := err.Error()
 			if !strings.Contains(str, ex.message) {
@@ -150,13 +156,70 @@ func TestInferInScope(t *testing.T) {
 		a := reg.Unbound()
 		scope = scope.Bind("id", reg.Func(a, a))
 
-		ref, err := InferInScope(&reg, scope, se)
+		ref, err := Infer(&reg, scope, se, nil)
 		if err != nil {
 			t.Error(err)
 		} else {
 			typ := reg.String(ref)
 			if typ != ex.typ {
 				t.Errorf("Invalid type for '%s'\n  expected: %s\n       got: %s", ex.source, ex.typ, typ)
+			}
+		}
+	}
+}
+
+type MapFetcher map[string]string
+
+func (mf MapFetcher) FetchSha256(key string) ([]byte, error) {
+	source, ok := mf[key]
+	if !ok {
+		return nil, fmt.Errorf("can't import '%s'", key)
+	}
+	return []byte(source), nil
+}
+
+func TestInferImport(t *testing.T) {
+	var reg Registry
+
+	a := reg.Var()
+
+	examples := []struct {
+		in     string  // The input.
+		imp    TypeRef // The imported type.
+		result string  // The stringified result type, or
+		err    string  // an error.
+	}{
+		// Since the `InferImport` function below doesn't check the hash length
+		// '$sha256~~' is sufficient to encode an import.
+		{in: `$sha256~~`, imp: IntRef, result: `int`},
+		{in: `$sha256~~`, imp: FloatRef, result: `float`},
+		{in: `1 + $sha256~~`, imp: FloatRef, err: `cannot unify 'int' with 'float'`},
+		{in: `$sha256~~`, imp: a, result: `$0`},
+		{in: `a ; a = $sha256~~`, imp: a, result: `$0`},
+		{in: `$sha256~~ [ 1, 2 ]`, imp: reg.Func(a, a), result: `list int`},
+		// TODO: Aliasing allocates new type vars, just importing does not. :/
+		{in: `a ; a = $sha256~~`, imp: reg.Func(a, a), result: `$2 -> $2`},
+		{in: `a ; a = $sha256~~`, imp: reg.Func(a, a), result: `$3 -> $3`},
+	}
+
+	for _, ex := range examples {
+		se := must(parser.ParseExpr(ex.in))
+		typ, err := Infer(&reg, DefaultScope(&reg), se, func(algo string, hash []byte) (TypeRef, error) {
+			return ex.imp, nil
+		})
+		if err != nil {
+			if ex.err != "" {
+				str := err.Error()
+				if !strings.Contains(str, ex.err) {
+					t.Errorf("Expected '%s' to be in error:\n%s", ex.err, str)
+				}
+			} else {
+				t.Error(err)
+			}
+		} else {
+			typStr := reg.String(typ)
+			if typStr != ex.result {
+				t.Errorf("Expected %s, got %s", ex.result, typStr)
 			}
 		}
 	}

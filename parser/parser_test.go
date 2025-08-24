@@ -129,6 +129,23 @@ func TestParses(t *testing.T) {
 	}
 }
 
+func TestImports(t *testing.T) {
+	valid := []string{
+		`$sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447`,
+	}
+
+	for _, src := range valid {
+		se, err := ParseExpr(src)
+		if err != nil {
+			writeParseError(t, src, err)
+		}
+
+		if _, ok := se.Expr.(*ast.ImportExpr); !ok {
+			t.Errorf("Expected an ImportExpr, got %T", se.Expr)
+		}
+	}
+}
+
 func TestParseError(t *testing.T) {
 	examples := []struct{ source, message string }{
 		{`{ a = b ..c }`, `Expected RBRACE got SPREAD`},

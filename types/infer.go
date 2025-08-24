@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/hex"
 	"fmt"
 
 	"github.com/Victorystick/scrapscript/ast"
@@ -36,10 +37,13 @@ func (s *Scope[T]) Bind(name string, val T) *Scope[T] {
 
 type TypeScope = *Scope[TypeRef]
 
+type InferImport func(algo string, hash []byte) (TypeRef, error)
+
 type context struct {
-	source token.Source
-	reg    *Registry
-	scope  TypeScope
+	source      token.Source
+	reg         *Registry
+	scope       TypeScope
+	inferImport InferImport
 }
 
 func (c *context) bail(span token.Span, msg string) {
@@ -56,28 +60,19 @@ func (c *context) unbind() {
 	c.scope = c.scope.parent
 }
 
-func DefaultScope() (reg Registry, scope TypeScope) {
+func DefaultScope(reg *Registry) (scope TypeScope) {
 	for _, p := range primitives {
 		scope = scope.Bind(reg.String(p), p)
 	}
 	return
 }
 
-func Infer(se ast.SourceExpr) (string, error) {
-	reg, scope := DefaultScope()
-
-	ref, err := InferInScope(&reg, scope, se)
-	if err != nil {
-		return "", err
-	}
-	return reg.String(ref), nil
-}
-
-func InferInScope(reg *Registry, scope TypeScope, se ast.SourceExpr) (ref TypeRef, err error) {
+func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, inferImport InferImport) (ref TypeRef, err error) {
 	context := context{
-		source: se.Source,
-		reg:    reg,
-		scope:  scope,
+		source:      se.Source,
+		reg:         reg,
+		scope:       scope,
+		inferImport: inferImport,
 	}
 
 	defer func() {
@@ -170,6 +165,19 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 			return c.ensure(x.Right, right, IntRef)
 		}
 		panic(fmt.Sprintf("can't infer binary expression %s", x.Op.String()))
+	case *ast.ImportExpr:
+		if c.inferImport == nil {
+			c.bail(x.Span(), "<internal error> missing infer import function")
+		}
+		bs, err := hex.DecodeString(c.source.GetString(x.Value.Pos.TrimStart(2)))
+		if err != nil {
+			c.bail(x.Span(), fmt.Sprintf("bad import hash %#v", x))
+		}
+		ref, err := c.inferImport(x.HashAlgo, bs)
+		if err != nil {
+			c.bail(x.Span(), err.Error())
+		}
+		return ref
 	}
 
 	panic(fmt.Sprintf("can't infer node %T", expr))

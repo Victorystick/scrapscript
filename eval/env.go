@@ -2,78 +2,84 @@ package eval
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 
+	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/parser"
 	"github.com/Victorystick/scrapscript/token"
 	"github.com/Victorystick/scrapscript/types"
 	"github.com/Victorystick/scrapscript/yards"
 )
 
-type Environment struct {
-	reg  types.Registry
-	vars Variables
+type Scrap struct {
+	expr  ast.SourceExpr
+	typ   types.TypeRef
+	value Value
 }
 
-func NewEnvironment(fetcher yards.Fetcher) *Environment {
+type Sha256Hash = [32]byte
+
+type Environment struct {
+	fetcher     yards.Fetcher
+	reg         types.Registry
+	vars        Variables
+	scraps      map[Sha256Hash]*Scrap
+	evalImport  EvalImport
+	inferImport types.InferImport
+}
+
+func NewEnvironment() *Environment {
 	env := &Environment{}
 	env.vars = bindBuiltIns(&env.reg)
-
-	if fetcher != nil {
-		// TODO: Don't inline this. :/
-		env.vars["$sha256"] = BuiltInFunc{
-			name: "$sha256",
-			// We must special-case import functions, since their type is dependent
-			// on their returned value.
-			typ: env.reg.Func(types.BytesRef, types.NeverRef),
-			fn: func(v Value) (Value, error) {
-				bs, ok := v.(Bytes)
-				if !ok {
-					return nil, fmt.Errorf("cannot import non-bytes %s", v)
-				}
-
-				// Must convert from `eval.Byte` to `[]byte`.
-				hash := []byte(bs)
-
-				// Funnily enough; any lower-cased, hex-encoded sha256 hash can be parsed
-				// as base64. Users reading the official documentation at
-				// https://scrapscript.org/guide may be frustrated if this doesn't work.
-				// We detect this and convert back via base64 to the original hex string.
-				var err error
-				if len(hash) == sha256AsBase64Size {
-					hash, err = rescueSha256FromBase64(hash)
-					if err != nil {
-						return nil, err
-					}
-				}
-
-				if len(hash) != sha256.Size {
-					return nil, fmt.Errorf("cannot import sha256 bytes of length %d, must be %d", len(hash), sha256.Size)
-				}
-
-				key := fmt.Sprintf("%x", hash)
-				bytes, err := fetcher.FetchSha256(key)
-				if err != nil {
-					return nil, err
-				}
-
-				return env.Eval(bytes)
-			},
+	env.scraps = make(map[Sha256Hash]*Scrap)
+	env.evalImport = func(algo string, hash []byte) (Value, error) {
+		scrap, err := env.fetch(algo, hash)
+		if err != nil {
+			return nil, err
 		}
+		return env.Eval(scrap)
 	}
-
+	env.inferImport = func(algo string, hash []byte) (types.TypeRef, error) {
+		scrap, err := env.fetch(algo, hash)
+		if err != nil {
+			return types.NeverRef, err
+		}
+		return env.infer(scrap)
+	}
 	return env
 }
 
-const sha256AsBase64Size = 48
-
-func rescueSha256FromBase64(encoded []byte) ([]byte, error) {
-	return hex.DecodeString(base64.StdEncoding.EncodeToString(encoded))
+func (e *Environment) UseFetcher(fetcher yards.Fetcher) {
+	e.fetcher = fetcher
 }
 
-func (e *Environment) Eval(script []byte) (Value, error) {
+func (e *Environment) fetch(algo string, hash []byte) (*Scrap, error) {
+	if algo != "sha256" {
+		return nil, fmt.Errorf("only sha256 imports are supported")
+	}
+
+	if len(hash) != sha256.Size {
+		return nil, fmt.Errorf("cannot import sha256 bytes of length %d, must be %d", len(hash), sha256.Size)
+	}
+
+	if scrap, ok := e.scraps[(Sha256Hash)(hash)]; ok {
+		return scrap, nil
+	}
+
+	if e.fetcher == nil {
+		return nil, fmt.Errorf("cannot import without a fetcher")
+	}
+
+	key := fmt.Sprintf("%x", hash)
+	bytes, err := e.fetcher.FetchSha256(key)
+	if err != nil {
+		return nil, err
+	}
+
+	return e.Read(bytes)
+}
+
+func (e *Environment) Read(script []byte) (*Scrap, error) {
 	src := token.NewSource(script)
 	se, err := parser.Parse(&src)
 
@@ -81,7 +87,36 @@ func (e *Environment) Eval(script []byte) (Value, error) {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
 
-	return Eval(se, &e.reg, e.vars)
+	scrap := &Scrap{expr: se}
+	e.scraps[sha256.Sum256(script)] = scrap
+	return scrap, nil
+}
+
+// Eval evaluates a Scrap.
+func (e *Environment) Eval(scrap *Scrap) (Value, error) {
+	if scrap.value == nil {
+		value, err := Eval(scrap.expr, &e.reg, e.vars, e.evalImport)
+		scrap.value = value
+		return value, err
+	}
+	return scrap.value, nil
+}
+
+func (e *Environment) infer(scrap *Scrap) (types.TypeRef, error) {
+	if scrap.typ == types.NeverRef {
+		// TODO: Add a complete type scope.
+		scope := types.DefaultScope(&e.reg)
+		ref, err := types.Infer(&e.reg, scope, scrap.expr, e.inferImport)
+		scrap.typ = ref
+		return ref, err
+	}
+	return scrap.typ, nil
+}
+
+// Infer returns the string representation of the type of a Scrap.
+func (e *Environment) Infer(scrap *Scrap) (string, error) {
+	ref, err := e.infer(scrap)
+	return e.reg.String(ref), err
 }
 
 // Scrap renders a Value as self-contained scrapscript program.

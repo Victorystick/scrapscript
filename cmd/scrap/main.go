@@ -8,9 +8,6 @@ import (
 
 	"github.com/Victorystick/scrapscript"
 	"github.com/Victorystick/scrapscript/eval"
-	"github.com/Victorystick/scrapscript/parser"
-	"github.com/Victorystick/scrapscript/token"
-	"github.com/Victorystick/scrapscript/types"
 	"github.com/Victorystick/scrapscript/yards"
 )
 
@@ -44,20 +41,26 @@ func must[T any](val T, err error) T {
 	return val
 }
 
-func evaluate(args []string) {
-	fetcher := must(yards.NewDefaultCacheFetcher(
+func makeEnv() *eval.Environment {
+	env := eval.NewEnvironment()
+	env.UseFetcher(must(yards.NewDefaultCacheFetcher(
 		// Don't cache invalid scraps, but trust the local cache for now.
 		yards.Validate(
 			// TODO: make configurable
 			yards.ByHttp("https://scraps.oseg.dev/")),
-	))
+	)))
+	return env
+}
 
+func evaluate(args []string) {
 	input := must(io.ReadAll(os.Stdin))
-	env := eval.NewEnvironment(fetcher)
-	val := must(env.Eval(input))
+	env := makeEnv()
+	scrap := must(env.Read(input))
+	val := must(env.Eval(scrap))
 
 	if len(args) >= 2 && args[0] == "apply" {
-		fn := must(env.Eval([]byte(args[1])))
+		scrap = must(env.Read([]byte(args[1])))
+		fn := must(env.Eval(scrap))
 		val = must(scrapscript.Call(fn, val))
 	}
 
@@ -66,13 +69,7 @@ func evaluate(args []string) {
 
 func inferType(args []string) {
 	input := must(io.ReadAll(os.Stdin))
-	source := token.NewSource(input)
-
-	se := must(parser.Parse(&source))
-	str, err := types.Infer(se)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	fmt.Println(str)
+	env := makeEnv()
+	scrap := must(env.Read(input))
+	fmt.Println(must(env.Infer(scrap)))
 }
