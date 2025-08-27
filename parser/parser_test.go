@@ -107,6 +107,22 @@ func TestParseEnum(t *testing.T) {
 		`#1 #2 #4 #8 #16 #32`,
 		`#tag (#a #b)`,
 		`my-type::left ; my-type : #left #right`,
+		`animal::horse "Lucy"
+; animal :
+  #horse text
+  #zebra int
+`,
+		// 		`my-org::my-config
+		// { name = "my-server-001"
+		// , cpus = #4
+		// , mem  = #16
+		// }
+		// ; my-org :
+		//     #my-config
+		//       { name : text
+		//       , cpus : #1 #2 #4 #8
+		//       , mem  : #1 #2 #4 #8 #16 #32
+		//       }`,
 	}
 
 	for _, src := range valid {
@@ -120,6 +136,7 @@ func TestParseEnum(t *testing.T) {
 func TestMatchFunc(t *testing.T) {
 	valid := []string{
 		`default -> | #none -> default | #just a -> a`,
+		`| "/" -> "Welcome" | _ -> "Where are you?" <| "/"`,
 	}
 
 	for _, src := range valid {

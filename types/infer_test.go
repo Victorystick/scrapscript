@@ -81,6 +81,14 @@ func TestInfer(t *testing.T) {
 		{`4 |> a -> b -> a`, `$4 -> int`},
 
 		{`typ::fun (x -> x * 2) ; typ : #fun (int -> int)`, `#fun (int -> int)`},
+
+		{`| "/" -> (status 200 <| page "you're on the index")
+		| "/about" -> (status 200 <| page "you're on the about page")
+		| _ -> notfound
+
+		; notfound = (status 404 <| page "not found")
+		; status = code -> body -> { code = code, body = body }
+		; page = body -> "<!doctype html><html><body>" ++ body ++ "</body></html>"`, `text -> { body : text, code : int }`},
 	}
 
 	for _, ex := range examples {

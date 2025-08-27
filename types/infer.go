@@ -117,6 +117,14 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 		ret := c.infer(x.Body)
 		return c.reg.Func(binder, ret)
 
+	case ast.MatchFuncExpr:
+		argTy := c.reg.Var()
+		bodyTy := c.reg.Var()
+		for _, opt := range x {
+			c.match(argTy, bodyTy, opt.Arg, opt.Body)
+		}
+		return c.reg.Func(argTy, bodyTy)
+
 	case *ast.CallExpr:
 		// Special-case pick with a value.
 		if pick, ok := x.Fn.(*ast.BinaryExpr); ok && pick.Op == token.PICK {
@@ -209,6 +217,26 @@ func (c *context) call(x, fn, arg ast.Expr) TypeRef {
 	argTy := c.infer(arg)
 	c.ensure(x, fnTy, c.reg.Func(argTy, res))
 	return res
+}
+
+func (c *context) match(argTy, bodyTy TypeRef, arg, body ast.Expr) {
+	switch arg := arg.(type) {
+	case *ast.Ident:
+		name := c.source.GetString(arg.Pos)
+		// Ignore _.
+		if name == "_" {
+			c.ensure(arg, bodyTy, c.infer(body))
+			return
+		}
+
+		c.bail(arg.Span(), "can only match on the _ identifier")
+
+	case *ast.Literal:
+		c.ensure(arg, argTy, literalTypeRef(arg.Kind))
+		c.ensure(arg, bodyTy, c.infer(body))
+	default:
+		c.bail(arg.Span(), fmt.Sprintf("cannot match on %T", arg))
+	}
 }
 
 func (c *context) where(x *ast.WhereExpr) TypeRef {
