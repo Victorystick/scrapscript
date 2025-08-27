@@ -606,7 +606,14 @@ func (c *context) createMatchFunc(x ast.MatchFuncExpr) (ScriptFunc, error) {
 
 func (c *context) where(x *ast.WhereExpr) (Value, error) {
 	name := c.name(&x.Id)
-	val, err := c.eval(x.Val)
+
+	// This where is type-only; semantics TBD?
+	expr := x.Val
+	if expr == nil {
+		expr = x.Typ
+	}
+
+	val, err := c.eval(expr)
 	if err != nil {
 		return nil, err
 	}

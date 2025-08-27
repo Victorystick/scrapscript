@@ -89,6 +89,8 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, inferImport InferI
 	return ref, err
 }
 
+type InferFunc func(expr ast.Expr) TypeRef
+
 func (c *context) infer(expr ast.Expr) TypeRef {
 	switch x := expr.(type) {
 	case *ast.Literal:
@@ -107,7 +109,9 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 	case *ast.RecordExpr:
 		return c.record(x)
 	case ast.EnumExpr:
-		return c.enum(x)
+		return c.enum(x, func(expr ast.Expr) TypeRef {
+			return c.infer(expr)
+		})
 
 	case *ast.FuncExpr:
 		// Not sure how to juggle vars vs unbound. :/
@@ -242,6 +246,13 @@ func (c *context) match(argTy, bodyTy TypeRef, arg, body ast.Expr) {
 func (c *context) where(x *ast.WhereExpr) TypeRef {
 	name := c.source.GetString(x.Id.Pos)
 
+	// This where is type-only; semantics TBD?
+	if x.Val == nil {
+		c.bind(name, c.reg.generalize(c.typ(x.Typ)))
+		defer c.unbind()
+		return c.infer(x.Expr)
+	}
+
 	tyVal := c.infer(x.Val)
 
 	// If there's an annotation, make sure it matches the inferred type.
@@ -251,8 +262,7 @@ func (c *context) where(x *ast.WhereExpr) TypeRef {
 
 	c.bind(name, c.reg.generalize(tyVal))
 	defer c.unbind()
-	tyExpr := c.infer(x.Expr)
-	return tyExpr
+	return c.infer(x.Expr)
 }
 
 func (c *context) typ(x ast.Expr) TypeRef {
@@ -269,6 +279,10 @@ func (c *context) typ(x ast.Expr) TypeRef {
 			c.typ(x.Arg),
 			c.typ(x.Body),
 		)
+	case ast.EnumExpr:
+		return c.enum(x, func(expr ast.Expr) TypeRef {
+			return c.typ(expr)
+		})
 	}
 
 	c.bail(x.Span(), fmt.Sprintf("cannot infer type of %T", x))
@@ -324,13 +338,13 @@ func (c *context) record(x *ast.RecordExpr) TypeRef {
 	return c.reg.Record(ref)
 }
 
-func (c *context) enum(x ast.EnumExpr) TypeRef {
+func (c *context) enum(x ast.EnumExpr, rec InferFunc) TypeRef {
 	ref := make(MapRef, len(x))
 	for _, v := range x {
 		name := c.source.GetString(v.Tag.Pos)
 		vRef := NeverRef
 		if v.Typ != nil {
-			vRef = c.infer(v.Typ)
+			vRef = rec(v.Typ)
 		}
 		ref[name] = vRef
 	}

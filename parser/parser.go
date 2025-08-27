@@ -271,44 +271,33 @@ func (p *parser) parseWhereExpr(x ast.Expr) ast.Expr {
 		stack = append(stack, "parseWhereExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
-	p.expect(token.IDENT)
-	id := ast.Ident{Pos: p.span}
-	p.next()
 
-	var typ ast.Expr
+	where := &ast.WhereExpr{
+		Expr: x,
+		Id:   *p.ident(),
+	}
+
 	if p.tok == token.DEFINE {
 		p.next()
 
-		if p.tok == token.OPTION {
-			return &ast.WhereExpr{
-				Expr: x,
-				Id:   id,
-				Val:  p.parseEnum(),
-			}
-		}
-
-		// TODO: only allow a subset of expressions here.
-		typ = p.parseBinaryExpr(nil, token.BasePrec)
+		where.Typ = p.parseType()
 	}
 
-	p.expect(token.ASSIGN)
-	p.next()
-
-	if p.tok == token.PIPE {
-		return &ast.WhereExpr{
-			Expr: x,
-			Id:   id,
-			Typ:  typ,
-			Val:  p.parseMatchFuncExpr(),
-		}
+	if p.tok == token.ASSIGN {
+		p.next()
+		where.Val = p.parsePlainExpr(token.BasePrec)
 	}
 
-	return &ast.WhereExpr{
-		Expr: x,
-		Id:   id,
-		Typ:  typ,
-		Val:  p.parseBinaryExpr(nil, token.BasePrec),
+	return where
+}
+
+func (p *parser) parseType() ast.Expr {
+	if p.tok == token.OPTION {
+		return p.parseEnum()
 	}
+
+	// TODO: only allow a subset of expressions here.
+	return p.parseBinaryExpr(nil, token.BasePrec)
 }
 
 func (p *parser) parseRecord() *ast.RecordExpr {
