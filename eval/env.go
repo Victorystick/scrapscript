@@ -122,6 +122,11 @@ func (e *Environment) Infer(scrap *Scrap) (string, error) {
 	return e.reg.String(ref), err
 }
 
+// Infer returns the string representation of the type of a Value.
+func (e *Environment) Type(value Value) string {
+	return e.reg.String(value.Type())
+}
+
 // Scrap renders a Value as self-contained scrapscript program.
 func (e *Environment) Scrap(value Value) string {
 	if vr, ok := value.(Variant); ok {

@@ -34,6 +34,13 @@ type Record struct {
 	values map[string]Value
 }
 
+func (r Record) Get(key string) Value {
+	if val, ok := r.values[key]; ok {
+		return val
+	}
+	return Hole{}
+}
+
 type List struct {
 	typ      types.TypeRef
 	elements []Value
