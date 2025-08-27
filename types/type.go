@@ -330,8 +330,8 @@ func (c *Registry) generalize(target TypeRef) TypeRef {
 			b := subst.bound(other)
 			if b == NeverRef {
 				if isArg {
-				b = c.Unbound()
-				subst.bind(other, b)
+					b = c.Unbound()
+					subst.bind(other, b)
 				} else {
 					return other
 				}
@@ -510,7 +510,13 @@ func (b *stringer) string(ref TypeRef, nesting int) {
 			b.WriteByte(')')
 		}
 	case enumTag:
+		if nesting > 0 {
+			b.WriteByte('(')
+		}
 		b.enum(index)
+		if nesting > 0 {
+			b.WriteByte(')')
+		}
 	case recordTag:
 		b.record(index)
 	case unboundTag:

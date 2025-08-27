@@ -60,10 +60,15 @@ func TestEnum(t *testing.T) {
 
 	Eq(t, reg.String(ref), "#l int #r int")
 
-	maybe := MapRef{"some": IntRef, "none": NeverRef}
-	ref = reg.Enum(maybe)
+	maybe := func(ref TypeRef) TypeRef {
+		return reg.Enum(MapRef{"some": ref, "none": NeverRef})
+	}
+
+	ref = maybe(IntRef)
 
 	Eq(t, reg.String(ref), "#none #some int")
+
+	Eq(t, reg.String(maybe(ref)), "#none #some (#none #some int)")
 
 	inc := reg.Func(IntRef, IntRef)
 	typ := MapRef{"fun": inc}

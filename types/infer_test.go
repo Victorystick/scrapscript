@@ -89,6 +89,15 @@ func TestInfer(t *testing.T) {
 		; notfound = (status 404 <| page "not found")
 		; status = code -> body -> { code = code, body = body }
 		; page = body -> "<!doctype html><html><body>" ++ body ++ "</body></html>"`, `text -> { body : text, code : int }`},
+		{`t
+; t :
+  #a a
+  #b int
+  #c byte
+; a :
+  #x
+  #y
+  #z`, `#a (#x #y #z) #b int #c byte`},
 	}
 
 	for _, ex := range examples {
