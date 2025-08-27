@@ -101,6 +101,35 @@ func TestParseRecord(t *testing.T) {
 	}
 }
 
+func TestParseEnum(t *testing.T) {
+	valid := []string{
+		`#true #false`,
+		`#1 #2 #4 #8 #16 #32`,
+		`#tag (#a #b)`,
+		`my-type::left ; my-type : #left #right`,
+	}
+
+	for _, src := range valid {
+		_, err := ParseExpr(src)
+		if err != nil {
+			writeParseError(t, src, err)
+		}
+	}
+}
+
+func TestMatchFunc(t *testing.T) {
+	valid := []string{
+		`default -> | #none -> default | #just a -> a`,
+	}
+
+	for _, src := range valid {
+		_, err := ParseExpr(src)
+		if err != nil {
+			writeParseError(t, src, err)
+		}
+	}
+}
+
 func TestParses(t *testing.T) {
 	valid := []string{
 		`f "b" ; f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`,

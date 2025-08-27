@@ -453,21 +453,20 @@ func (p *parser) parseVariant() *ast.VariantExpr {
 	// Eat option.
 	p.next()
 
-	p.expect(token.IDENT)
+	if p.tok != token.INT {
+		p.expect(token.IDENT)
+	}
 	id := ast.Ident{
 		Pos: p.span,
 	}
 	p.next()
 
-	if p.tok == token.ARROW {
-		return &ast.VariantExpr{
-			Tag: id,
-		}
-	}
-
 	var typ ast.Expr
-	if p.tok != token.OPTION && p.tok != token.EOF {
+
+	if !p.tok.IsOperator() && p.tok != token.EOF {
 		typ = p.parseBinaryExpr(nil, token.ARROW.Precedence()+1)
+	} else if p.tok == token.LPAREN {
+		typ = p.parseParenExpr()
 	}
 
 	return &ast.VariantExpr{
