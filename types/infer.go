@@ -123,11 +123,7 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 			return c.pick(pick, x.Arg)
 		}
 
-		res := c.reg.Var()
-		fn := c.infer(x.Fn)
-		arg := c.infer(x.Arg)
-		c.ensure(x, fn, c.reg.Func(arg, res))
-		return res
+		return c.call(x, x.Fn, x.Arg)
 
 	case *ast.BinaryExpr:
 		if x.Op == token.PICK {
@@ -163,6 +159,12 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 			// Assume int, like ML does.
 			c.ensure(x.Left, left, IntRef)
 			return c.ensure(x.Right, right, IntRef)
+
+		// Pipes are essentially just calls.
+		case token.LPIPE:
+			return c.call(x, x.Left, x.Right)
+		case token.RPIPE:
+			return c.call(x, x.Right, x.Left)
 		}
 		panic(fmt.Sprintf("can't infer binary expression %s", x.Op.String()))
 	case *ast.ImportExpr:
@@ -199,6 +201,14 @@ func (c *context) ensure(x ast.Expr, got, want TypeRef) TypeRef {
 		c.reg.unify(got, want)
 	}
 	return want
+}
+
+func (c *context) call(x, fn, arg ast.Expr) TypeRef {
+	res := c.reg.Var()
+	fnTy := c.infer(fn)
+	argTy := c.infer(arg)
+	c.ensure(x, fnTy, c.reg.Func(argTy, res))
+	return res
 }
 
 func (c *context) where(x *ast.WhereExpr) TypeRef {

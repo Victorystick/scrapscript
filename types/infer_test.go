@@ -76,6 +76,9 @@ func TestInfer(t *testing.T) {
 		{`a -> b -> [ a, b ]`, `$1 -> $1 -> list $1`},
 		{`(a -> b -> [ a, b ]) 1`, `int -> list int`},
 
+		{`"to" |> a -> b -> a <| 2`, `text`},
+		{`4 |> a -> b -> a`, `$4 -> int`},
+
 		{`typ::fun (x -> x * 2) ; typ : #fun (int -> int)`, `#fun (int -> int)`},
 	}
 
