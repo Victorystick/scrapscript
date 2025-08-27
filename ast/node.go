@@ -126,7 +126,7 @@ func (b *VariantExpr) Span() token.Span {
 	}
 	return token.Span{Start: b.Tag.Span().Start - 1, End: end}
 }
-func (b EnumExpr) Span() token.Span   { return span(&b[0].Tag, &b[len(b)-1].Tag) }
+func (b EnumExpr) Span() token.Span   { return span(b[0], b[len(b)-1]) }
 func (b RecordExpr) Span() token.Span { return b.Pos }
 func (b AccessExpr) Span() token.Span { return b.Pos }
 func (b ListExpr) Span() token.Span   { return b.Pos }
