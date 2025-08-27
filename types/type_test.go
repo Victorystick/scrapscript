@@ -98,8 +98,7 @@ func TestGeneric(t *testing.T) {
 func TestInstantiate(t *testing.T) {
 	reg := Registry{}
 
-	// A Scheme is represented by an unbound variable.
-	// These are left untouched. (forall x. x) untouched.
+	// Only unbound types _introduced_ by arrows should be replaced.
 	a := reg.Unbound()
 	b := reg.Unbound()
 	f := reg.Func(a, b)
@@ -110,10 +109,33 @@ func TestInstantiate(t *testing.T) {
 
 	g := reg.Instantiate(f)
 	h := reg.Instantiate(f)
-	Eq(t, reg.String(g), "$0 -> $1")
-	Eq(t, reg.String(h), "$2 -> $3")
+	Eq(t, reg.String(g), "$0 -> a")
+	Eq(t, reg.String(h), "$1 -> a")
 
-	Eq(t, reg.String(reg.Instantiate(l)), "list $4")
+	Eq(t, reg.String(reg.Instantiate(l)), "list a")
+	Eq(t, reg.String(reg.Instantiate(reg.Func(a, l))), "$2 -> list $2")
+}
+
+func TestGeneralize(t *testing.T) {
+	reg := Registry{}
+
+	// Only type variables _introduced_ by arrows should be replaced.
+	a := reg.Var()
+	b := reg.Var()
+	f := reg.Func(a, b)
+	Eq(t, reg.String(f), "$0 -> $1")
+
+	l := reg.List(a)
+	Eq(t, reg.String(l), "list $0")
+
+	g := reg.generalize(f)
+	h := reg.generalize(f)
+	Eq(t, reg.String(g), "a -> $1")
+	Eq(t, reg.String(h), "a -> $1")
+
+	Eq(t, reg.String(reg.generalize(l)), "list $0")
+	Eq(t, reg.String(reg.generalize(reg.Func(a, l))), "a -> list a")
+
 }
 
 func TestGetVar(t *testing.T) {

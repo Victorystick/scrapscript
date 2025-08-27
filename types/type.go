@@ -279,26 +279,30 @@ func (c *Registry) traverse(target TypeRef, mtr MapTypeRef) {
 	mtr(target)
 }
 
-type Replacer func(ref TypeRef) TypeRef
+type Replacer func(ref TypeRef, isArg bool) TypeRef
 
-func (c *Registry) replace(target TypeRef, f Replacer) TypeRef {
+func (c *Registry) replace(target TypeRef, f Replacer, isArg bool) TypeRef {
 	tag, index := target.extract()
 	switch tag {
+	case unboundTag:
+		return f(target, isArg)
+	case varTag:
+		return f(target, isArg)
 	case listTag:
-		return c.List(f(c.lists[index]))
+		return c.List(c.replace(c.lists[index], f, isArg))
 	case funcTag:
 		fn := c.funcs[index]
-		return c.Func(f(fn.Arg), f(fn.Result))
+		return c.Func(c.replace(fn.Arg, f, true), c.replace(fn.Result, f, isArg))
 	case enumTag:
 		ref := make(MapRef, len(c.enums[index]))
 		for k, v := range c.enums[index] {
-			ref[k] = f(v)
+			ref[k] = c.replace(v, f, isArg)
 		}
 		return c.Enum(ref)
 	case recordTag:
 		ref := make(MapRef, len(c.records[index]))
 		for k, v := range c.records[index] {
-			ref[k] = f(v)
+			ref[k] = c.replace(v, f, isArg)
 		}
 		return c.Record(ref)
 	}
@@ -321,40 +325,40 @@ func (reg *Registry) bind(a, b TypeRef) {
 // The opposite of instantiate.
 func (c *Registry) generalize(target TypeRef) TypeRef {
 	var subst Subst
-	return c.replace(target, func(other TypeRef) TypeRef {
+	return c.replace(target, func(other TypeRef, isArg bool) TypeRef {
 		if other.IsVar() {
 			b := subst.bound(other)
 			if b == NeverRef {
+				if isArg {
 				b = c.Unbound()
 				subst.bind(other, b)
+				} else {
+					return other
+				}
 			}
 			return b
 		}
 		return other
-	})
+	}, false)
 }
 
 func (c *Registry) Instantiate(target TypeRef) TypeRef {
 	var subst Subst
-	c.insertUnbound(target, &subst)
-	return c.substitute(target, subst)
-}
-
-func (c *Registry) insertUnbound(target TypeRef, subst *Subst) {
-	tag, index := target.extract()
-	switch tag {
-	case unboundTag:
-		if !subst.binds(target) {
-			subst.bind(target, c.Var())
+	return c.replace(target, func(other TypeRef, isArg bool) TypeRef {
+		if other.IsUnbound() {
+			b := subst.bound(other)
+			if b == NeverRef {
+				if isArg {
+					b = c.Var()
+					subst.bind(other, b)
+				} else {
+					return other
+				}
+			}
+			return b
 		}
-	case listTag:
-		c.insertUnbound(c.lists[index], subst)
-	case funcTag:
-		fn := c.funcs[index]
-		c.insertUnbound(fn.Arg, subst)
-		c.insertUnbound(fn.Result, subst)
-		// TODO: Other types
-	}
+		return other
+	}, false)
 }
 
 func (c *Registry) unify(a, b TypeRef) {
@@ -402,50 +406,6 @@ func (c *Registry) unify(a, b TypeRef) {
 	} else {
 		panic("cannot unify '" + c.String(a) + "' with '" + c.String(b) + "'")
 	}
-}
-
-func (c *Registry) substitute(target TypeRef, subst Subst) TypeRef {
-	tag, index := target.extract()
-	switch tag {
-	case unboundTag:
-		for _, s := range subst {
-			if s.replace == target {
-				return s.with
-			}
-		}
-	case varTag:
-		for _, s := range subst {
-			if s.replace == target {
-				c.vars[index] = s.with
-				return s.with
-			}
-		}
-	case listTag:
-		return c.List(
-			c.substitute(c.lists[index], subst),
-		)
-	case funcTag:
-		fn := c.funcs[index]
-		return c.Func(
-			c.substitute(fn.Arg, subst),
-			c.substitute(fn.Result, subst),
-		)
-	case enumTag:
-		ref := make(MapRef, len(c.enums[index]))
-		for k, v := range c.enums[index] {
-			ref[k] = c.substitute(v, subst)
-		}
-		return c.Enum(ref)
-	case recordTag:
-		ref := make(MapRef, len(c.records[index]))
-		for k, v := range c.records[index] {
-			ref[k] = c.substitute(v, subst)
-		}
-		return c.Record(ref)
-	}
-
-	// Else, the target remains unchanged.
-	return target
 }
 
 // DebugString returns a string representation for TypeRef.

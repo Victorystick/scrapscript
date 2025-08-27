@@ -71,6 +71,7 @@ func TestInfer(t *testing.T) {
 		{`(f -> a -> [ a ]) "a"`, `$2 -> list $2`},
 		{`(f -> a -> [ a ]) "a" 3`, `list int`},
 
+		{`a -> (b ; b = a)`, `$0 -> $0`},
 		{`f -> a -> ([ b, b ] ; b = (f a))`, `($1 -> $2) -> $1 -> list $2`},
 		// If used the same, arguments must be the same.
 		{`a -> b -> [ a, b ]`, `$1 -> $1 -> list $1`},
