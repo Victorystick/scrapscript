@@ -420,6 +420,21 @@ func (c *context) typeRef(x ast.Expr) (ref types.TypeRef, err error) {
 		ref = c.reg.Func(argRef, bodyRef)
 		return
 
+	case ast.EnumExpr:
+		mapRef := make(types.MapRef)
+		for _, v := range x {
+			key := c.name(&v.Tag)
+			value := types.NeverRef
+			if v.Typ != nil {
+				value, err = c.typeRef(v.Typ)
+				if err != nil {
+					return
+				}
+			}
+			mapRef[key] = value
+		}
+		ref = c.reg.Enum(mapRef)
+		return
 		// TODO: Handle other expression types.
 	}
 

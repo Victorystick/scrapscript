@@ -300,12 +300,10 @@ func (c *context) enum(x ast.EnumExpr) TypeRef {
 }
 
 func (c *context) pick(x *ast.BinaryExpr, val ast.Expr) TypeRef {
-	// TODO: A binary expr for pick is annoying.
-	name := c.source.GetString(x.Left.Span())
-	ref := c.scope.Lookup(name)
+	ref := c.infer(x.Left)
 	enum := c.reg.GetEnum(ref)
 	if enum == nil {
-		c.bail(x.Left.Span(), fmt.Sprintf("%s isn't an enum", name))
+		c.bail(x.Left.Span(), fmt.Sprintf("%s isn't an enum", c.reg.String(ref)))
 	}
 
 	if id, ok := x.Right.(*ast.Ident); ok {

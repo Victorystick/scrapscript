@@ -32,6 +32,7 @@ func TestInfer(t *testing.T) {
 		{`e ; e : #l int #r`, `#l int #r`},
 		{`e::r ; e : #l int #r`, `#l int #r`},
 		{`e::l 4 ; e : #l int #r`, `#l int #r`},
+		{`(#horse text #zebra int)::horse "Lucy"`, `#horse text #zebra int`},
 		// Functions
 		{`a -> a`, `$0 -> $0`},
 		{`_ -> "hi"`, `$0 -> text`},
@@ -105,7 +106,7 @@ func TestInferFailure(t *testing.T) {
 		{`{ ..base, a = 1 } ; base = { a = ~00 }`, `type of a must be byte, not int`},
 		{`{ ..1, a = 1 }`, `cannot spread from non-record type int`},
 		// Enums
-		{`1::a`, `1 isn't an enum`},
+		{`1::a`, `int isn't an enum`},
 		{`a::a ; a : #b`, `#a isn't a valid option for enum #b`},
 		{`a::b 1 ; a : #b`, `#b doesn't take any value`},
 		{`a::b 1 ; a : #b text`, `cannot unify 'int' with 'text'`},

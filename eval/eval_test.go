@@ -75,6 +75,26 @@ var expressions = []struct {
 	{`"yo" |> list/repeat 2 |> text/join " "`, `"yo yo"`},
 }
 
+func TestScrapItentity(t *testing.T) {
+	var scraps = []string{
+		`(#horse text #zebra int)::horse "Lucy"`,
+	}
+
+	for _, scrap := range scraps {
+		env := NewEnvironment()
+		val, err := eval(env, scrap)
+
+		if err != nil {
+			t.Error(err)
+		} else {
+			rep := env.Scrap(val)
+			if scrap != rep {
+				t.Errorf("Expected: %#v, got: %#v", scrap, rep)
+			}
+		}
+	}
+}
+
 var failures = []struct {
 	source string
 	error  string
