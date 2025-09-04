@@ -21,6 +21,7 @@ var commands = []Command{
 	{name: "eval", desc: "evaluates it", fn: evaluate},
 	{name: "type", desc: "infers its type", fn: inferType},
 	{name: "push", desc: "pushes it to the server", fn: pushScrap},
+	{name: "hash", desc: "prints its sha256 hash", fn: hashScrap},
 }
 
 var (
@@ -101,4 +102,11 @@ func pushScrap(args []string) {
 	scrap := must(env.Read(input))
 	key := must(env.Push(scrap))
 	fmt.Println(key)
+}
+
+func hashScrap(args []string) {
+	input := must(io.ReadAll(os.Stdin))
+	env := makeEnv()
+	scrap := must(env.Read(input))
+	fmt.Println(scrap.Sha256())
 }

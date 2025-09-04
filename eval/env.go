@@ -17,6 +17,10 @@ type Scrap struct {
 	value Value
 }
 
+func (s Scrap) Sha256() string {
+	return fmt.Sprintf("%x", sha256.Sum256(s.expr.Source.Bytes()))
+}
+
 type Sha256Hash = [32]byte
 
 type Environment struct {
