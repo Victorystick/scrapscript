@@ -11,26 +11,46 @@ import (
 	"github.com/Victorystick/scrapscript/yards"
 )
 
-type Command func(args []string)
-
-var commands = map[string]Command{
-	"eval": evaluate,
-	"type": inferType,
+type Command struct {
+	name string
+	desc string
+	fn   func(args []string)
 }
+
+var commands = []Command{
+	{name: "eval", desc: "evaluates it", fn: evaluate},
+	{name: "type", desc: "infers its type", fn: inferType},
+	{name: "push", desc: "pushes it to the server", fn: pushScrap},
+}
+
+var (
+	server = flag.String("server", "https://scraps.oseg.dev/", "The scrapyard server to use")
+)
 
 func main() {
 	flag.Parse()
 
-	cmd, ok := commands[flag.Arg(0)]
-	if !ok {
-		flag.Usage()
-		for name := range commands {
-			fmt.Fprintln(os.Stderr, name)
+	name := flag.Arg(0)
+	var cmd *Command
+	for i := range commands {
+		if commands[i].name == name {
+			cmd = &commands[i]
+			break
 		}
+	}
+
+	if cmd == nil {
+		fmt.Fprintln(os.Stderr, os.Args[0], "reads a script from stdin, parses it and does one of", len(commands), "things:")
+		fmt.Fprintln(os.Stderr)
+		for _, cmd := range commands {
+			fmt.Fprintf(os.Stderr, "%s %s - %s\n", os.Args[0], cmd.name, cmd.desc)
+		}
+		fmt.Fprintln(os.Stderr, "\nFlags:")
+		flag.PrintDefaults()
 		os.Exit(2)
 	}
 
-	cmd(flag.Args()[1:])
+	cmd.fn(flag.Args()[1:])
 }
 
 func must[T any](val T, err error) T {
@@ -43,12 +63,13 @@ func must[T any](val T, err error) T {
 
 func makeEnv() *eval.Environment {
 	env := eval.NewEnvironment()
+
+	pusher := yards.ByHttp(*server)
+	env.UsePusher(pusher)
 	env.UseFetcher(must(yards.NewDefaultCacheFetcher(
 		// Don't cache invalid scraps, but trust the local cache for now.
-		yards.Validate(
-			// TODO: make configurable
-			yards.ByHttp("https://scraps.oseg.dev/")),
-	)))
+		yards.Validate(pusher)),
+	))
 	return env
 }
 
@@ -72,4 +93,12 @@ func inferType(args []string) {
 	env := makeEnv()
 	scrap := must(env.Read(input))
 	fmt.Println(must(env.Infer(scrap)))
+}
+
+func pushScrap(args []string) {
+	input := must(io.ReadAll(os.Stdin))
+	env := makeEnv()
+	scrap := must(env.Read(input))
+	key := must(env.Push(scrap))
+	fmt.Println(key)
 }

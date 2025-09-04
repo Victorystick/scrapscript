@@ -20,6 +20,7 @@ type Scrap struct {
 type Sha256Hash = [32]byte
 
 type Environment struct {
+	pusher  yards.Pusher
 	fetcher yards.Fetcher
 	reg     types.Registry
 	// The TypeScope and Variables match each other's contents.
@@ -52,6 +53,10 @@ func NewEnvironment() *Environment {
 		return env.infer(scrap)
 	}
 	return env
+}
+
+func (e *Environment) UsePusher(pusher yards.Pusher) {
+	e.pusher = pusher
 }
 
 func (e *Environment) UseFetcher(fetcher yards.Fetcher) {
@@ -131,4 +136,12 @@ func (e *Environment) Scrap(value Value) string {
 		return fmt.Sprintf("(%s)::%s %s", e.reg.String(vr.typ), vr.tag, e.Scrap(vr.value))
 	}
 	return value.String()
+}
+
+func (e *Environment) Push(scrap *Scrap) (string, error) {
+	if e.pusher == nil {
+		return "", fmt.Errorf("cannot push without a pusher")
+	}
+
+	return e.pusher.PushScrap(scrap.expr.Source.Bytes())
 }

@@ -12,6 +12,17 @@ type Fetcher interface {
 	FetchSha256(key string) ([]byte, error)
 }
 
+// Pusher is the interface for storing scraps, returning their SHA hashes.
+type Pusher interface {
+	PushScrap(data []byte) (key string, err error)
+}
+
+// A FetchPusher is both a Fetcher and a Pusher.
+type FetchPusher interface {
+	Fetcher
+	Pusher
+}
+
 // ByDirectory returns a Fetcher that looks in the given directory.
 func ByDirectory(fs fs.FS) Fetcher {
 	return &directoryFetcher{fs}
