@@ -233,7 +233,9 @@ func (c *context) match(argTy, bodyTy TypeRef, arg, body ast.Expr) {
 			return
 		}
 
-		c.bail(arg.Span(), "can only match on the _ identifier")
+		c.bind(name, argTy)
+		defer c.unbind()
+		c.ensure(arg, bodyTy, c.infer(body))
 
 	case *ast.Literal:
 		c.ensure(arg, argTy, literalTypeRef(arg.Kind))

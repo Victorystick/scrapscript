@@ -201,7 +201,36 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 		return nil, fmt.Errorf("cannot bytes/from-utf8-text on %T", val)
 	})
 
+	// Use the Y combinator to define recursive functions.
+	// (a -> b) -> a -> b
+	define("fix", reg.Func(aToB, aToB), func(val Value) (Value, error) {
+		fn := Callable(val)
+		if fn == nil {
+			return nil, fmt.Errorf("needed function, but got %T", val)
+		}
+		return ScriptFunc{
+			source: "fix " + val.String(),
+			fn:     fix(fn),
+		}, nil
+	})
+
 	return scope, builtIns
+}
+
+func fix(outer Func) Func {
+	return func(inner Value) (Value, error) {
+		// Note: This calls `fix` for every recursive call, which is not super efficient.
+		self := fix(outer)
+		fn, err := outer(ScriptFunc{"self", self})
+		if err != nil {
+			return nil, err
+		}
+		fn2 := Callable(fn)
+		if fn == nil {
+			return nil, fmt.Errorf("needed function, but got %T", fn)
+		}
+		return fn2(inner)
+	}
 }
 
 func roundFunc(round func(float64) float64) Func {

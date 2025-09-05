@@ -176,6 +176,18 @@ var exp2str = []struct{ source, result string }{
 
 	{`[ 4 + 2, 5 - 1, ]`, "[ 6, 4 ]"},
 	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four"`, `"four"`},
+
+	{`fix (fn -> a -> a) <| 4`, `4`},
+
+	// Generates a list of numbers from 0 to n inclusive.
+	{`fix (seq -> | 0 -> [0] | n -> seq (n - 1) +< n) 4`, `[ 0, 1, 2, 3, 4 ]`},
+
+	{`list/map fib (seq 10)
+	; seq = fix (seq -> | 0 -> [0] | n -> seq (n - 1) +< n)
+    ; fib = fix (fib ->
+        | 0 -> 0
+        | 1 -> 1
+        | n -> fib (n - 1) + fib (n - 2))`, `[ 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55 ]`},
 }
 
 func TestEvalString(t *testing.T) {

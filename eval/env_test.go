@@ -31,6 +31,13 @@ func TestInferBuiltin(t *testing.T) {
 
 		{`list/fold 0 (a -> b -> a + text/length b)`, `list text -> int`},
 		{`list/fold 0 (a -> b -> a + text/length b) ["hey", "beautiful"]`, `int`},
+
+		{`fix`, `($0 -> $1) -> $0 -> $1`},
+		{`fix (a -> a)`, `$3 -> $3`},
+
+		// TODO: These should be equivalent, from a type perspective.
+		{`| 0 -> [0] | n -> seq (n - 1) +< n ; seq = x -> [x]`, `int -> list int`},
+		{`fix (seq -> | 0 -> [0] | n -> seq (n - 1) +< n)`, `(int -> list int) -> int -> list int`},
 	}
 
 	for _, ex := range examples {
