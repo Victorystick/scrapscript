@@ -98,6 +98,16 @@ func TestInfer(t *testing.T) {
   #x
   #y
   #z`, `#a (#x #y #z) #b int #c byte`},
+
+		{`| n >+ ns -> ns`, `list $2 -> list $2`},
+		{`| ns +< n -> ns`, `list $2 -> list $2`},
+		{`| ns ++ [a, b] -> ns`, `list $2 -> list $2`},
+
+		{`| n >+ ns -> ns <| [1, 2, 3]`, `list int`},
+		{`| ns +< n -> ns <| [1, 2, 3]`, `list int`},
+		{`| ns ++ [2, 3] -> ns <| [1, 2, 3]`, `list int`},
+		{`| [1, 2] ++ ns -> ns <| [1, 2, 3]`, `list int`},
+		{`| ns ++ [2, last] -> ns +< last <| [1, 2, 3]`, `list int`},
 	}
 
 	for _, ex := range examples {

@@ -125,7 +125,12 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 		argTy := c.reg.Var()
 		bodyTy := c.reg.Var()
 		for _, opt := range x {
-			c.match(argTy, bodyTy, opt.Arg, opt.Body)
+			boundVars := c.match(argTy, opt.Arg)
+			c.ensure(opt.Body, bodyTy, c.infer(opt.Body))
+			// Unbind all bound variables.
+			for i := 0; i < boundVars; i++ {
+				c.unbind()
+			}
 		}
 		return c.reg.Func(argTy, bodyTy)
 
@@ -223,26 +228,57 @@ func (c *context) call(x, fn, arg ast.Expr) TypeRef {
 	return res
 }
 
-func (c *context) match(argTy, bodyTy TypeRef, arg, body ast.Expr) {
+func (c *context) match(argTy TypeRef, arg ast.Expr) int {
 	switch arg := arg.(type) {
 	case *ast.Ident:
 		name := c.source.GetString(arg.Pos)
 		// Ignore _.
 		if name == "_" {
-			c.ensure(arg, bodyTy, c.infer(body))
-			return
+			return 0
 		}
 
 		c.bind(name, argTy)
-		defer c.unbind()
-		c.ensure(arg, bodyTy, c.infer(body))
+		return 1
 
 	case *ast.Literal:
 		c.ensure(arg, argTy, literalTypeRef(arg.Kind))
-		c.ensure(arg, bodyTy, c.infer(body))
+		return 0
+
+	case *ast.BinaryExpr:
+		if arg.Op == token.PREPEND {
+			val := c.reg.Var()
+			valList := c.reg.List(val)
+			c.ensure(arg, argTy, valList)
+			return c.match(val, arg.Left) + c.match(valList, arg.Right)
+		}
+		if arg.Op == token.APPEND {
+			val := c.reg.Var()
+			valList := c.reg.List(val)
+			c.ensure(arg, argTy, valList)
+			return c.match(valList, arg.Left) + c.match(val, arg.Right)
+		}
+		if arg.Op == token.CONCAT {
+			val := c.reg.Var()
+			valList := c.reg.List(val)
+			c.ensure(arg, argTy, valList)
+			return c.match(valList, arg.Left) + c.match(valList, arg.Right)
+		}
+
+	case *ast.ListExpr:
+		val := c.reg.Var()
+		c.ensure(arg, c.reg.List(val), argTy)
+
+		bindings := 0
+		for _, v := range arg.Elements {
+			bindings += c.match(val, v)
+		}
+		return bindings
+
 	default:
 		c.bail(arg.Span(), fmt.Sprintf("cannot match on %T", arg))
 	}
+	// Unreachable.
+	return 0
 }
 
 func (c *context) where(x *ast.WhereExpr) TypeRef {

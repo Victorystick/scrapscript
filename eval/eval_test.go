@@ -73,6 +73,12 @@ var expressions = []struct {
 
 	{`"hi " ++ text/repeat 3 "a" ++ "ron"`, `"hi aaaron"`},
 	{`"yo" |> list/repeat 2 |> text/join " "`, `"yo yo"`},
+
+	{`| n >+ ns -> ns <| [1, 2, 3]`, `[ 2, 3 ]`},
+	{`| ns +< n -> ns <| [1, 2, 3]`, `[ 1, 2 ]`},
+	{`| ns ++ [2, 3] -> ns <| [1, 2, 3]`, `[ 1 ]`},
+	{`| [1, 2] ++ ns -> ns <| [1, 2, 3]`, `[ 3 ]`},
+	{`| ns ++ [2, last] -> ns +< last <| [1, 2, 3]`, `[ 1, 3 ]`},
 }
 
 func TestScrapItentity(t *testing.T) {

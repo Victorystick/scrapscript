@@ -21,13 +21,13 @@ func TestInferBuiltin(t *testing.T) {
 		{`list/length`, `list $0 -> int`},
 		{`list/map`, `($0 -> $1) -> list $0 -> list $1`},
 		{`list/map (a -> a + 1)`, `list int -> list int`},
-		// {`list/fold`, `($0 -> $1) -> list $0 -> list $1`},
-		// {`list/repeat`, `int -> list a -> text`},
+		{`list/fold`, `$0 -> ($0 -> $1 -> $0) -> list $1 -> $0`},
+		{`list/repeat`, `int -> $0 -> list $0`},
 
 		// text
 		{`text/length`, `text -> int`},
 		{`text/repeat`, `int -> text -> text`},
-		// {`text/join`, `text -> list text -> text`},
+		{`text/join`, `text -> list text -> text`},
 
 		{`list/fold 0 (a -> b -> a + text/length b)`, `list text -> int`},
 		{`list/fold 0 (a -> b -> a + text/length b) ["hey", "beautiful"]`, `int`},

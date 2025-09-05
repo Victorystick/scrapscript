@@ -134,10 +134,62 @@ func (m *matcher) match(x ast.Expr, val Value) {
 		}
 
 	case *ast.BinaryExpr:
+		if x.Op == token.PREPEND {
+			if list, ok := val.(List); ok && len(list.elements) > 0 {
+				// Match head.
+				m.match(x.Left, list.elements[0])
+				// Match tail.
+				m.match(x.Right, List{list.typ, list.elements[1:]})
+				return
+			}
+		}
+		if x.Op == token.APPEND {
+			if list, ok := val.(List); ok && len(list.elements) > 0 {
+				// Match head.
+				m.match(x.Left, List{list.typ, list.elements[:len(list.elements)-1]})
+				// Match tail.
+				m.match(x.Right, list.elements[0])
+				return
+			}
+		}
 		if x.Op == token.CONCAT {
+			if list, ok := val.(List); ok {
+				if sublist, ok := x.Left.(*ast.ListExpr); ok {
+					if len(sublist.Elements) > len(list.elements) {
+						m.err = ErrNoMatch
+						return
+					}
 
+					head, tail := split(list.elements, len(sublist.Elements))
+
+					for index, elem := range head {
+						m.match(sublist.Elements[index], elem)
+					}
+					m.match(x.Right, List{list.typ, tail})
+					return
+				}
+
+				if sublist, ok := x.Right.(*ast.ListExpr); ok {
+					if len(sublist.Elements) > len(list.elements) {
+						m.err = ErrNoMatch
+						return
+					}
+
+					head, tail := split(list.elements, len(list.elements)-len(sublist.Elements))
+
+					m.match(x.Left, List{list.typ, head})
+					for index, elem := range tail {
+						m.match(sublist.Elements[index], elem)
+					}
+					return
+				}
+			}
 		}
 	}
 
 	m.err = ErrNoMatch
+}
+
+func split(list []Value, n int) ([]Value, []Value) {
+	return list[:n], list[n:]
 }

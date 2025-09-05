@@ -2,6 +2,10 @@
 
 A exploration (read: very incomplete implementation) of [Scrapscript](https://scrapscript.org).
 
+## Installation
+
+With Go installed, run `go install github.com/Victorystick/scrapscript/cmd/scrap`.
+
 ## Overview
 
 The aim is to implement Scrapscript along with the `scrap` CLI as documented on https://scrapscript.org/guide.
