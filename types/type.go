@@ -361,9 +361,14 @@ func (c *Registry) Instantiate(target TypeRef) TypeRef {
 	}, false)
 }
 
-func (c *Registry) unify(a, b TypeRef) {
+func (c *Registry) unify(a, b TypeRef) TypeRef {
 	a = c.Resolve(a)
 	b = c.Resolve(b)
+
+	// Early out if they are already the same.
+	if a == b {
+		return a
+	}
 
 	tag, index := a.extract()
 	if tag == unboundTag {
@@ -377,12 +382,12 @@ func (c *Registry) unify(a, b TypeRef) {
 			}
 		})
 		c.vars[index] = b
-		return
+		return a
 	}
 
 	if b.IsVar() {
 		c.unify(b, a)
-		return
+		return a
 	}
 
 	bTag, bIndex := b.extract()
@@ -397,15 +402,49 @@ func (c *Registry) unify(a, b TypeRef) {
 		case listTag:
 			c.unify(c.GetList(a), c.GetList(b))
 		case recordTag:
-			c.unify(c.GetList(a), c.GetList(b))
+			return c.unifyRecords(c.records[index], c.records[bIndex])
 		case primitiveTag:
 			if index != bIndex {
 				panic("cannot unify '" + c.String(a) + "' with '" + c.String(b) + "'")
 			}
+		case enumTag:
+			return c.unifyEnums(c.enums[index], c.enums[bIndex])
+		default:
+			panic("cannot unify '" + c.String(a) + "' with '" + c.String(b) + "'")
 		}
+		return a
 	} else {
 		panic("cannot unify '" + c.String(a) + "' with '" + c.String(b) + "'")
 	}
+}
+
+func ignoreValues(_, _ TypeRef) bool {
+	return true
+}
+
+func (reg *Registry) unifyRecords(a, b MapRef) TypeRef {
+	// We can't unify records with different keys.
+	if !maps.EqualFunc(a, b, ignoreValues) {
+		panic("cannot unify '" + reg.String(reg.Record(a)) + "' with '" + reg.String(reg.Record(b)) + "'")
+	}
+	c := maps.Clone(a)
+	for k, v := range b {
+		c[k] = reg.unify(c[k], v)
+	}
+	return reg.Record(c)
+}
+
+// Merges two known-distinct maps.
+func (reg *Registry) unifyEnums(a, b MapRef) TypeRef {
+	c := maps.Clone(a)
+	for k, v := range b {
+		if ov, ok := c[k]; ok {
+			c[k] = reg.unify(ov, v)
+		} else {
+			c[k] = v
+		}
+	}
+	return reg.Enum(c)
 }
 
 // DebugString returns a string representation for TypeRef.

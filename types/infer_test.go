@@ -108,6 +108,13 @@ func TestInfer(t *testing.T) {
 		{`| ns ++ [2, 3] -> ns <| [1, 2, 3]`, `list int`},
 		{`| [1, 2] ++ ns -> ns <| [1, 2, 3]`, `list int`},
 		{`| ns ++ [2, last] -> ns +< last <| [1, 2, 3]`, `list int`},
+		// Is empty.
+		{`| [] -> #true | _ -> #false`, `list $2 -> #false #true`},
+		{`| a >+ _ -> #first a | _ -> #empty`, `list $2 -> #empty #first $2`},
+		// Unifies nested types.
+		{`| [] -> { empty = #true } | _ -> { empty = #false }`, `list $2 -> { empty : (#false #true) }`},
+		{`| 1 -> { list = [] } | _ -> { list = [ 1 ] }`, `int -> { list : list int }`},
+		{`| #true -> [1] | #false -> []`, `(#false #true) -> list int`},
 	}
 
 	for _, ex := range examples {
@@ -148,6 +155,12 @@ func TestInferFailure(t *testing.T) {
 		{`1 + 1.0`, `cannot unify 'int' with 'float'`},
 		// No imports.
 		{`$sha256~~`, `<internal error> missing infer import function`},
+		// Different return types.
+		{`| [] -> #box int | _ -> #box text`, `cannot unify 'int' with 'text'`},
+		// Different input types.
+		{`| #box n -> [ n + 1 ] | #box "o" -> []`, `cannot unify 'int' with 'text'`},
+		// Different fields.
+		{`| [] -> { a = 1 } | _ -> { b = 1 }`, `cannot unify '{ a : int }' with '{ b : int }'`},
 	}
 
 	for _, ex := range examples {

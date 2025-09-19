@@ -125,8 +125,8 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 		argTy := c.reg.Var()
 		bodyTy := c.reg.Var()
 		for _, opt := range x {
-			boundVars := c.match(argTy, opt.Arg)
-			c.ensure(opt.Body, bodyTy, c.infer(opt.Body))
+			boundVars := c.match(&argTy, opt.Arg)
+			bodyTy = c.ensure(opt.Body, bodyTy, c.infer(opt.Body))
 			// Unbind all bound variables.
 			for i := 0; i < boundVars; i++ {
 				c.unbind()
@@ -215,7 +215,7 @@ func (c *context) ensure(x ast.Expr, got, want TypeRef) TypeRef {
 			}
 		}()
 
-		c.reg.unify(got, want)
+		return c.reg.unify(got, want)
 	}
 	return want
 }
@@ -228,54 +228,67 @@ func (c *context) call(x, fn, arg ast.Expr) TypeRef {
 	return res
 }
 
-func (c *context) match(argTy TypeRef, arg ast.Expr) int {
-	switch arg := arg.(type) {
+// The expression type is passed by pointer so that we can update it.
+func (c *context) match(ty *TypeRef, expr ast.Expr) int {
+	switch expr := expr.(type) {
 	case *ast.Ident:
-		name := c.source.GetString(arg.Pos)
+		name := c.source.GetString(expr.Pos)
 		// Ignore _.
 		if name == "_" {
 			return 0
 		}
 
-		c.bind(name, argTy)
+		c.bind(name, *ty)
 		return 1
 
 	case *ast.Literal:
-		c.ensure(arg, argTy, literalTypeRef(arg.Kind))
+		c.ensure(expr, *ty, literalTypeRef(expr.Kind))
 		return 0
 
 	case *ast.BinaryExpr:
-		if arg.Op == token.PREPEND {
+		if expr.Op == token.PREPEND {
 			val := c.reg.Var()
 			valList := c.reg.List(val)
-			c.ensure(arg, argTy, valList)
-			return c.match(val, arg.Left) + c.match(valList, arg.Right)
+			c.ensure(expr, *ty, valList)
+			return c.match(&val, expr.Left) + c.match(&valList, expr.Right)
 		}
-		if arg.Op == token.APPEND {
+		if expr.Op == token.APPEND {
 			val := c.reg.Var()
 			valList := c.reg.List(val)
-			c.ensure(arg, argTy, valList)
-			return c.match(valList, arg.Left) + c.match(val, arg.Right)
+			c.ensure(expr, *ty, valList)
+			return c.match(&valList, expr.Left) + c.match(&val, expr.Right)
 		}
-		if arg.Op == token.CONCAT {
+		if expr.Op == token.CONCAT {
 			val := c.reg.Var()
 			valList := c.reg.List(val)
-			c.ensure(arg, argTy, valList)
-			return c.match(valList, arg.Left) + c.match(valList, arg.Right)
+			c.ensure(expr, *ty, valList)
+			return c.match(&valList, expr.Left) + c.match(&valList, expr.Right)
 		}
 
 	case *ast.ListExpr:
 		val := c.reg.Var()
-		c.ensure(arg, c.reg.List(val), argTy)
+		c.ensure(expr, c.reg.List(val), *ty)
 
 		bindings := 0
-		for _, v := range arg.Elements {
-			bindings += c.match(val, v)
+		for _, v := range expr.Elements {
+			bindings += c.match(&val, v)
 		}
 		return bindings
 
+	case *ast.VariantExpr:
+		bindings := 0
+		name := c.source.GetString(expr.Tag.Pos)
+		vRef := NeverRef
+		if expr.Typ != nil {
+			vRef = c.reg.Var()
+			bindings += c.match(&vRef, expr.Typ)
+		}
+		ref := c.reg.Enum(map[string]TypeRef{name: vRef})
+		*ty = c.ensure(expr, *ty, ref)
+		return bindings
+
 	default:
-		c.bail(arg.Span(), fmt.Sprintf("cannot match on %T", arg))
+		c.bail(expr.Span(), fmt.Sprintf("cannot match on %T", expr))
 	}
 	// Unreachable.
 	return 0
