@@ -5,17 +5,216 @@ import (
 	"github.com/Victorystick/scrapscript/token"
 )
 
-// A SourceExpr combines an expression with its source and tokens,
-// which are necessary to extract identifiers and literals from it,
-// as well as for error reporting.
+// Tok is the index of a token in a SourceExpr's Tokens.
+type Tok uint32
+
+// Node is the index of a node in a SourceExpr's node arrays.
+type Node uint32
+
+// None is the placeholder node 0, which stands in for a missing optional
+// child.
+const None Node = 0
+
+// Kind is the kind of a node. Each kind's comment says how it uses its main
+// token and its Lhs and Rhs data; a range Lhs..Rhs is a slice of Extra.
+type Kind uint8
+
+const (
+	Invalid   Kind = iota // only None
+	Ident                 // Main: the name.
+	Literal               // Main: the literal, whose token kind is its kind.
+	Binary                // Main: the operator. Lhs, Rhs: the operands.
+	Func                  // Main: '->'. Lhs: the parameter. Rhs: the body.
+	MatchFunc             // Lhs..Rhs: the arms, which are Func nodes.
+	Call                  // Lhs: the function. Rhs: the argument.
+	Variant               // Main: the tag after '#'. Lhs: the payload type, or None.
+	Enum                  // Lhs..Rhs: the Variant nodes.
+	Record                // Main: '{'. Lhs: the spread record, or None. Rhs: see Record.
+	Access                // Main: the key. Lhs: the record.
+	List                  // Main: '['. Lhs..Rhs: the elements, then the ']' token.
+	Where                 // Main: the bound name. Lhs: the body. Rhs: see Where.
+	Import                // Main: '$', followed by the algorithm and hash tokens.
+)
+
+var kindStrings = [...]string{
+	Invalid:   "Invalid",
+	Ident:     "Ident",
+	Literal:   "Literal",
+	Binary:    "Binary",
+	Func:      "Func",
+	MatchFunc: "MatchFunc",
+	Call:      "Call",
+	Variant:   "Variant",
+	Enum:      "Enum",
+	Record:    "Record",
+	Access:    "Access",
+	List:      "List",
+	Where:     "Where",
+	Import:    "Import",
+}
+
+func (k Kind) String() string {
+	if int(k) < len(kindStrings) {
+		return kindStrings[k]
+	}
+	return "Kind(?)"
+}
+
+// Data holds a node's two children or indices; see Kind for their meaning.
+type Data struct {
+	Lhs, Rhs uint32
+}
+
+// A SourceExpr is a parsed source: its text, tokens and expression tree.
+//
+// The tree is stored as parallel arrays indexed by Node. Nodes with more than
+// two children keep them in Extra, which holds node indices and, where a
+// Kind says so, token indices.
 type SourceExpr struct {
 	Source token.Source
 	Tokens scanner.Tokens
-	Expr   Expr
+
+	Kinds []Kind
+	Mains []Tok
+	Data  []Data
+	Extra []Node
+
+	// Expr is the root node.
+	Expr Node
 }
 
-// Tok is the index of a token in a SourceExpr's Tokens.
-type Tok uint32
+func (se *SourceExpr) Kind(n Node) Kind { return se.Kinds[n] }
+func (se *SourceExpr) Main(n Node) Tok  { return se.Mains[n] }
+
+func (se *SourceExpr) extra(d Data) []Node { return se.Extra[d.Lhs:d.Rhs] }
+
+// LiteralKind returns the token kind of a Literal.
+func (se *SourceExpr) LiteralKind(n Node) token.Token {
+	return se.Tokens.Kinds[se.Mains[n]]
+}
+
+// Binary returns a Binary node's operator and operands.
+func (se *SourceExpr) Binary(n Node) (op token.Token, left, right Node) {
+	d := se.Data[n]
+	return se.Tokens.Kinds[se.Mains[n]], Node(d.Lhs), Node(d.Rhs)
+}
+
+// Func returns a Func node's parameter and body.
+func (se *SourceExpr) Func(n Node) (arg, body Node) {
+	d := se.Data[n]
+	return Node(d.Lhs), Node(d.Rhs)
+}
+
+// Call returns a Call node's function and argument.
+func (se *SourceExpr) Call(n Node) (fn, arg Node) {
+	d := se.Data[n]
+	return Node(d.Lhs), Node(d.Rhs)
+}
+
+// Arms returns a MatchFunc node's arms, which are Func nodes.
+func (se *SourceExpr) Arms(n Node) []Node { return se.extra(se.Data[n]) }
+
+// Variants returns an Enum node's Variant nodes.
+func (se *SourceExpr) Variants(n Node) []Node { return se.extra(se.Data[n]) }
+
+// Variant returns a Variant node's tag and payload type, which may be None.
+func (se *SourceExpr) Variant(n Node) (tag Tok, typ Node) {
+	return se.Mains[n], Node(se.Data[n].Lhs)
+}
+
+// Fields are a record's fields: alternating key tokens and value nodes.
+type Fields []Node
+
+func (f Fields) Len() int         { return len(f) / 2 }
+func (f Fields) Key(i int) Tok    { return Tok(f[2*i]) }
+func (f Fields) Value(i int) Node { return f[2*i+1] }
+
+// Record returns a Record node's spread record, which may be None, and its
+// fields. Its Rhs indexes Extra at: the '}' token, the field count n, then
+// the n fields.
+func (se *SourceExpr) Record(n Node) (rest Node, fields Fields) {
+	d := se.Data[n]
+	count := uint32(se.Extra[d.Rhs+1])
+	start := d.Rhs + 2
+	return Node(d.Lhs), Fields(se.Extra[start : start+2*count])
+}
+
+// Access returns an Access node's record and key.
+func (se *SourceExpr) Access(n Node) (rec Node, key Tok) {
+	return Node(se.Data[n].Lhs), se.Mains[n]
+}
+
+// List returns a List node's elements.
+func (se *SourceExpr) List(n Node) []Node {
+	d := se.Data[n]
+	return se.Extra[d.Lhs : d.Rhs-1]
+}
+
+// Where returns a Where node's body, bound name, and its type annotation and
+// value, either of which may be None. Its Rhs indexes Extra at: the type, then
+// the value.
+func (se *SourceExpr) Where(n Node) (body Node, id Tok, typ, val Node) {
+	d := se.Data[n]
+	return Node(d.Lhs), se.Mains[n], se.Extra[d.Rhs], se.Extra[d.Rhs+1]
+}
+
+// Import returns an Import node's algorithm and hash tokens.
+func (se *SourceExpr) Import(n Node) (algo, hash Tok) {
+	return se.Mains[n] + 1, se.Mains[n] + 2
+}
+
+// First returns the index of n's first token.
+func (se *SourceExpr) First(n Node) Tok {
+	switch se.Kinds[n] {
+	case Binary, Func, Call, Where, Access:
+		return se.First(Node(se.Data[n].Lhs))
+	case MatchFunc:
+		arg, _ := se.Func(se.Arms(n)[0])
+		return se.First(arg)
+	case Enum:
+		return se.First(se.Variants(n)[0])
+	case Variant:
+		// The token before the tag is its '#'.
+		return se.Mains[n] - 1
+	}
+	return se.Mains[n]
+}
+
+// Last returns the index of n's last token.
+func (se *SourceExpr) Last(n Node) Tok {
+	switch se.Kinds[n] {
+	case Binary, Func, Call:
+		return se.Last(Node(se.Data[n].Rhs))
+	case MatchFunc:
+		arms := se.Arms(n)
+		_, body := se.Func(arms[len(arms)-1])
+		return se.Last(body)
+	case Enum:
+		vs := se.Variants(n)
+		return se.Last(vs[len(vs)-1])
+	case Variant:
+		if _, typ := se.Variant(n); typ != None {
+			return se.Last(typ)
+		}
+	case Record:
+		return Tok(se.Extra[se.Data[n].Rhs])
+	case List:
+		return Tok(se.Extra[se.Data[n].Rhs-1])
+	case Where:
+		_, id, typ, val := se.Where(n)
+		switch {
+		case val != None:
+			return se.Last(val)
+		case typ != None:
+			return se.Last(typ)
+		}
+		return id
+	case Import:
+		_, hash := se.Import(n)
+		return hash
+	}
+	return se.Mains[n]
+}
 
 // TokenSpan returns the span of token t.
 func (se *SourceExpr) TokenSpan(t Tok) token.Span {
@@ -31,8 +230,8 @@ func (se *SourceExpr) TokenText(t Tok) string {
 // last token.
 func (se *SourceExpr) Span(n Node) token.Span {
 	return token.Span{
-		Start: int(se.Tokens.Starts[n.First()]),
-		End:   se.Tokens.End(se.Source.Bytes(), int(n.Last())),
+		Start: int(se.Tokens.Starts[se.First(n)]),
+		End:   se.Tokens.End(se.Source.Bytes(), int(se.Last(n))),
 	}
 }
 
@@ -46,138 +245,7 @@ func (se *SourceExpr) Error(n Node, msg string) token.Error {
 	return se.Source.Error(se.Span(n), msg)
 }
 
-// A Node knows its first and last token; its span is derived from them.
-type Node interface {
-	First() Tok
-	Last() Tok
+// TokenError returns an error located at token t.
+func (se *SourceExpr) TokenError(t Tok, msg string) token.Error {
+	return se.Source.Error(se.TokenSpan(t), msg)
 }
-
-type Expr interface {
-	Node
-	expr()
-}
-
-type Ident struct {
-	Tok Tok
-}
-
-type Literal struct {
-	Tok  Tok
-	Kind token.Token
-}
-
-type BinaryExpr struct {
-	Left  Expr
-	Op    token.Token
-	Right Expr
-}
-
-type FuncExpr struct {
-	Arg  Expr
-	Body Expr
-}
-
-// A pattern-matched FuncExpr
-type MatchFuncExpr []*FuncExpr
-
-type CallExpr struct {
-	Fn  Expr
-	Arg Expr
-}
-
-type VariantExpr struct {
-	Tag Ident
-	Typ Expr
-}
-
-// A name-matched VariantExpr
-type EnumExpr []*VariantExpr
-
-type RecordExpr struct {
-	LBrace  Tok
-	RBrace  Tok
-	Entries map[string]Expr
-	Rest    Expr // May be nil
-}
-
-type AccessExpr struct {
-	Rec Expr
-	Key Ident
-}
-
-type ListExpr struct {
-	LBrack   Tok
-	RBrack   Tok
-	Elements []Expr
-}
-
-type WhereExpr struct {
-	Expr Expr
-	Id   Ident
-	Typ  Expr // Optional type annotation.
-	Val  Expr
-}
-
-type ImportExpr struct {
-	Dollar Tok
-	// Typically "sha256".
-	HashAlgo string
-	// Any literal, typically a byte-string.
-	Value Literal
-}
-
-func (b Ident) expr()         {}
-func (b Literal) expr()       {}
-func (b BinaryExpr) expr()    {}
-func (b FuncExpr) expr()      {}
-func (b MatchFuncExpr) expr() {}
-func (b CallExpr) expr()      {}
-func (b VariantExpr) expr()   {}
-func (b EnumExpr) expr()      {}
-func (b RecordExpr) expr()    {}
-func (b AccessExpr) expr()    {}
-func (b ListExpr) expr()      {}
-func (b WhereExpr) expr()     {}
-func (b ImportExpr) expr()    {}
-
-func (i *Ident) First() Tok        { return i.Tok }
-func (i *Ident) Last() Tok         { return i.Tok }
-func (i *Literal) First() Tok      { return i.Tok }
-func (i *Literal) Last() Tok       { return i.Tok }
-func (b *BinaryExpr) First() Tok   { return b.Left.First() }
-func (b *BinaryExpr) Last() Tok    { return b.Right.Last() }
-func (b *FuncExpr) First() Tok     { return b.Arg.First() }
-func (b *FuncExpr) Last() Tok      { return b.Body.Last() }
-func (b MatchFuncExpr) First() Tok { return b[0].Arg.First() }
-func (b MatchFuncExpr) Last() Tok  { return b[len(b)-1].Body.Last() }
-func (b *CallExpr) First() Tok     { return b.Fn.First() }
-func (b *CallExpr) Last() Tok      { return b.Arg.Last() }
-
-// The token before the tag is its '#'.
-func (b *VariantExpr) First() Tok { return b.Tag.Tok - 1 }
-func (b *VariantExpr) Last() Tok {
-	if b.Typ != nil {
-		return b.Typ.Last()
-	}
-	return b.Tag.Tok
-}
-func (b EnumExpr) First() Tok   { return b[0].First() }
-func (b EnumExpr) Last() Tok    { return b[len(b)-1].Last() }
-func (b RecordExpr) First() Tok { return b.LBrace }
-func (b RecordExpr) Last() Tok  { return b.RBrace }
-func (b AccessExpr) First() Tok { return b.Rec.First() }
-func (b AccessExpr) Last() Tok  { return b.Key.Tok }
-func (b ListExpr) First() Tok   { return b.LBrack }
-func (b ListExpr) Last() Tok    { return b.RBrack }
-func (b *WhereExpr) First() Tok { return b.Expr.First() }
-func (b *WhereExpr) Last() Tok {
-	switch {
-	case b.Val != nil:
-		return b.Val.Last()
-	case b.Typ != nil:
-		return b.Typ.Last()
-	}
-	return b.Id.Tok
-}
-func (b ImportExpr) First() Tok { return b.Dollar }
-func (b ImportExpr) Last() Tok  { return b.Value.Tok }

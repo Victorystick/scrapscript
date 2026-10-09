@@ -17,6 +17,16 @@ type parser struct {
 	i   int         // index of the current token
 	tok token.Token // kind of the current token
 
+	// The tree being built; see ast.SourceExpr.
+	kinds []ast.Kind
+	mains []ast.Tok
+	data  []ast.Data
+	extra []ast.Node
+
+	// scratch collects the children of the lists being parsed, innermost
+	// last, until each list is complete and moved to extra.
+	scratch []ast.Node
+
 	errors scanner.Errors
 }
 
@@ -40,6 +50,28 @@ func (p *parser) span() token.Span {
 // at returns the index of the current token.
 func (p *parser) at() ast.Tok {
 	return ast.Tok(p.i)
+}
+
+func (p *parser) add(kind ast.Kind, main ast.Tok, lhs, rhs uint32) ast.Node {
+	p.kinds = append(p.kinds, kind)
+	p.mains = append(p.mains, main)
+	p.data = append(p.data, ast.Data{Lhs: lhs, Rhs: rhs})
+	return ast.Node(len(p.kinds) - 1)
+}
+
+// addExtra appends ns to extra and returns the index of the first.
+func (p *parser) addExtra(ns ...ast.Node) uint32 {
+	i := len(p.extra)
+	p.extra = append(p.extra, ns...)
+	return uint32(i)
+}
+
+// flush moves the scratch children from start onwards to extra, and returns
+// their range there.
+func (p *parser) flush(start int) (lhs, rhs uint32) {
+	lhs = p.addExtra(p.scratch[start:]...)
+	p.scratch = p.scratch[:start]
+	return lhs, uint32(len(p.extra))
 }
 
 func (p *parser) expect(tok token.Token) {
@@ -89,6 +121,15 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	}
 	p.tok = p.tokens.Kinds[0]
 
+	// Reserve for about 3/4 node and 1/3 extra entry per token, so that the
+	// arrays rarely regrow.
+	n := len(p.tokens.Kinds)*3/4 + 1
+	p.kinds = make([]ast.Kind, 0, n)
+	p.mains = make([]ast.Tok, 0, n)
+	p.data = make([]ast.Data, 0, n)
+	p.extra = make([]ast.Node, 0, len(p.tokens.Kinds)/3)
+	p.add(ast.Invalid, 0, 0, 0) // ast.None
+
 	expr := p.parseExpr()
 	if debug && p.tok != token.EOF {
 		fmt.Fprintf(os.Stderr, "%#v\n", expr)
@@ -96,20 +137,26 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	}
 	p.expect(token.EOF)
 
-	se = ast.SourceExpr{Source: *p.source, Tokens: p.tokens, Expr: expr}
+	se = ast.SourceExpr{
+		Source: *p.source,
+		Tokens: p.tokens,
+		Kinds:  p.kinds,
+		Mains:  p.mains,
+		Data:   p.data,
+		Extra:  p.extra,
+		Expr:   expr,
+	}
 	return
 }
 
-func (p *parser) parseExpr() ast.Expr {
+func (p *parser) parseExpr() ast.Node {
 	if debug {
 		stack = append(stack, "parseExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
 	expr := p.parsePlainExpr(token.BasePrec)
-	i := 0
 
 	for p.tok == token.WHERE {
-		i += 1
 		p.next()
 		expr = p.parseWhereExpr(expr)
 	}
@@ -117,20 +164,17 @@ func (p *parser) parseExpr() ast.Expr {
 	return expr
 }
 
-func (p *parser) parsePlainExpr(prec int) ast.Expr {
+func (p *parser) parsePlainExpr(prec int) ast.Node {
 	if debug {
 		stack = append(stack, "parsePlainExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
-	left := p.parseBinaryExpr(nil, prec)
+	left := p.parseBinaryExpr(ast.None, prec)
 
 	for {
 		if p.tok == token.LPAREN {
 			right := p.parseParenExpr()
-			left = &ast.CallExpr{
-				Fn:  left,
-				Arg: right,
-			}
+			left = p.add(ast.Call, 0, uint32(left), uint32(right))
 		} else if p.tok.IsOperator() && p.tok.Precedence() > prec {
 			op := p.tok
 			val := p.parseBinaryExpr(left, op.Precedence())
@@ -140,10 +184,8 @@ func (p *parser) parsePlainExpr(prec int) ast.Expr {
 			}
 			left = val
 		} else if p.tok != token.EOF && (!p.tok.IsOperator() || startsSimpleValue(p.tok)) && token.CallPrec > prec {
-			left = &ast.CallExpr{
-				Fn:  left,
-				Arg: p.parseBinaryExpr(nil, token.CallPrec-1),
-			}
+			right := p.parseBinaryExpr(ast.None, token.CallPrec-1)
+			left = p.add(ast.Call, 0, uint32(left), uint32(right))
 		} else {
 			break
 		}
@@ -152,7 +194,7 @@ func (p *parser) parsePlainExpr(prec int) ast.Expr {
 	return left
 }
 
-func (p *parser) parseParenExpr() ast.Expr {
+func (p *parser) parseParenExpr() ast.Node {
 	p.next()
 	x := p.parseExpr()
 	p.expect(token.RPAREN)
@@ -160,21 +202,16 @@ func (p *parser) parseParenExpr() ast.Expr {
 	return x
 }
 
-func (p *parser) ident() *ast.Ident {
+// identTok consumes an identifier and returns its token.
+func (p *parser) identTok() ast.Tok {
 	p.expect(token.IDENT)
-	ident := &ast.Ident{
-		Tok: p.at(),
-	}
+	t := p.at()
 	p.next()
-	return ident
+	return t
 }
 
-// Parses an identifier as a string.
-func (p *parser) name() string {
-	p.expect(token.IDENT)
-	name := p.source.GetString(p.span())
-	p.next()
-	return name
+func (p *parser) ident() ast.Node {
+	return p.add(ast.Ident, p.identTok(), 0, 0)
 }
 
 // Returns true if `tok` is the start of a simple value.
@@ -190,7 +227,7 @@ func startsSimpleValue(tok token.Token) bool {
 	return false
 }
 
-func (p *parser) parseUnaryExpr() ast.Expr {
+func (p *parser) parseUnaryExpr() ast.Node {
 	if debug {
 		stack = append(stack, "parseUnaryExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
@@ -200,10 +237,7 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 		return p.ident()
 	case token.INT, token.FLOAT, token.HOLE,
 		token.TEXT, token.BYTE, token.BYTES:
-		lit := &ast.Literal{
-			Tok:  p.at(),
-			Kind: p.tok,
-		}
+		lit := p.add(ast.Literal, p.at(), 0, 0)
 		p.next()
 		return lit
 
@@ -227,15 +261,15 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 	}
 
 	p.unexpected()
-	return nil
+	return ast.None
 }
 
-func (p *parser) parseBinaryExpr(x ast.Expr, prec int) ast.Expr {
+func (p *parser) parseBinaryExpr(x ast.Node, prec int) ast.Node {
 	if debug {
 		stack = append(stack, "parseBinaryExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
-	if x == nil {
+	if x == ast.None {
 		x = p.parseUnaryExpr()
 	}
 
@@ -249,79 +283,68 @@ func (p *parser) parseBinaryExpr(x ast.Expr, prec int) ast.Expr {
 		token.RPIPE, token.LPIPE,
 		token.RCOMP, token.LCOMP,
 		token.CONCAT, token.APPEND, token.PREPEND:
-		op := p.tok
+		op, at := p.tok, p.at()
 		p.next()
-		return &ast.BinaryExpr{
-			Left:  x,
-			Op:    op,
-			Right: p.parsePlainExpr(op.Precedence()),
-		}
+		right := p.parsePlainExpr(op.Precedence())
+		return p.add(ast.Binary, at, uint32(x), uint32(right))
 
 	case token.PICK:
-		op := p.tok
+		at := p.at()
 		p.next()
-		return &ast.BinaryExpr{
-			Left:  x,
-			Op:    op,
-			Right: p.ident(),
-		}
+		return p.add(ast.Binary, at, uint32(x), uint32(p.ident()))
 
 	case token.ACCESS:
 		p.next()
-		return &ast.AccessExpr{
-			Rec: x,
-			Key: *p.ident(),
-		}
+		return p.add(ast.Access, p.identTok(), uint32(x), 0)
 
 	case token.ARROW:
+		at := p.at()
 		p.next()
-		return p.parseFuncExpr(x)
+		return p.parseFuncExpr(x, at)
 	}
 
 	return x
 }
 
-func (p *parser) parseWhereExpr(x ast.Expr) ast.Expr {
+func (p *parser) parseWhereExpr(x ast.Node) ast.Node {
 	if debug {
 		stack = append(stack, "parseWhereExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
 
-	where := &ast.WhereExpr{
-		Expr: x,
-		Id:   *p.ident(),
-	}
+	id := p.identTok()
+	typ, val := ast.None, ast.None
 
 	if p.tok == token.DEFINE {
 		p.next()
 
-		where.Typ = p.parseType()
+		typ = p.parseType()
 	}
 
 	if p.tok == token.ASSIGN {
 		p.next()
-		where.Val = p.parsePlainExpr(token.BasePrec)
+		val = p.parsePlainExpr(token.BasePrec)
 	}
 
-	return where
+	return p.add(ast.Where, id, uint32(x), p.addExtra(typ, val))
 }
 
-func (p *parser) parseType() ast.Expr {
+func (p *parser) parseType() ast.Node {
 	if p.tok == token.OPTION {
 		return p.parseEnum()
 	}
 
 	// TODO: only allow a subset of expressions here.
-	return p.parseBinaryExpr(nil, token.BasePrec)
+	return p.parseBinaryExpr(ast.None, token.BasePrec)
 }
 
-func (p *parser) parseRecord() *ast.RecordExpr {
+func (p *parser) parseRecord() ast.Node {
 	p.expect(token.LBRACE)
 	start := p.at()
 	p.next()
 
 	// Do we start with a spread?
-	var rest ast.Expr
+	rest := ast.None
 	if p.tok == token.SPREAD {
 		p.next()
 		rest = p.parseExpr()
@@ -329,7 +352,8 @@ func (p *parser) parseRecord() *ast.RecordExpr {
 		p.next()
 	}
 
-	entries := make(map[string]ast.Expr)
+	// Fields are collected as key token, value node pairs.
+	top := len(p.scratch)
 	for {
 		if p.tok == token.RBRACE {
 			break
@@ -340,14 +364,14 @@ func (p *parser) parseRecord() *ast.RecordExpr {
 			p.bail("A spread must be first in a record.")
 		}
 
-		name := p.name()
+		key := p.identTok()
 
 		p.expect(token.ASSIGN)
 		p.next()
 
 		x := p.parseExpr()
 
-		entries[name] = x
+		p.scratch = append(p.scratch, ast.Node(key), x)
 
 		if p.tok != token.COMMA {
 			break
@@ -359,15 +383,13 @@ func (p *parser) parseRecord() *ast.RecordExpr {
 	end := p.at()
 	p.next()
 
-	return &ast.RecordExpr{
-		LBrace:  start,
-		RBrace:  end,
-		Entries: entries,
-		Rest:    rest,
-	}
+	count := (len(p.scratch) - top) / 2
+	info := p.addExtra(ast.Node(end), ast.Node(count))
+	p.flush(top)
+	return p.add(ast.Record, start, uint32(rest), info)
 }
 
-func (p *parser) parseList() *ast.ListExpr {
+func (p *parser) parseList() ast.Node {
 	if debug {
 		stack = append(stack, "parseList")
 		defer func() { stack = stack[:len(stack)-1] }()
@@ -376,12 +398,12 @@ func (p *parser) parseList() *ast.ListExpr {
 	start := p.at()
 	p.next()
 
-	es := make([]ast.Expr, 0)
+	top := len(p.scratch)
 	for {
 		if p.tok == token.RBRACK {
 			break
 		}
-		es = append(es, p.parseExpr())
+		p.scratch = append(p.scratch, p.parseExpr())
 
 		if p.tok != token.COMMA {
 			break
@@ -390,67 +412,67 @@ func (p *parser) parseList() *ast.ListExpr {
 	}
 
 	p.expect(token.RBRACK)
-	end := p.at()
+	p.scratch = append(p.scratch, ast.Node(p.at()))
 	p.next()
 
-	return &ast.ListExpr{LBrack: start, RBrack: end, Elements: es}
+	lhs, rhs := p.flush(top)
+	return p.add(ast.List, start, lhs, rhs)
 }
 
-func (p *parser) parseFuncExpr(x ast.Expr) *ast.FuncExpr {
+// parseFuncExpr parses the body of a function whose parameter x and arrow
+// have been parsed.
+func (p *parser) parseFuncExpr(x ast.Node, arrow ast.Tok) ast.Node {
 	if debug {
 		stack = append(stack, "parseFuncExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
-	return &ast.FuncExpr{
-		Arg:  x,
-		Body: p.parsePlainExpr(token.ARROW.Precedence()),
-	}
+	body := p.parsePlainExpr(token.ARROW.Precedence())
+	return p.add(ast.Func, arrow, uint32(x), uint32(body))
 }
 
-func (p *parser) parseMatchFuncExpr() ast.Expr {
+func (p *parser) parseMatchFuncExpr() ast.Node {
 	if debug {
 		stack = append(stack, "parseMatchFuncExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
-	// We guess there'll be about 2 branches.
-	exprs := make(ast.MatchFuncExpr, 0, 2)
+	top := len(p.scratch)
 
 	for p.tok == token.PIPE {
 		p.next()
 
-		var arg ast.Expr
+		var arg ast.Node
 		if p.tok == token.OPTION {
 			arg = p.parseVariant()
 		} else {
-			arg = p.parseBinaryExpr(nil, token.ARROW.Precedence()+1)
+			arg = p.parseBinaryExpr(ast.None, token.ARROW.Precedence()+1)
 		}
 		p.expect(token.ARROW)
+		arrow := p.at()
 		p.next()
 
-		expr := p.parseFuncExpr(arg)
-		exprs = append(exprs, expr)
+		p.scratch = append(p.scratch, p.parseFuncExpr(arg, arrow))
 	}
 
-	return exprs
+	lhs, rhs := p.flush(top)
+	return p.add(ast.MatchFunc, 0, lhs, rhs)
 }
 
-func (p *parser) parseEnum() ast.EnumExpr {
+func (p *parser) parseEnum() ast.Node {
 	if debug {
 		stack = append(stack, "parseEnum")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
-	// We guess there'll be about 2 branches.
-	exprs := make(ast.EnumExpr, 0, 2)
+	top := len(p.scratch)
 
 	for p.tok == token.OPTION {
-		variant := p.parseVariant()
-		exprs = append(exprs, variant)
+		p.scratch = append(p.scratch, p.parseVariant())
 	}
 
-	return exprs
+	lhs, rhs := p.flush(top)
+	return p.add(ast.Enum, 0, lhs, rhs)
 }
 
-func (p *parser) parseVariant() *ast.VariantExpr {
+func (p *parser) parseVariant() ast.Node {
 	if debug {
 		stack = append(stack, "parseVariant")
 		defer func() { stack = stack[:len(stack)-1] }()
@@ -461,26 +483,21 @@ func (p *parser) parseVariant() *ast.VariantExpr {
 	if p.tok != token.INT {
 		p.expect(token.IDENT)
 	}
-	id := ast.Ident{
-		Tok: p.at(),
-	}
+	tag := p.at()
 	p.next()
 
-	var typ ast.Expr
+	typ := ast.None
 
 	if !p.tok.IsOperator() && p.tok != token.EOF {
-		typ = p.parseBinaryExpr(nil, token.ARROW.Precedence()+1)
+		typ = p.parseBinaryExpr(ast.None, token.ARROW.Precedence()+1)
 	} else if p.tok == token.LPAREN {
 		typ = p.parseParenExpr()
 	}
 
-	return &ast.VariantExpr{
-		Tag: id,
-		Typ: typ,
-	}
+	return p.add(ast.Variant, tag, uint32(typ), 0)
 }
 
-func (p *parser) parseImport() *ast.ImportExpr {
+func (p *parser) parseImport() ast.Node {
 	start := p.at()
 
 	// Eat $.
@@ -488,19 +505,10 @@ func (p *parser) parseImport() *ast.ImportExpr {
 
 	// Hash algo.
 	p.expect(token.IDENT)
-	algo := p.source.GetString(p.span())
 	p.next()
 
 	p.expect(token.BYTES)
-	bytes := ast.Literal{
-		Tok:  p.at(),
-		Kind: p.tok,
-	}
 	p.next()
 
-	return &ast.ImportExpr{
-		Dollar:   start,
-		HashAlgo: algo,
-		Value:    bytes,
-	}
+	return p.add(ast.Import, start, 0, 0)
 }

@@ -25,8 +25,8 @@ func TestParseExpr(t *testing.T) {
 		}
 		x := se.Expr
 		// sanity check
-		if _, ok := x.(*ast.BinaryExpr); !ok {
-			t.Errorf("ParseExpr(%q): got %T, want *ast.BinaryExpr", src, x)
+		if k := se.Kind(x); k != ast.Binary {
+			t.Errorf("ParseExpr(%q): got %s, want Binary", src, k)
 			var buf bytes.Buffer
 			printer.Fprint(&buf, &se, x)
 			t.Error(buf.String())
@@ -46,8 +46,10 @@ func TestParseExpr(t *testing.T) {
 	}
 	x := se.Expr
 	// sanity check
-	if b, ok := x.(*ast.BinaryExpr); !ok || b.Op != token.ADD {
-		t.Errorf("ParseExpr(%q): got %T, want *ast.BinaryExpr", src, x)
+	if k := se.Kind(x); k != ast.Binary {
+		t.Errorf("ParseExpr(%q): got %s, want Binary", src, k)
+	} else if op, _, _ := se.Binary(x); op != token.ADD {
+		t.Errorf("ParseExpr(%q): got %s, want ADD", src, op)
 		writeExpr(t, &se, x)
 	}
 
@@ -63,8 +65,8 @@ func TestParseExpr(t *testing.T) {
 		}
 		x := se.Expr
 		// sanity check
-		if _, ok := x.(*ast.CallExpr); !ok {
-			t.Errorf("ParseExpr(%q): got %T, want *ast.CallExpr", src, x)
+		if k := se.Kind(x); k != ast.Call {
+			t.Errorf("ParseExpr(%q): got %s, want Call", src, k)
 			var buf bytes.Buffer
 			printer.Fprint(&buf, &se, x)
 			t.Error(buf.String())
@@ -78,8 +80,8 @@ func TestParseExpr(t *testing.T) {
 	}
 	x = se.Expr
 	// sanity check
-	if _, ok := x.(*ast.WhereExpr); !ok {
-		t.Errorf("ParseExpr(%q): got %T, want *ast.LetExpr", src, x)
+	if k := se.Kind(x); k != ast.Where {
+		t.Errorf("ParseExpr(%q): got %s, want Where", src, k)
 		writeExpr(t, &se, x)
 	}
 }
@@ -186,8 +188,8 @@ func TestImports(t *testing.T) {
 			writeParseError(t, src, err)
 		}
 
-		if _, ok := se.Expr.(*ast.ImportExpr); !ok {
-			t.Errorf("Expected an ImportExpr, got %T", se.Expr)
+		if k := se.Kind(se.Expr); k != ast.Import {
+			t.Errorf("Expected an Import, got %s", k)
 		}
 	}
 }
@@ -217,7 +219,7 @@ func writeParseError(t *testing.T, src string, err error) {
 	}
 }
 
-func writeExpr(t *testing.T, se *ast.SourceExpr, expr ast.Expr) {
+func writeExpr(t *testing.T, se *ast.SourceExpr, expr ast.Node) {
 	var buf bytes.Buffer
 	printer.Fprint(&buf, se, expr)
 	t.Error(buf.String())

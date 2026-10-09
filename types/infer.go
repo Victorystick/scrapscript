@@ -89,44 +89,44 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, inferImport InferI
 	return ref, err
 }
 
-type InferFunc func(expr ast.Expr) TypeRef
+type InferFunc func(expr ast.Node) TypeRef
 
-func (c *context) infer(expr ast.Expr) TypeRef {
-	switch x := expr.(type) {
-	case *ast.Literal:
-		return literalTypeRef(x.Kind)
-	case *ast.Ident:
-		name := c.src.TokenText(x.Tok)
+func (c *context) infer(x ast.Node) TypeRef {
+	switch c.src.Kind(x) {
+	case ast.Literal:
+		return literalTypeRef(c.src.LiteralKind(x))
+	case ast.Ident:
+		name := c.src.TokenText(c.src.Main(x))
 		ref := c.scope.Lookup(name)
 		if ref == NeverRef {
 			c.bail(x, "unbound variable: "+name)
 		}
 		return c.reg.Instantiate(ref)
-	case *ast.WhereExpr:
+	case ast.Where:
 		return c.where(x)
-	case *ast.ListExpr:
+	case ast.List:
 		return c.list(x)
-	case *ast.RecordExpr:
+	case ast.Record:
 		return c.record(x)
-	case ast.EnumExpr:
-		return c.enum(x, func(expr ast.Expr) TypeRef {
-			return c.infer(expr)
-		})
+	case ast.Enum:
+		return c.enum(x, c.infer)
 
-	case *ast.FuncExpr:
+	case ast.Func:
+		arg, body := c.src.Func(x)
 		// Not sure how to juggle vars vs unbound. :/
 		binder := c.reg.Var()
-		c.bind(c.src.NodeText(x.Arg), binder)
+		c.bind(c.src.NodeText(arg), binder)
 		defer c.unbind()
-		ret := c.infer(x.Body)
+		ret := c.infer(body)
 		return c.reg.Func(binder, ret)
 
-	case ast.MatchFuncExpr:
+	case ast.MatchFunc:
 		argTy := c.reg.Var()
 		bodyTy := c.reg.Var()
-		for _, opt := range x {
-			boundVars := c.match(&argTy, opt.Arg)
-			bodyTy = c.ensure(opt.Body, bodyTy, c.infer(opt.Body))
+		for _, opt := range c.src.Arms(x) {
+			arg, body := c.src.Func(opt)
+			boundVars := c.match(&argTy, arg)
+			bodyTy = c.ensure(body, bodyTy, c.infer(body))
 			// Unbind all bound variables.
 			for i := 0; i < boundVars; i++ {
 				c.unbind()
@@ -134,26 +134,30 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 		}
 		return c.reg.Func(argTy, bodyTy)
 
-	case *ast.CallExpr:
+	case ast.Call:
+		fn, arg := c.src.Call(x)
 		// Special-case pick with a value.
-		if pick, ok := x.Fn.(*ast.BinaryExpr); ok && pick.Op == token.PICK {
-			return c.pick(pick, x.Arg)
+		if c.src.Kind(fn) == ast.Binary {
+			if op, _, _ := c.src.Binary(fn); op == token.PICK {
+				return c.pick(fn, arg)
+			}
 		}
 
-		return c.call(x, x.Fn, x.Arg)
+		return c.call(x, fn, arg)
 
-	case *ast.BinaryExpr:
-		if x.Op == token.PICK {
-			return c.pick(x, nil)
+	case ast.Binary:
+		op, l, r := c.src.Binary(x)
+		if op == token.PICK {
+			return c.pick(x, ast.None)
 		}
 
-		left := c.infer(x.Left)
-		right := c.infer(x.Right)
-		switch x.Op {
+		left := c.infer(l)
+		right := c.infer(r)
+		switch op {
 		case token.PREPEND:
-			return c.pend(x.Left, x.Right, left, right)
+			return c.pend(l, r, left, right)
 		case token.APPEND:
-			return c.pend(x.Right, x.Left, right, left)
+			return c.pend(r, l, right, left)
 		case token.CONCAT:
 			if left == TextRef || right == TextRef {
 				c.ensure(x, left, right)
@@ -174,35 +178,36 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 				return FloatRef
 			}
 			// Assume int, like ML does.
-			c.ensure(x.Left, left, IntRef)
-			return c.ensure(x.Right, right, IntRef)
+			c.ensure(l, left, IntRef)
+			return c.ensure(r, right, IntRef)
 
 		// Pipes are essentially just calls.
 		case token.LPIPE:
-			return c.call(x, x.Left, x.Right)
+			return c.call(x, l, r)
 		case token.RPIPE:
-			return c.call(x, x.Right, x.Left)
+			return c.call(x, r, l)
 		}
-		panic(fmt.Sprintf("can't infer binary expression %s", x.Op.String()))
-	case *ast.ImportExpr:
+		panic(fmt.Sprintf("can't infer binary expression %s", op.String()))
+	case ast.Import:
 		if c.inferImport == nil {
 			c.bail(x, "<internal error> missing infer import function")
 		}
-		bs, err := hex.DecodeString(c.src.Source.GetString(c.src.TokenSpan(x.Value.Tok).TrimStart(2)))
+		algo, hash := c.src.Import(x)
+		bs, err := hex.DecodeString(c.src.Source.GetString(c.src.TokenSpan(hash).TrimStart(2)))
 		if err != nil {
-			c.bail(x, fmt.Sprintf("bad import hash %#v", x))
+			c.bail(x, fmt.Sprintf("bad import hash %s", c.src.NodeText(x)))
 		}
-		ref, err := c.inferImport(x.HashAlgo, bs)
+		ref, err := c.inferImport(c.src.TokenText(algo), bs)
 		if err != nil {
 			c.bail(x, err.Error())
 		}
 		return ref
 	}
 
-	panic(fmt.Sprintf("can't infer node %T", expr))
+	panic(fmt.Sprintf("can't infer node %s", c.src.Kind(x)))
 }
 
-func (c *context) ensure(x ast.Expr, got, want TypeRef) TypeRef {
+func (c *context) ensure(x ast.Node, got, want TypeRef) TypeRef {
 	if got != want {
 		// Really? Must make this API better.
 		defer func() {
@@ -220,7 +225,7 @@ func (c *context) ensure(x ast.Expr, got, want TypeRef) TypeRef {
 	return want
 }
 
-func (c *context) call(x, fn, arg ast.Expr) TypeRef {
+func (c *context) call(x, fn, arg ast.Node) TypeRef {
 	res := c.reg.Var()
 	fnTy := c.infer(fn)
 	argTy := c.infer(arg)
@@ -229,10 +234,10 @@ func (c *context) call(x, fn, arg ast.Expr) TypeRef {
 }
 
 // The expression type is passed by pointer so that we can update it.
-func (c *context) match(ty *TypeRef, expr ast.Expr) int {
-	switch expr := expr.(type) {
-	case *ast.Ident:
-		name := c.src.TokenText(expr.Tok)
+func (c *context) match(ty *TypeRef, x ast.Node) int {
+	switch c.src.Kind(x) {
+	case ast.Ident:
+		name := c.src.TokenText(c.src.Main(x))
 		// Ignore _.
 		if name == "_" {
 			return 0
@@ -241,109 +246,111 @@ func (c *context) match(ty *TypeRef, expr ast.Expr) int {
 		c.bind(name, *ty)
 		return 1
 
-	case *ast.Literal:
-		c.ensure(expr, *ty, literalTypeRef(expr.Kind))
+	case ast.Literal:
+		c.ensure(x, *ty, literalTypeRef(c.src.LiteralKind(x)))
 		return 0
 
-	case *ast.BinaryExpr:
-		if expr.Op == token.PREPEND {
+	case ast.Binary:
+		op, l, r := c.src.Binary(x)
+		if op == token.PREPEND {
 			val := c.reg.Var()
 			valList := c.reg.List(val)
-			c.ensure(expr, *ty, valList)
-			return c.match(&val, expr.Left) + c.match(&valList, expr.Right)
+			c.ensure(x, *ty, valList)
+			return c.match(&val, l) + c.match(&valList, r)
 		}
-		if expr.Op == token.APPEND {
+		if op == token.APPEND {
 			val := c.reg.Var()
 			valList := c.reg.List(val)
-			c.ensure(expr, *ty, valList)
-			return c.match(&valList, expr.Left) + c.match(&val, expr.Right)
+			c.ensure(x, *ty, valList)
+			return c.match(&valList, l) + c.match(&val, r)
 		}
-		if expr.Op == token.CONCAT {
+		if op == token.CONCAT {
 			val := c.reg.Var()
 			valList := c.reg.List(val)
-			c.ensure(expr, *ty, valList)
-			return c.match(&valList, expr.Left) + c.match(&valList, expr.Right)
+			c.ensure(x, *ty, valList)
+			return c.match(&valList, l) + c.match(&valList, r)
 		}
 
-	case *ast.ListExpr:
+	case ast.List:
 		val := c.reg.Var()
-		c.ensure(expr, c.reg.List(val), *ty)
+		c.ensure(x, c.reg.List(val), *ty)
 
 		bindings := 0
-		for _, v := range expr.Elements {
+		for _, v := range c.src.List(x) {
 			bindings += c.match(&val, v)
 		}
 		return bindings
 
-	case *ast.VariantExpr:
+	case ast.Variant:
 		bindings := 0
-		name := c.src.TokenText(expr.Tag.Tok)
+		tag, typ := c.src.Variant(x)
+		name := c.src.TokenText(tag)
 		vRef := NeverRef
-		if expr.Typ != nil {
+		if typ != ast.None {
 			vRef = c.reg.Var()
-			bindings += c.match(&vRef, expr.Typ)
+			bindings += c.match(&vRef, typ)
 		}
 		ref := c.reg.Enum(map[string]TypeRef{name: vRef})
-		*ty = c.ensure(expr, *ty, ref)
+		*ty = c.ensure(x, *ty, ref)
 		return bindings
 
 	default:
-		c.bail(expr, fmt.Sprintf("cannot match on %T", expr))
+		c.bail(x, fmt.Sprintf("cannot match on %s", c.src.Kind(x)))
 	}
 	// Unreachable.
 	return 0
 }
 
-func (c *context) where(x *ast.WhereExpr) TypeRef {
-	name := c.src.TokenText(x.Id.Tok)
+func (c *context) where(x ast.Node) TypeRef {
+	body, id, typ, val := c.src.Where(x)
+	name := c.src.TokenText(id)
 
 	// This where is type-only; semantics TBD?
-	if x.Val == nil {
-		c.bind(name, c.reg.generalize(c.typ(x.Typ)))
+	if val == ast.None {
+		c.bind(name, c.reg.generalize(c.typ(typ)))
 		defer c.unbind()
-		return c.infer(x.Expr)
+		return c.infer(body)
 	}
 
-	tyVal := c.infer(x.Val)
+	tyVal := c.infer(val)
 
 	// If there's an annotation, make sure it matches the inferred type.
-	if x.Typ != nil {
-		c.ensure(x.Typ, tyVal, c.typ(x.Typ))
+	if typ != ast.None {
+		c.ensure(typ, tyVal, c.typ(typ))
 	}
 
 	c.bind(name, c.reg.generalize(tyVal))
 	defer c.unbind()
-	return c.infer(x.Expr)
+	return c.infer(body)
 }
 
-func (c *context) typ(x ast.Expr) TypeRef {
-	switch x := x.(type) {
-	case *ast.Ident:
-		name := c.src.TokenText(x.Tok)
+func (c *context) typ(x ast.Node) TypeRef {
+	switch c.src.Kind(x) {
+	case ast.Ident:
+		name := c.src.TokenText(c.src.Main(x))
 		ref := c.scope.Lookup(name)
 		if ref == NeverRef {
 			c.bail(x, fmt.Sprintf("unknown type %s", name))
 		}
 		return ref
-	case *ast.FuncExpr:
+	case ast.Func:
+		arg, body := c.src.Func(x)
 		return c.reg.Func(
-			c.typ(x.Arg),
-			c.typ(x.Body),
+			c.typ(arg),
+			c.typ(body),
 		)
-	case ast.EnumExpr:
-		return c.enum(x, func(expr ast.Expr) TypeRef {
-			return c.typ(expr)
-		})
+	case ast.Enum:
+		return c.enum(x, c.typ)
 	}
 
-	c.bail(x, fmt.Sprintf("cannot infer type of %T", x))
+	c.bail(x, fmt.Sprintf("cannot infer type of %s", c.src.Kind(x)))
 	return NeverRef
 }
 
-func (c *context) list(x *ast.ListExpr) TypeRef {
+func (c *context) list(x ast.Node) TypeRef {
 	res := NeverRef
 
-	for _, v := range x.Elements {
+	for _, v := range c.src.List(x) {
 		typ := c.infer(v)
 
 		if res == NeverRef {
@@ -360,15 +367,18 @@ func (c *context) list(x *ast.ListExpr) TypeRef {
 	return c.reg.List(res)
 }
 
-func (c *context) record(x *ast.RecordExpr) TypeRef {
+func (c *context) record(x ast.Node) TypeRef {
+	rest, fields := c.src.Record(x)
+
 	// If there is a rest/spread, our type is equal to that.
-	if x.Rest != nil {
-		rest := c.infer(x.Rest)
-		rec := c.reg.GetRecord(rest)
+	if rest != ast.None {
+		restTy := c.infer(rest)
+		rec := c.reg.GetRecord(restTy)
 		if rec == nil {
-			c.bail(x.Rest, fmt.Sprintf("cannot spread from non-record type %s", c.reg.String(rest)))
+			c.bail(rest, fmt.Sprintf("cannot spread from non-record type %s", c.reg.String(restTy)))
 		}
-		for k, v := range x.Entries {
+		for i := range fields.Len() {
+			k, v := c.src.TokenText(fields.Key(i)), fields.Value(i)
 			expected, ok := rec[k]
 			if !ok {
 				c.bail(v, fmt.Sprintf("cannot set %s not in the base record", k))
@@ -379,41 +389,43 @@ func (c *context) record(x *ast.RecordExpr) TypeRef {
 				c.bail(v, fmt.Sprintf("type of %s must be %s, not %s", k, c.reg.String(expected), c.reg.String(actual)))
 			}
 		}
-		return rest
+		return restTy
 	}
 
-	ref := make(MapRef, len(x.Entries))
-	for k, v := range x.Entries {
-		ref[k] = c.infer(v)
+	ref := make(MapRef, fields.Len())
+	for i := range fields.Len() {
+		ref[c.src.TokenText(fields.Key(i))] = c.infer(fields.Value(i))
 	}
 	return c.reg.Record(ref)
 }
 
-func (c *context) enum(x ast.EnumExpr, rec InferFunc) TypeRef {
-	ref := make(MapRef, len(x))
-	for _, v := range x {
-		name := c.src.TokenText(v.Tag.Tok)
+func (c *context) enum(x ast.Node, rec InferFunc) TypeRef {
+	variants := c.src.Variants(x)
+	ref := make(MapRef, len(variants))
+	for _, v := range variants {
+		tag, typ := c.src.Variant(v)
 		vRef := NeverRef
-		if v.Typ != nil {
-			vRef = rec(v.Typ)
+		if typ != ast.None {
+			vRef = rec(typ)
 		}
-		ref[name] = vRef
+		ref[c.src.TokenText(tag)] = vRef
 	}
 	return c.reg.Enum(ref)
 }
 
-func (c *context) pick(x *ast.BinaryExpr, val ast.Expr) TypeRef {
-	ref := c.infer(x.Left)
+func (c *context) pick(x ast.Node, val ast.Node) TypeRef {
+	_, l, r := c.src.Binary(x)
+	ref := c.infer(l)
 	enum := c.reg.GetEnum(ref)
 	if enum == nil {
-		c.bail(x.Left, fmt.Sprintf("%s isn't an enum", c.reg.String(ref)))
+		c.bail(l, fmt.Sprintf("%s isn't an enum", c.reg.String(ref)))
 	}
 
-	if id, ok := x.Right.(*ast.Ident); ok {
-		tag := c.src.NodeText(id)
+	if c.src.Kind(r) == ast.Ident {
+		tag := c.src.NodeText(r)
 		typ, ok := enum[tag]
 		if !ok {
-			c.bail(id,
+			c.bail(r,
 				fmt.Sprintf("#%s isn't a valid option for enum %s",
 					tag, c.reg.String(ref)))
 		}
@@ -421,7 +433,7 @@ func (c *context) pick(x *ast.BinaryExpr, val ast.Expr) TypeRef {
 		// We expect no value.
 		if typ == NeverRef {
 			// But there was one.
-			if val != nil {
+			if val != ast.None {
 				c.bail(val, fmt.Sprintf("#%s doesn't take any value", tag))
 			}
 		} else {
@@ -456,7 +468,7 @@ func literalTypeRef(tok token.Token) TypeRef {
 }
 
 // Either pre-pend or ap-pend.
-func (c *context) pend(singleX, listX ast.Expr, single, list TypeRef) TypeRef {
+func (c *context) pend(singleX, listX ast.Node, single, list TypeRef) TypeRef {
 	// Special-case bytes.
 	if single == ByteRef || list == BytesRef {
 		c.ensure(singleX, single, ByteRef)

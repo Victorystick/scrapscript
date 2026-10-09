@@ -47,8 +47,8 @@ func (b Binding) Get(name string) Value {
 	return nil
 }
 
-func (c *context) ident(x *ast.Ident) (Value, error) {
-	name := c.name(x)
+func (c *context) ident(x ast.Node) (Value, error) {
+	name := c.name(c.src.Main(x))
 
 	// Traverse the context stack.
 	context := c
@@ -63,8 +63,8 @@ func (c *context) ident(x *ast.Ident) (Value, error) {
 	return nil, c.error(x, fmt.Sprintf("unknown variable %s", name))
 }
 
-func (c *context) name(id *ast.Ident) string {
-	return c.src.TokenText(id.Tok)
+func (c *context) name(t ast.Tok) string {
+	return c.src.TokenText(t)
 }
 
 func (c *context) sub(vars Vars) *context {
@@ -75,6 +75,10 @@ func (c *context) error(n ast.Node, msg string) error {
 	return c.src.Error(n, msg)
 }
 
+func (c *context) tokenError(t ast.Tok, msg string) error {
+	return c.src.TokenError(t, msg)
+}
+
 // Eval evaluates a SourceExpr in the context of a set of variables.
 func Eval(se ast.SourceExpr, reg *types.Registry, vars Vars, evalImport EvalImport) (Value, error) {
 	ctx := &context{&se, reg, vars, evalImport, nil}
@@ -83,60 +87,63 @@ func Eval(se ast.SourceExpr, reg *types.Registry, vars Vars, evalImport EvalImpo
 }
 
 func (c *context) eval(x ast.Node) (Value, error) {
-	switch x := x.(type) {
-	case *ast.Literal:
+	switch c.src.Kind(x) {
+	case ast.Literal:
 		return Literal(c.src, x)
-	case *ast.Ident:
+	case ast.Ident:
 		return c.ident(x)
-	case *ast.BinaryExpr:
+	case ast.Binary:
 		return c.binary(x)
-	case *ast.CallExpr:
-		return c.call(x)
-	case *ast.WhereExpr:
+	case ast.Call:
+		fn, arg := c.src.Call(x)
+		return c.call(fn, arg)
+	case ast.Where:
 		return c.where(x)
-	case ast.EnumExpr:
+	case ast.Enum:
 		return c.enum(x)
-	case *ast.RecordExpr:
+	case ast.Record:
 		return c.recordExpr(x)
-	case *ast.ListExpr:
+	case ast.List:
 		return c.listExpr(x)
-	case *ast.FuncExpr:
+	case ast.Func:
 		return c.createFunc(x)
-	case ast.MatchFuncExpr:
+	case ast.MatchFunc:
 		return c.createMatchFunc(x)
-	case *ast.AccessExpr:
+	case ast.Access:
 		return c.access(x)
-	case *ast.ImportExpr:
-		bs, err := hex.DecodeString(c.src.Source.GetString(c.src.TokenSpan(x.Value.Tok).TrimStart(2)))
+	case ast.Import:
+		algo, hash := c.src.Import(x)
+		bs, err := hex.DecodeString(c.src.Source.GetString(c.src.TokenSpan(hash).TrimStart(2)))
 		if err != nil {
-			return nil, c.error(x, fmt.Sprintf("bad import hash %#v", x))
+			return nil, c.error(x, fmt.Sprintf("bad import hash %s", c.src.NodeText(x)))
 		}
-		return c.evalImport(x.HashAlgo, bs)
+		return c.evalImport(c.name(algo), bs)
 	}
 
-	return nil, c.error(x, fmt.Sprintf("unhandled node %#v", x))
+	return nil, c.error(x, fmt.Sprintf("unhandled node %s", c.src.Kind(x)))
 }
 
-func Literal(src *ast.SourceExpr, x *ast.Literal) (Value, error) {
-	switch x.Kind {
+func Literal(src *ast.SourceExpr, x ast.Node) (Value, error) {
+	t := src.Main(x)
+	switch kind := src.LiteralKind(x); kind {
 	case token.HOLE:
 		return Hole{}, nil
 	case token.INT:
-		i, err := strconv.Atoi(src.TokenText(x.Tok))
+		i, err := strconv.Atoi(src.TokenText(t))
 		if err != nil {
 			return nil, err
 		}
 		return Int(i), nil
 	case token.FLOAT:
-		f, err := strconv.ParseFloat(src.TokenText(x.Tok), 64)
+		f, err := strconv.ParseFloat(src.TokenText(t), 64)
 		if err != nil {
 			return nil, err
 		}
 		return Float(f), nil
 	case token.TEXT:
-		return Text(src.Source.GetString(src.TokenSpan(x.Tok).TrimBoth())), nil
+		return Text(src.Source.GetString(src.TokenSpan(t).TrimBoth())), nil
 	case token.BYTES:
-		str := src.Source.GetString(src.TokenSpan(x.Tok).TrimStart(2))
+		str := src.Source.GetString(src.TokenSpan(t).TrimStart(2))
 		dst := make([]byte, base64.StdEncoding.DecodedLen(len(str)))
 		n, err := base64.StdEncoding.Decode(dst, []byte(str))
 		if err != nil {
@@ -144,14 +151,14 @@ func Literal(src *ast.SourceExpr, x *ast.Literal) (Value, error) {
 		}
 		return Bytes(dst[:n]), nil
 	case token.BYTE:
-		val, err := strconv.ParseUint(src.Source.GetString(src.TokenSpan(x.Tok).TrimStart(1)), 16, 8)
+		val, err := strconv.ParseUint(src.Source.GetString(src.TokenSpan(t).TrimStart(1)), 16, 8)
 		if err != nil {
 			return nil, err
 		}
 		return Byte(byte(val)), nil
+	default:
+		return nil, src.Error(x, fmt.Sprintf("unhandled literal kind %s", kind))
 	}
-
-	return nil, src.Error(x, fmt.Sprintf("unhandled literal kind %s", x.Kind))
 }
 
 func binop[T ~int | ~float64](t token.Token, a, b T) (T, error) {
@@ -167,39 +174,40 @@ func binop[T ~int | ~float64](t token.Token, a, b T) (T, error) {
 	return 0, fmt.Errorf("unhandled binop %s", t)
 }
 
-func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
-	switch x.Op {
+func (c *context) binary(x ast.Node) (Value, error) {
+	op, left, right := c.src.Binary(x)
+	switch op {
 	case token.ADD, token.SUB, token.MUL:
-		l, err := c.eval(x.Left)
+		l, err := c.eval(left)
 		if err != nil {
 			return nil, err
 		}
 		if lf, ok := l.(Float); ok {
-			rf, err := c.float(x.Right)
+			rf, err := c.float(right)
 			if err != nil {
 				return nil, err
 			}
-			return binop(x.Op, lf, rf)
+			return binop(op, lf, rf)
 		}
 		if lf, ok := l.(Int); ok {
-			rf, err := c.int(x.Right)
+			rf, err := c.int(right)
 			if err != nil {
 				return nil, err
 			}
-			return binop(x.Op, lf, rf)
+			return binop(op, lf, rf)
 		}
 		return nil, c.error(x,
 			fmt.Sprintf("cannot perform addition on %s",
 				c.reg.String(l.Type())))
 
 	case token.APPEND:
-		l, err := c.eval(x.Left)
+		l, err := c.eval(left)
 		if err != nil {
 			return nil, err
 		}
 
 		if bs, ok := l.(Bytes); ok {
-			r, err := c.byte(x.Right)
+			r, err := c.byte(right)
 			if err != nil {
 				return nil, err
 			}
@@ -207,7 +215,7 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 		}
 
 		if ls, ok := l.(List); ok {
-			r, err := c.eval(x.Right)
+			r, err := c.eval(right)
 			if err != nil {
 				return nil, err
 			}
@@ -217,7 +225,7 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 				if typ == types.NeverRef {
 					typ = r.Type()
 				} else {
-					return nil, c.error(x.Right,
+					return nil, c.error(right,
 						fmt.Sprintf("cannot append %s to %s",
 							c.reg.String(r.Type()), c.reg.String(ls.typ)))
 				}
@@ -228,13 +236,13 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 		return nil, fmt.Errorf("cannot append to non-list %s", reflect.TypeOf(l))
 
 	case token.PREPEND:
-		r, err := c.eval(x.Right)
+		r, err := c.eval(right)
 		if err != nil {
 			return nil, err
 		}
 
 		if bs, ok := r.(Bytes); ok {
-			l, err := c.byte(x.Left)
+			l, err := c.byte(left)
 			if err != nil {
 				return nil, err
 			}
@@ -242,7 +250,7 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 		}
 
 		if ls, ok := r.(List); ok {
-			l, err := c.eval(x.Left)
+			l, err := c.eval(left)
 			if err != nil {
 				return nil, err
 			}
@@ -252,7 +260,7 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 				if typ == types.NeverRef {
 					typ = r.Type()
 				} else {
-					return nil, c.error(x.Left,
+					return nil, c.error(left,
 						fmt.Sprintf("cannot prepend %s to %s",
 							c.reg.String(l.Type()), c.reg.String(ls.typ)))
 				}
@@ -263,13 +271,13 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 		return nil, fmt.Errorf("cannot prepend to non-list %s", reflect.TypeOf(r))
 
 	case token.CONCAT:
-		l, err := c.eval(x.Left)
+		l, err := c.eval(left)
 		if err != nil {
 			return nil, err
 		}
 
 		if bs, ok := l.(Bytes); ok {
-			r, err := c.bytes(x.Right)
+			r, err := c.bytes(right)
 			if err != nil {
 				return nil, err
 			}
@@ -277,7 +285,7 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 		}
 
 		if ls, ok := l.(List); ok {
-			r, err := c.list(x.Right)
+			r, err := c.list(right)
 			if err != nil {
 				return nil, err
 			}
@@ -288,14 +296,14 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 				if c.reg.GetList(typ) == types.NeverRef {
 					typ = r.typ
 				} else if c.reg.GetList(r.typ) != types.NeverRef {
-					return nil, c.error(x.Left, fmt.Sprintf("cannot concat %s to %s", c.reg.String(ls.typ), c.reg.String(r.typ)))
+					return nil, c.error(left, fmt.Sprintf("cannot concat %s to %s", c.reg.String(ls.typ), c.reg.String(r.typ)))
 				}
 			}
 			return List{typ, append(ls.elements, r.elements...)}, nil
 		}
 
 		if tx, ok := l.(Text); ok {
-			r, err := c.text(x.Right)
+			r, err := c.text(right)
 			if err != nil {
 				return nil, err
 			}
@@ -304,52 +312,43 @@ func (c *context) binary(x *ast.BinaryExpr) (Value, error) {
 
 		return nil, fmt.Errorf("cannot append to non-list %s", reflect.TypeOf(l))
 
+	// Pipes are calls.
 	case token.RPIPE:
-		// Construct a call.
-		call := ast.CallExpr{
-			Fn:  x.Right,
-			Arg: x.Left,
-		}
-		return c.call(&call)
+		return c.call(right, left)
 	case token.LPIPE:
-		// Construct a call.
-		call := ast.CallExpr{
-			Fn:  x.Left,
-			Arg: x.Right,
-		}
-		return c.call(&call)
+		return c.call(left, right)
 
 	case token.RCOMP: // a >> b
-		return c.compose(x.Left, x.Right)
+		return c.compose(left, right)
 	case token.LCOMP: // a << b
-		return c.compose(x.Right, x.Left)
+		return c.compose(right, left)
 
 	case token.PICK:
-		return c.pick(x, nil)
+		return c.pick(x, ast.None)
 	}
 
-	return nil, c.error(x, fmt.Sprintf("unhandled %s operator", x.Op))
+	return nil, c.error(x, fmt.Sprintf("unhandled %s operator", op))
 }
 
-func (c *context) call(x *ast.CallExpr) (Value, error) {
-	if bin, ok := x.Fn.(*ast.BinaryExpr); ok {
-		if bin.Op == token.PICK {
-			return c.pick(bin, x.Arg)
+func (c *context) call(fnX, argX ast.Node) (Value, error) {
+	if c.src.Kind(fnX) == ast.Binary {
+		if op, _, _ := c.src.Binary(fnX); op == token.PICK {
+			return c.pick(fnX, argX)
 		}
 	}
 
-	fn, err := c.fn(x.Fn)
+	fn, err := c.fn(fnX)
 	if err != nil {
 		return nil, err
 	}
-	arg, err := c.eval(x.Arg)
+	arg, err := c.eval(argX)
 	if err != nil {
 		return nil, err
 	}
 	return fn(arg)
 }
 
-func (c *context) compose(first, second ast.Expr) (Value, error) {
+func (c *context) compose(first, second ast.Node) (Value, error) {
 	a, err := c.fn(first)
 	if err != nil {
 		return nil, err
@@ -370,17 +369,19 @@ func (c *context) compose(first, second ast.Expr) (Value, error) {
 	}, nil
 }
 
-func (c *context) enum(typ ast.EnumExpr) (Type, error) {
-	enum := make(types.MapRef, len(typ))
-	for _, v := range typ {
-		tag := c.name(&v.Tag)
+func (c *context) enum(x ast.Node) (Type, error) {
+	variants := c.src.Variants(x)
+	enum := make(types.MapRef, len(variants))
+	for _, v := range variants {
+		tagTok, typ := c.src.Variant(v)
+		tag := c.name(tagTok)
 		if _, ok := enum[tag]; ok {
-			return Type(types.NeverRef), c.error(&v.Tag, fmt.Sprintf("cannot define tag #%s more than once", tag))
+			return Type(types.NeverRef), c.tokenError(tagTok, fmt.Sprintf("cannot define tag #%s more than once", tag))
 		}
 
 		ref := types.NeverRef
-		if v.Typ != nil {
-			val, err := c.typeRef(v.Typ)
+		if typ != ast.None {
+			val, err := c.typeRef(typ)
 			if err != nil {
 				return Type(types.NeverRef), err
 			}
@@ -392,9 +393,9 @@ func (c *context) enum(typ ast.EnumExpr) (Type, error) {
 }
 
 // typeRef returns the TypeRef of the type expression it is called with.
-func (c *context) typeRef(x ast.Expr) (ref types.TypeRef, err error) {
-	switch x := x.(type) {
-	case *ast.Ident:
+func (c *context) typeRef(x ast.Node) (ref types.TypeRef, err error) {
+	switch c.src.Kind(x) {
+	case ast.Ident:
 		var val Value
 		val, err = c.ident(x)
 		if err != nil {
@@ -407,31 +408,32 @@ func (c *context) typeRef(x ast.Expr) (ref types.TypeRef, err error) {
 		ref = types.TypeRef(t)
 		return
 
-	case *ast.FuncExpr:
+	case ast.Func:
+		arg, body := c.src.Func(x)
 		var argRef, bodyRef types.TypeRef
-		argRef, err = c.typeRef(x.Arg)
+		argRef, err = c.typeRef(arg)
 		if err != nil {
 			return
 		}
-		bodyRef, err = c.typeRef(x.Body)
+		bodyRef, err = c.typeRef(body)
 		if err != nil {
 			return
 		}
 		ref = c.reg.Func(argRef, bodyRef)
 		return
 
-	case ast.EnumExpr:
+	case ast.Enum:
 		mapRef := make(types.MapRef)
-		for _, v := range x {
-			key := c.name(&v.Tag)
+		for _, v := range c.src.Variants(x) {
+			tag, typ := c.src.Variant(v)
 			value := types.NeverRef
-			if v.Typ != nil {
-				value, err = c.typeRef(v.Typ)
+			if typ != ast.None {
+				value, err = c.typeRef(typ)
 				if err != nil {
 					return
 				}
 			}
-			mapRef[key] = value
+			mapRef[c.name(tag)] = value
 		}
 		ref = c.reg.Enum(mapRef)
 		return
@@ -442,15 +444,18 @@ func (c *context) typeRef(x ast.Expr) (ref types.TypeRef, err error) {
 	return
 }
 
-func (c *context) recordExpr(x *ast.RecordExpr) (r Record, err error) {
-	// New record.
-	if x.Rest == nil {
-		ref := make(types.MapRef, len(x.Entries))
-		values := make(map[string]Value, len(x.Entries))
+func (c *context) recordExpr(x ast.Node) (r Record, err error) {
+	rest, fields := c.src.Record(x)
 
-		for tag, x := range x.Entries {
+	// New record.
+	if rest == ast.None {
+		ref := make(types.MapRef, fields.Len())
+		values := make(map[string]Value, fields.Len())
+
+		for i := range fields.Len() {
+			tag := c.name(fields.Key(i))
 			var val Value
-			val, err = c.eval(x)
+			val, err = c.eval(fields.Value(i))
 			if err != nil {
 				return
 			}
@@ -464,14 +469,15 @@ func (c *context) recordExpr(x *ast.RecordExpr) (r Record, err error) {
 
 	// Record based on another.
 	var other Record
-	other, err = c.record(x.Rest)
+	other, err = c.record(rest)
 	if err != nil {
 		return
 	}
 	ref := c.reg.GetRecord(other.typ)
 	values := maps.Clone(other.values)
 
-	for tag, x := range x.Entries {
+	for i := range fields.Len() {
+		tag, x := c.name(fields.Key(i)), fields.Value(i)
 		var val Value
 		val, err = c.eval(x)
 		if err != nil {
@@ -497,24 +503,26 @@ func (c *context) recordExpr(x *ast.RecordExpr) (r Record, err error) {
 	return Record{other.typ, values}, nil
 }
 
-func (c *context) access(x *ast.AccessExpr) (Value, error) {
-	r, err := c.record(x.Rec)
+func (c *context) access(x ast.Node) (Value, error) {
+	recX, keyTok := c.src.Access(x)
+	r, err := c.record(recX)
 	if err != nil {
 		return nil, err
 	}
-	key := c.name(&x.Key)
+	key := c.name(keyTok)
 	val, ok := r.values[key]
 	if !ok {
-		return nil, c.error(&x.Key,
+		return nil, c.tokenError(keyTok,
 			fmt.Sprintf("record %s has no key %s", r, key))
 	}
 	return val, nil
 }
 
-func (c *context) listExpr(x *ast.ListExpr) (ls List, err error) {
-	elements := make([]Value, len(x.Elements))
+func (c *context) listExpr(x ast.Node) (ls List, err error) {
+	elems := c.src.List(x)
+	elements := make([]Value, len(elems))
 	typ := types.NeverRef
-	for i, x := range x.Elements {
+	for i, x := range elems {
 		var val Value
 		val, err = c.eval(x)
 		if err != nil {
@@ -534,28 +542,29 @@ func (c *context) listExpr(x *ast.ListExpr) (ls List, err error) {
 	return List{c.reg.List(typ), elements}, nil
 }
 
-func (c *context) pick(pick *ast.BinaryExpr, x ast.Expr) (Value, error) {
-	ref, err := c.typeRef(pick.Left)
+// pick evaluates `typ::tag`, applied to x unless it is None.
+func (c *context) pick(pick ast.Node, x ast.Node) (Value, error) {
+	_, left, right := c.src.Binary(pick)
+	ref, err := c.typeRef(left)
 	if err != nil {
 		return nil, err
 	}
 	// This is always the case for a pick expression. Let's update the ast/parser.
-	id, ok := pick.Right.(*ast.Ident)
-	if !ok {
-		return nil, c.error(pick.Right, fmt.Sprintf("cannot pick using non-identifier %#v", pick))
+	if c.src.Kind(right) != ast.Ident {
+		return nil, c.error(right, fmt.Sprintf("cannot pick using non-identifier %s", c.src.NodeText(right)))
 	}
-	tag := c.name(id)
+	tag := c.name(c.src.Main(right))
 	enum := c.reg.GetEnum(ref)
 	if tagTyp, ok := enum[tag]; ok {
 		if tagTyp == types.NeverRef {
-			if x == nil {
+			if x == ast.None {
 				return Variant{ref, tag, nil}, nil
 			} else {
 				return nil, c.error(x, fmt.Sprintf("#%s does not take a value", tag))
 			}
 		} else {
-			if x == nil {
-				return nil, c.error(pick.Right, fmt.Sprintf("#%s requires a value of type %s", tag, c.reg.String(tagTyp)))
+			if x == ast.None {
+				return nil, c.error(right, fmt.Sprintf("#%s requires a value of type %s", tag, c.reg.String(tagTyp)))
 			} else {
 				val, err := c.eval(x)
 				if err != nil {
@@ -570,55 +579,57 @@ func (c *context) pick(pick *ast.BinaryExpr, x ast.Expr) (Value, error) {
 	return nil, c.error(pick, fmt.Sprintf("#%s isn't one of the valid tags: #%s", tag, tags))
 }
 
-func (c *context) createFunc(x *ast.FuncExpr) (ScriptFunc, error) {
-	id, ok := x.Arg.(*ast.Ident)
-	if !ok {
-		return ScriptFunc{}, c.error(x.Arg, "function parameter must be an identifier")
+func (c *context) createFunc(x ast.Node) (ScriptFunc, error) {
+	arg, body := c.src.Func(x)
+	if c.src.Kind(arg) != ast.Ident {
+		return ScriptFunc{}, c.error(arg, "function parameter must be an identifier")
 	}
-	name := c.name(id)
+	name := c.name(c.src.Main(arg))
 	return ScriptFunc{
 		source: c.src.NodeText(x),
 		fn: func(value Value) (Value, error) {
-			return c.sub(Variables{name: value}).eval(x.Body)
+			return c.sub(Variables{name: value}).eval(body)
 		},
 	}, nil
 }
 
-func (c *context) createMatchFunc(x ast.MatchFuncExpr) (ScriptFunc, error) {
+func (c *context) createMatchFunc(x ast.Node) (ScriptFunc, error) {
 	source := c.src.NodeText(x)
 	return ScriptFunc{
 		source: source,
 		fn: func(a Value) (Value, error) {
-			for _, alt := range x {
-				matches, err := Match(c.src, c.reg, alt.Arg, a)
+			for _, alt := range c.src.Arms(x) {
+				arg, body := c.src.Func(alt)
+				matches, err := Match(c.src, c.reg, arg, a)
 				if err != nil {
 					if err == ErrNoMatch {
 						continue
 					}
 					return nil, err
 				}
-				return c.sub(matches).eval(alt.Body)
+				return c.sub(matches).eval(body)
 			}
 			return nil, fmt.Errorf("%s had no alternative for %s", source, a)
 		},
 	}, nil
 }
 
-func (c *context) where(x *ast.WhereExpr) (Value, error) {
-	name := c.name(&x.Id)
+func (c *context) where(x ast.Node) (Value, error) {
+	body, id, typ, val := c.src.Where(x)
+	name := c.name(id)
 
 	// This where is type-only; semantics TBD?
-	expr := x.Val
-	if expr == nil {
-		expr = x.Typ
+	expr := val
+	if expr == ast.None {
+		expr = typ
 	}
 
-	val, err := c.eval(expr)
+	v, err := c.eval(expr)
 	if err != nil {
 		return nil, err
 	}
 
-	return c.sub(Binding{name, val}).eval(x.Expr)
+	return c.sub(Binding{name, v}).eval(body)
 }
 
 // Evaluates a value, requiring a certain type.

@@ -45,51 +45,53 @@ func (w *writer) space() error {
 }
 
 // Fprint prints expr, which is se.Expr or one of its descendants.
-func Fprint(w io.Writer, se *ast.SourceExpr, expr ast.Expr) error {
+func Fprint(w io.Writer, se *ast.SourceExpr, expr ast.Node) error {
 	wr := writer{w: w, se: se}
 	return wr.print(expr)
 }
 
-func (w *writer) print(expr ast.Expr) error {
+func (w *writer) print(x ast.Node) error {
 	if w.parens {
 		w.string("(")
 		defer w.string(")")
 	}
 
-	switch e := expr.(type) {
-	case *ast.Ident:
-		return w.token(e.Tok)
-	case *ast.Literal:
-		return w.token(e.Tok)
+	se := w.se
+	switch se.Kind(x) {
+	case ast.Ident, ast.Literal:
+		return w.token(se.Main(x))
 
-	case *ast.BinaryExpr:
-		err := w.print(e.Left)
+	case ast.Binary:
+		op, left, right := se.Binary(x)
+		err := w.print(left)
 		if err != nil {
 			return err
 		}
 		w.space()
-		w.string(e.Op.Op())
+		w.string(op.Op())
 		w.space()
-		return w.print(e.Right)
+		return w.print(right)
 
-	case *ast.FuncExpr:
-		err := w.print(e.Arg)
+	case ast.Func:
+		arg, body := se.Func(x)
+		err := w.print(arg)
 		if err != nil {
 			return err
 		}
 		w.string(" -> ")
-		return w.print(e.Body)
+		return w.print(body)
 
-	case *ast.CallExpr:
-		err := w.print(e.Fn)
+	case ast.Call:
+		fn, arg := se.Call(x)
+		err := w.print(fn)
 		if err != nil {
 			return err
 		}
 		w.space()
-		return w.print(e.Arg)
+		return w.print(arg)
 
-	case ast.MatchFuncExpr:
-		for _, fn := range e {
+	case ast.MatchFunc:
+		for _, fn := range se.Arms(x) {
 			w.newline()
 			w.string("| ")
 			err := w.print(fn)
@@ -99,28 +101,29 @@ func (w *writer) print(expr ast.Expr) error {
 		}
 		return nil
 
-	case *ast.WhereExpr:
+	case ast.Where:
+		body, id, _, val := se.Where(x)
 		// w.indent += 1
-		err := w.print(e.Expr)
+		err := w.print(body)
 		if err != nil {
 			return err
 		}
 		w.newline()
 		w.string(token.WHERE.Op())
 		w.string(" ")
-		err = w.token(e.Id.Tok)
+		err = w.token(id)
 		if err != nil {
 			return err
 		}
 		w.string(" =")
-		if _, ok := e.Val.(ast.MatchFuncExpr); ok {
+		if se.Kind(val) == ast.MatchFunc {
 			w.indent()
 			defer w.dedent()
 		} else {
 			w.string(" ")
 		}
-		return w.print(e.Val)
+		return w.print(val)
 	}
 
-	return fmt.Errorf("unhandled AST node: %#v", expr)
+	return fmt.Errorf("unhandled AST node: %s", se.Kind(x))
 }
