@@ -20,6 +20,7 @@ var expressions = []struct {
 	// Where
 	{`200 + (x ; x = 150)`, `350`},
 	{`a + b + c ; a = 1 ; b = 2 ; c = 3`, `6`},
+	{"-- doc\na + b -- sum\n; a = 1\n---- separator\n; b = 2 --\n", `3`},
 	// Binary ops
 	{`1 + 2`, `3`},
 	{`1 + 3 * 3`, `10`},

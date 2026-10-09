@@ -195,6 +195,12 @@ func TestScanErrors(t *testing.T) {
 		{"\"abc\nd", []token.Token{token.TEXT, token.IDENT}, []ErrCode{ErrUnterminatedText}},
 		{`~zz`, []token.Token{token.BAD, token.IDENT}, []ErrCode{ErrExpectedHex}},
 		{`~~abc`, []token.Token{token.BAD}, []ErrCode{ErrBase64Padding}},
+		// Comments are skipped, up to the end of their line.
+		{"a -- b\nc", []token.Token{token.IDENT, token.IDENT}, nil},
+		{"-- a\n--- doc\n----\n--\n\"--\" --", []token.Token{token.TEXT}, nil},
+		{"a - - b", []token.Token{token.IDENT, token.SUB, token.SUB, token.IDENT}, nil},
+		{"--é\na", []token.Token{token.IDENT}, []ErrCode{ErrBadComment}},
+		{"a --b", []token.Token{token.IDENT}, []ErrCode{ErrBadComment}},
 	}
 
 	for _, ex := range examples {
@@ -216,7 +222,7 @@ func TestScanErrors(t *testing.T) {
 }
 
 // checkTokens verifies that toks covers src: tokens are in order, do not
-// overlap, are separated only by whitespace and end with EOF at the end of src.
+// overlap, are separated only by whitespace and comments and end with EOF at the end of src.
 func checkTokens(t *testing.T, src []byte, toks Tokens) {
 	t.Helper()
 	n := len(toks.Kinds)
@@ -229,8 +235,9 @@ func checkTokens(t *testing.T, src []byte, toks Tokens) {
 		if start < prev {
 			t.Fatalf("%q: token %d starts at %d, before the previous token ends at %d", src, i, start, prev)
 		}
-		if gap := src[prev:start]; len(bytes.Trim(gap, " \t\n\r")) > 0 {
-			t.Fatalf("%q: non-whitespace %q between tokens", src, gap)
+		trivia := scanner{src: src, pos: prev}
+		if trivia.skipWhitespace(); trivia.pos != start {
+			t.Fatalf("%q: non-trivia %q between tokens", src, src[prev:start])
 		}
 		if end <= start && i < n-1 {
 			t.Fatalf("%q: empty %s token at %d", src, toks.Kinds[i], start)

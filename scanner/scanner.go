@@ -77,9 +77,35 @@ func (s *scanner) at(i int) byte {
 	return 0
 }
 
+// skipWhitespace skips whitespace and comments, which are trivia.
 func (s *scanner) skipWhitespace() {
-	for s.pos < len(s.src) && class[s.src[s.pos]]&cSpace != 0 {
-		s.pos++
+	for s.pos < len(s.src) {
+		switch {
+		case class[s.src[s.pos]]&cSpace != 0:
+			s.pos++
+		case s.src[s.pos] == '-' && s.at(s.pos+1) == '-':
+			s.comment()
+		default:
+			return
+		}
+	}
+}
+
+// comment skips a line comment, up to the end of its line. `--` must be
+// followed by a space, another `-` or the end of the line; anything else is
+// almost always a typo, so it is an error, though still skipped as a comment.
+func (s *scanner) comment() {
+	start := s.pos
+	switch s.at(start + 2) {
+	case ' ', '-', '\n', '\r', 0:
+	default:
+		s.fail(ErrBadComment, start, start+2)
+	}
+	end := bytes.IndexByte(s.src[start:], '\n')
+	if end == -1 {
+		s.pos = len(s.src)
+	} else {
+		s.pos = start + end
 	}
 }
 
