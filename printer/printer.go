@@ -10,8 +10,8 @@ import (
 )
 
 type writer struct {
-	w      io.Writer
-	source []byte
+	w  io.Writer
+	se *ast.SourceExpr
 
 	spaces int
 	parens bool // for debugging
@@ -35,8 +35,8 @@ func (w *writer) newline() error {
 	return w.string(strings.Repeat("  ", w.spaces))
 }
 
-func (w *writer) span(s token.Span) error {
-	return w.string(s.Get(w.source))
+func (w *writer) token(t ast.Tok) error {
+	return w.string(w.se.TokenText(t))
 }
 
 func (w *writer) space() error {
@@ -44,8 +44,9 @@ func (w *writer) space() error {
 	return err
 }
 
-func Fprint(w io.Writer, source []byte, expr ast.Expr) error {
-	wr := writer{w: w, source: source}
+// Fprint prints expr, which is se.Expr or one of its descendants.
+func Fprint(w io.Writer, se *ast.SourceExpr, expr ast.Expr) error {
+	wr := writer{w: w, se: se}
 	return wr.print(expr)
 }
 
@@ -56,8 +57,10 @@ func (w *writer) print(expr ast.Expr) error {
 	}
 
 	switch e := expr.(type) {
-	case *ast.Ident, *ast.Literal:
-		return w.span(e.Span())
+	case *ast.Ident:
+		return w.token(e.Tok)
+	case *ast.Literal:
+		return w.token(e.Tok)
 
 	case *ast.BinaryExpr:
 		err := w.print(e.Left)
@@ -105,7 +108,7 @@ func (w *writer) print(expr ast.Expr) error {
 		w.newline()
 		w.string(token.WHERE.Op())
 		w.string(" ")
-		err = w.span(e.Id.Pos)
+		err = w.token(e.Id.Tok)
 		if err != nil {
 			return err
 		}

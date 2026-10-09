@@ -28,7 +28,7 @@ func TestParseExpr(t *testing.T) {
 		if _, ok := x.(*ast.BinaryExpr); !ok {
 			t.Errorf("ParseExpr(%q): got %T, want *ast.BinaryExpr", src, x)
 			var buf bytes.Buffer
-			printer.Fprint(&buf, []byte(src), x)
+			printer.Fprint(&buf, &se, x)
 			t.Error(buf.String())
 		}
 	}
@@ -48,7 +48,7 @@ func TestParseExpr(t *testing.T) {
 	// sanity check
 	if b, ok := x.(*ast.BinaryExpr); !ok || b.Op != token.ADD {
 		t.Errorf("ParseExpr(%q): got %T, want *ast.BinaryExpr", src, x)
-		writeExpr(t, src, x)
+		writeExpr(t, &se, x)
 	}
 
 	fns := []string{
@@ -66,7 +66,7 @@ func TestParseExpr(t *testing.T) {
 		if _, ok := x.(*ast.CallExpr); !ok {
 			t.Errorf("ParseExpr(%q): got %T, want *ast.CallExpr", src, x)
 			var buf bytes.Buffer
-			printer.Fprint(&buf, []byte(src), x)
+			printer.Fprint(&buf, &se, x)
 			t.Error(buf.String())
 		}
 	}
@@ -80,7 +80,7 @@ func TestParseExpr(t *testing.T) {
 	// sanity check
 	if _, ok := x.(*ast.WhereExpr); !ok {
 		t.Errorf("ParseExpr(%q): got %T, want *ast.LetExpr", src, x)
-		writeExpr(t, src, x)
+		writeExpr(t, &se, x)
 	}
 }
 
@@ -217,8 +217,8 @@ func writeParseError(t *testing.T, src string, err error) {
 	}
 }
 
-func writeExpr(t *testing.T, src string, expr ast.Expr) {
+func writeExpr(t *testing.T, se *ast.SourceExpr, expr ast.Expr) {
 	var buf bytes.Buffer
-	printer.Fprint(&buf, []byte(src), expr)
+	printer.Fprint(&buf, se, expr)
 	t.Error(buf.String())
 }

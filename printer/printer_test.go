@@ -35,7 +35,7 @@ func expect(t *testing.T, source, expected string) {
 		t.Error(err)
 	} else {
 		var buf bytes.Buffer
-		err = Fprint(&buf, []byte(source), se.Expr)
+		err = Fprint(&buf, &se, se.Expr)
 		if err != nil {
 			t.Error(err)
 		} else {

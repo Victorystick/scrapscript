@@ -18,10 +18,10 @@ var (
 )
 
 type matcher struct {
-	source *token.Source
-	reg    *types.Registry
-	vars   Variables
-	err    error
+	src  *ast.SourceExpr
+	reg  *types.Registry
+	vars Variables
+	err  error
 }
 
 // Abandons matching returning err as the error.
@@ -31,14 +31,14 @@ func (m *matcher) error(err error) {
 }
 
 // Abandons matching, creating an error pointing at the culprit span.
-func (m *matcher) errorf(span token.Span, format string, args ...any) {
-	m.error(m.source.Error(span, fmt.Sprintf(format, args...)))
+func (m *matcher) errorf(n ast.Node, format string, args ...any) {
+	m.error(m.src.Error(n, fmt.Sprintf(format, args...)))
 }
 
 // Matches an expression onto val returning new bindings.
 // It is a match if err is nil.
-func Match(source *token.Source, reg *types.Registry, x ast.Expr, val Value) (vars Variables, err error) {
-	m := matcher{source, reg, make(Variables), err}
+func Match(src *ast.SourceExpr, reg *types.Registry, x ast.Expr, val Value) (vars Variables, err error) {
+	m := matcher{src, reg, make(Variables), err}
 
 	defer func() {
 		if pnc := recover(); pnc != nil {
@@ -57,20 +57,20 @@ func Match(source *token.Source, reg *types.Registry, x ast.Expr, val Value) (va
 func (m *matcher) match(x ast.Expr, val Value) {
 	switch x := x.(type) {
 	case *ast.Ident:
-		name := m.source.GetString(x.Pos)
+		name := m.src.TokenText(x.Tok)
 		// Ignore _.
 		if name == "_" {
 			return
 		}
 
 		if _, ok := m.vars[name]; ok {
-			m.errorf(x.Pos, "cannot bind %s twice", name)
+			m.errorf(x, "cannot bind %s twice", name)
 		}
 		m.vars[name] = val
 		return
 
 	case *ast.Literal:
-		lit, err := Literal(m.source, x)
+		lit, err := Literal(m.src, x)
 
 		if err != nil {
 			m.error(err)
@@ -86,7 +86,7 @@ func (m *matcher) match(x ast.Expr, val Value) {
 		return
 
 	case *ast.VariantExpr:
-		if val, ok := val.(Variant); ok && m.source.GetString(x.Tag.Pos) == val.tag {
+		if val, ok := val.(Variant); ok && m.src.TokenText(x.Tag.Tok) == val.tag {
 			// TODO: handle nil
 			// Recursively match further.
 			m.match(x.Typ, val.value)
@@ -99,7 +99,7 @@ func (m *matcher) match(x ast.Expr, val Value) {
 				val, ok := record.values[tag]
 				if !ok {
 					// TODO: should point to the key, not the value (x).
-					m.errorf(x.Span(), "cannot bind to missing key %s", tag)
+					m.errorf(x, "cannot bind to missing key %s", tag)
 				}
 				// Recursively match further.
 				m.match(x, val)

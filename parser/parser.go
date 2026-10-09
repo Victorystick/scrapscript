@@ -37,9 +37,9 @@ func (p *parser) span() token.Span {
 	return p.tokens.Span(p.src, p.i)
 }
 
-// start returns the offset at which the current token starts.
-func (p *parser) start() int {
-	return int(p.tokens.Starts[p.i])
+// at returns the index of the current token.
+func (p *parser) at() ast.Tok {
+	return ast.Tok(p.i)
 }
 
 func (p *parser) expect(tok token.Token) {
@@ -96,7 +96,7 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	}
 	p.expect(token.EOF)
 
-	se = ast.SourceExpr{Source: *p.source, Expr: expr}
+	se = ast.SourceExpr{Source: *p.source, Tokens: p.tokens, Expr: expr}
 	return
 }
 
@@ -163,7 +163,7 @@ func (p *parser) parseParenExpr() ast.Expr {
 func (p *parser) ident() *ast.Ident {
 	p.expect(token.IDENT)
 	ident := &ast.Ident{
-		Pos: p.span(),
+		Tok: p.at(),
 	}
 	p.next()
 	return ident
@@ -201,7 +201,7 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 	case token.INT, token.FLOAT, token.HOLE,
 		token.TEXT, token.BYTE, token.BYTES:
 		lit := &ast.Literal{
-			Pos:  p.span(),
+			Tok:  p.at(),
 			Kind: p.tok,
 		}
 		p.next()
@@ -267,10 +267,8 @@ func (p *parser) parseBinaryExpr(x ast.Expr, prec int) ast.Expr {
 		}
 
 	case token.ACCESS:
-		span := p.span()
 		p.next()
 		return &ast.AccessExpr{
-			Pos: span,
 			Rec: x,
 			Key: *p.ident(),
 		}
@@ -319,7 +317,7 @@ func (p *parser) parseType() ast.Expr {
 
 func (p *parser) parseRecord() *ast.RecordExpr {
 	p.expect(token.LBRACE)
-	start := p.start()
+	start := p.at()
 	p.next()
 
 	// Do we start with a spread?
@@ -358,11 +356,12 @@ func (p *parser) parseRecord() *ast.RecordExpr {
 	}
 
 	p.expect(token.RBRACE)
-	end := p.span().End
+	end := p.at()
 	p.next()
 
 	return &ast.RecordExpr{
-		Pos:     token.Span{Start: start, End: end},
+		LBrace:  start,
+		RBrace:  end,
 		Entries: entries,
 		Rest:    rest,
 	}
@@ -374,7 +373,7 @@ func (p *parser) parseList() *ast.ListExpr {
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
 	p.expect(token.LBRACK)
-	start := p.start()
+	start := p.at()
 	p.next()
 
 	es := make([]ast.Expr, 0)
@@ -391,10 +390,10 @@ func (p *parser) parseList() *ast.ListExpr {
 	}
 
 	p.expect(token.RBRACK)
-	end := p.span().End
+	end := p.at()
 	p.next()
 
-	return &ast.ListExpr{Pos: token.Span{Start: start, End: end}, Elements: es}
+	return &ast.ListExpr{LBrack: start, RBrack: end, Elements: es}
 }
 
 func (p *parser) parseFuncExpr(x ast.Expr) *ast.FuncExpr {
@@ -463,7 +462,7 @@ func (p *parser) parseVariant() *ast.VariantExpr {
 		p.expect(token.IDENT)
 	}
 	id := ast.Ident{
-		Pos: p.span(),
+		Tok: p.at(),
 	}
 	p.next()
 
@@ -482,7 +481,7 @@ func (p *parser) parseVariant() *ast.VariantExpr {
 }
 
 func (p *parser) parseImport() *ast.ImportExpr {
-	start := p.start()
+	start := p.at()
 
 	// Eat $.
 	p.next()
@@ -494,14 +493,13 @@ func (p *parser) parseImport() *ast.ImportExpr {
 
 	p.expect(token.BYTES)
 	bytes := ast.Literal{
-		Pos:  p.span(),
+		Tok:  p.at(),
 		Kind: p.tok,
 	}
-	end := bytes.Pos.End
 	p.next()
 
 	return &ast.ImportExpr{
-		Pos:      token.Span{Start: start, End: end},
+		Dollar:   start,
 		HashAlgo: algo,
 		Value:    bytes,
 	}

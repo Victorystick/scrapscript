@@ -40,14 +40,14 @@ type TypeScope = *Scope[TypeRef]
 type InferImport func(algo string, hash []byte) (TypeRef, error)
 
 type context struct {
-	source      token.Source
+	src         *ast.SourceExpr
 	reg         *Registry
 	scope       TypeScope
 	inferImport InferImport
 }
 
-func (c *context) bail(span token.Span, msg string) {
-	panic(c.source.Error(span, msg))
+func (c *context) bail(n ast.Node, msg string) {
+	panic(c.src.Error(n, msg))
 }
 
 func (c *context) bind(name string, ref TypeRef) TypeScope {
@@ -69,7 +69,7 @@ func DefaultScope(reg *Registry) (scope TypeScope) {
 
 func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, inferImport InferImport) (ref TypeRef, err error) {
 	context := context{
-		source:      se.Source,
+		src:         &se,
 		reg:         reg,
 		scope:       scope,
 		inferImport: inferImport,
@@ -96,10 +96,10 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 	case *ast.Literal:
 		return literalTypeRef(x.Kind)
 	case *ast.Ident:
-		name := c.source.GetString(x.Pos)
+		name := c.src.TokenText(x.Tok)
 		ref := c.scope.Lookup(name)
 		if ref == NeverRef {
-			c.bail(x.Pos, "unbound variable: "+name)
+			c.bail(x, "unbound variable: "+name)
 		}
 		return c.reg.Instantiate(ref)
 	case *ast.WhereExpr:
@@ -116,7 +116,7 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 	case *ast.FuncExpr:
 		// Not sure how to juggle vars vs unbound. :/
 		binder := c.reg.Var()
-		c.bind(c.source.GetString(x.Arg.Span()), binder)
+		c.bind(c.src.NodeText(x.Arg), binder)
 		defer c.unbind()
 		ret := c.infer(x.Body)
 		return c.reg.Func(binder, ret)
@@ -186,15 +186,15 @@ func (c *context) infer(expr ast.Expr) TypeRef {
 		panic(fmt.Sprintf("can't infer binary expression %s", x.Op.String()))
 	case *ast.ImportExpr:
 		if c.inferImport == nil {
-			c.bail(x.Span(), "<internal error> missing infer import function")
+			c.bail(x, "<internal error> missing infer import function")
 		}
-		bs, err := hex.DecodeString(c.source.GetString(x.Value.Pos.TrimStart(2)))
+		bs, err := hex.DecodeString(c.src.Source.GetString(c.src.TokenSpan(x.Value.Tok).TrimStart(2)))
 		if err != nil {
-			c.bail(x.Span(), fmt.Sprintf("bad import hash %#v", x))
+			c.bail(x, fmt.Sprintf("bad import hash %#v", x))
 		}
 		ref, err := c.inferImport(x.HashAlgo, bs)
 		if err != nil {
-			c.bail(x.Span(), err.Error())
+			c.bail(x, err.Error())
 		}
 		return ref
 	}
@@ -208,7 +208,7 @@ func (c *context) ensure(x ast.Expr, got, want TypeRef) TypeRef {
 		defer func() {
 			if pnc := recover(); pnc != nil {
 				if msg, ok := pnc.(string); ok {
-					c.bail(x.Span(), msg)
+					c.bail(x, msg)
 				} else {
 					panic(pnc)
 				}
@@ -232,7 +232,7 @@ func (c *context) call(x, fn, arg ast.Expr) TypeRef {
 func (c *context) match(ty *TypeRef, expr ast.Expr) int {
 	switch expr := expr.(type) {
 	case *ast.Ident:
-		name := c.source.GetString(expr.Pos)
+		name := c.src.TokenText(expr.Tok)
 		// Ignore _.
 		if name == "_" {
 			return 0
@@ -277,7 +277,7 @@ func (c *context) match(ty *TypeRef, expr ast.Expr) int {
 
 	case *ast.VariantExpr:
 		bindings := 0
-		name := c.source.GetString(expr.Tag.Pos)
+		name := c.src.TokenText(expr.Tag.Tok)
 		vRef := NeverRef
 		if expr.Typ != nil {
 			vRef = c.reg.Var()
@@ -288,14 +288,14 @@ func (c *context) match(ty *TypeRef, expr ast.Expr) int {
 		return bindings
 
 	default:
-		c.bail(expr.Span(), fmt.Sprintf("cannot match on %T", expr))
+		c.bail(expr, fmt.Sprintf("cannot match on %T", expr))
 	}
 	// Unreachable.
 	return 0
 }
 
 func (c *context) where(x *ast.WhereExpr) TypeRef {
-	name := c.source.GetString(x.Id.Pos)
+	name := c.src.TokenText(x.Id.Tok)
 
 	// This where is type-only; semantics TBD?
 	if x.Val == nil {
@@ -319,10 +319,10 @@ func (c *context) where(x *ast.WhereExpr) TypeRef {
 func (c *context) typ(x ast.Expr) TypeRef {
 	switch x := x.(type) {
 	case *ast.Ident:
-		name := c.source.GetString(x.Pos)
+		name := c.src.TokenText(x.Tok)
 		ref := c.scope.Lookup(name)
 		if ref == NeverRef {
-			c.bail(x.Span(), fmt.Sprintf("unknown type %s", name))
+			c.bail(x, fmt.Sprintf("unknown type %s", name))
 		}
 		return ref
 	case *ast.FuncExpr:
@@ -336,7 +336,7 @@ func (c *context) typ(x ast.Expr) TypeRef {
 		})
 	}
 
-	c.bail(x.Span(), fmt.Sprintf("cannot infer type of %T", x))
+	c.bail(x, fmt.Sprintf("cannot infer type of %T", x))
 	return NeverRef
 }
 
@@ -366,17 +366,17 @@ func (c *context) record(x *ast.RecordExpr) TypeRef {
 		rest := c.infer(x.Rest)
 		rec := c.reg.GetRecord(rest)
 		if rec == nil {
-			c.bail(x.Rest.Span(), fmt.Sprintf("cannot spread from non-record type %s", c.reg.String(rest)))
+			c.bail(x.Rest, fmt.Sprintf("cannot spread from non-record type %s", c.reg.String(rest)))
 		}
 		for k, v := range x.Entries {
 			expected, ok := rec[k]
 			if !ok {
-				c.bail(v.Span(), fmt.Sprintf("cannot set %s not in the base record", k))
+				c.bail(v, fmt.Sprintf("cannot set %s not in the base record", k))
 
 			}
 			actual := c.infer(v)
 			if actual != expected {
-				c.bail(v.Span(), fmt.Sprintf("type of %s must be %s, not %s", k, c.reg.String(expected), c.reg.String(actual)))
+				c.bail(v, fmt.Sprintf("type of %s must be %s, not %s", k, c.reg.String(expected), c.reg.String(actual)))
 			}
 		}
 		return rest
@@ -392,7 +392,7 @@ func (c *context) record(x *ast.RecordExpr) TypeRef {
 func (c *context) enum(x ast.EnumExpr, rec InferFunc) TypeRef {
 	ref := make(MapRef, len(x))
 	for _, v := range x {
-		name := c.source.GetString(v.Tag.Pos)
+		name := c.src.TokenText(v.Tag.Tok)
 		vRef := NeverRef
 		if v.Typ != nil {
 			vRef = rec(v.Typ)
@@ -406,14 +406,14 @@ func (c *context) pick(x *ast.BinaryExpr, val ast.Expr) TypeRef {
 	ref := c.infer(x.Left)
 	enum := c.reg.GetEnum(ref)
 	if enum == nil {
-		c.bail(x.Left.Span(), fmt.Sprintf("%s isn't an enum", c.reg.String(ref)))
+		c.bail(x.Left, fmt.Sprintf("%s isn't an enum", c.reg.String(ref)))
 	}
 
 	if id, ok := x.Right.(*ast.Ident); ok {
-		tag := c.source.GetString(id.Span())
+		tag := c.src.NodeText(id)
 		typ, ok := enum[tag]
 		if !ok {
-			c.bail(id.Span(),
+			c.bail(id,
 				fmt.Sprintf("#%s isn't a valid option for enum %s",
 					tag, c.reg.String(ref)))
 		}
@@ -422,7 +422,7 @@ func (c *context) pick(x *ast.BinaryExpr, val ast.Expr) TypeRef {
 		if typ == NeverRef {
 			// But there was one.
 			if val != nil {
-				c.bail(val.Span(), fmt.Sprintf("#%s doesn't take any value", tag))
+				c.bail(val, fmt.Sprintf("#%s doesn't take any value", tag))
 			}
 		} else {
 			valRef := c.infer(val)
