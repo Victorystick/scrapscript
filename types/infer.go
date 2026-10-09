@@ -89,7 +89,7 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, inferImport InferI
 	}()
 
 	reg.enter()
-	ref = context.infer(se.Expr)
+	ref = context.scrap(se.Expr)
 	reg.exit()
 	reg.generalize(ref)
 	return ref, err
@@ -103,11 +103,14 @@ func (c *context) infer(x ast.Node) TypeRef {
 		name := c.src.TokenText(c.src.Main(x))
 		bound := c.scope.Get(name)
 		if bound == nil {
+			if c.aliases.Get(name) != nil {
+				c.bail(x, fmt.Sprintf("cannot use type %s as a value", name))
+			}
 			c.bail(x, "unbound variable: "+name)
 		}
 		return c.reg.Instantiate(bound.val)
 	case ast.Where:
-		return c.where(x)
+		return c.where(x, c.infer)
 	case ast.List:
 		return c.list(x)
 	case ast.Record:
@@ -154,22 +157,56 @@ func (c *context) infer(x ast.Node) TypeRef {
 		return c.binary(x)
 
 	case ast.Import:
-		if c.inferImport == nil {
-			c.bail(x, "<internal error> missing infer import function")
-		}
-		algo, hash := c.src.Import(x)
-		bs, err := hex.DecodeString(c.src.Source.GetString(c.src.TokenSpan(hash).TrimStart(2)))
-		if err != nil {
-			c.bail(x, fmt.Sprintf("bad import hash %s", c.src.NodeText(x)))
-		}
-		ref, err := c.inferImport(c.src.TokenText(algo), bs)
-		if err != nil {
-			c.bail(x, err.Error())
+		ref := c.imported(x)
+		if _, ok := c.reg.Denoted(ref); ok {
+			c.bail(x, fmt.Sprintf("cannot use type %s as a value", c.src.NodeText(x)))
 		}
 		return c.reg.Instantiate(ref)
 	}
 
 	panic(fmt.Sprintf("can't infer node %s", c.src.Kind(x)))
+}
+
+// scrap infers the type of a scrap's expression x. Unlike other expressions,
+// a scrap may denote a type, so that other scraps can import it in type
+// position. Then its type is the sort of that type.
+func (c *context) scrap(x ast.Node) TypeRef {
+	switch c.src.Kind(x) {
+	case ast.Where:
+		return c.where(x, c.scrap)
+	case ast.Ident:
+		name := c.src.TokenText(c.src.Main(x))
+		if c.scope.Get(name) == nil {
+			if a := c.aliases.Lookup(name); a != nil {
+				return c.reg.Type(c.alias(x, name, a))
+			}
+		}
+	case ast.Import:
+		ref := c.imported(x)
+		if _, ok := c.reg.Denoted(ref); ok {
+			return ref
+		}
+		return c.reg.Instantiate(ref)
+	}
+	return c.infer(x)
+}
+
+// imported returns the type of the scrap that the import x refers to, which
+// may be a type scheme or the sort of a type.
+func (c *context) imported(x ast.Node) TypeRef {
+	if c.inferImport == nil {
+		c.bail(x, "<internal error> missing infer import function")
+	}
+	algo, hash := c.src.Import(x)
+	bs, err := hex.DecodeString(c.src.Source.GetString(c.src.TokenSpan(hash).TrimStart(2)))
+	if err != nil {
+		c.bail(x, fmt.Sprintf("bad import hash %s", c.src.NodeText(x)))
+	}
+	ref, err := c.inferImport(c.src.TokenText(algo), bs)
+	if err != nil {
+		c.bail(x, err.Error())
+	}
+	return ref
 }
 
 // ensure unifies got with want, failing at x if they differ.
@@ -245,10 +282,10 @@ func (c *context) either(a, b, typ TypeRef) bool {
 	return c.reg.Resolve(a) == typ || c.reg.Resolve(b) == typ
 }
 
-// where infers the type of a where-group's body. The group's bindings are
-// mutually recursive. Each strongly connected component of them is inferred
-// in turn, and generalized before the components that use it.
-func (c *context) where(x ast.Node) TypeRef {
+// where infers the type of a where-group's body with inferBody. The group's
+// bindings are mutually recursive. Each strongly connected component of them
+// is inferred in turn, and generalized before the components that use it.
+func (c *context) where(x ast.Node, inferBody func(ast.Node) TypeRef) TypeRef {
 	body, binds := c.src.Group(x)
 	scope, aliases := c.scope, c.aliases
 	defer func() { c.scope, c.aliases = scope, aliases }()
@@ -296,7 +333,7 @@ func (c *context) where(x ast.Node) TypeRef {
 		}
 	}
 
-	return c.infer(body)
+	return inferBody(body)
 }
 
 var primitiveTypes = map[string]TypeRef{
@@ -319,6 +356,11 @@ func (c *context) typ(x ast.Node) TypeRef {
 			return c.alias(x, name, a)
 		}
 		c.bail(x, fmt.Sprintf("unknown type %s", name))
+	case ast.Import:
+		if ref, ok := c.reg.Denoted(c.imported(x)); ok {
+			return ref
+		}
+		c.bail(x, fmt.Sprintf("%s is a value, not a type", c.src.NodeText(x)))
 	case ast.Literal:
 		if c.src.LiteralKind(x) == token.HOLE {
 			return HoleRef

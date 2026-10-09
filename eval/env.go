@@ -110,8 +110,12 @@ func (e *Environment) Read(script []byte) (*Scrap, error) {
 // Eval type-checks and evaluates a Scrap.
 func (e *Environment) Eval(scrap *Scrap) (Value, error) {
 	if scrap.value == nil {
-		if _, err := e.infer(scrap); err != nil {
+		ref, err := e.infer(scrap)
+		if err != nil {
 			return nil, err
+		}
+		if _, ok := e.reg.Denoted(ref); ok {
+			return nil, fmt.Errorf("cannot evaluate a type")
 		}
 		value, err := Eval(scrap.expr, e.vars, e.evalImport)
 		scrap.value = value

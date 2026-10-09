@@ -259,6 +259,38 @@ func TestEvalImport(t *testing.T) {
 	}
 }
 
+func TestImportType(t *testing.T) {
+	env := NewEnvironment()
+	env.UseFetcher(MapFetcher{
+		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445": `t ; t : #a int #b`,
+	})
+
+	scrap, err := env.Read([]byte(`f (#a 1) ; f : $sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445 -> int = | #a n -> n | #b -> 0`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	val, err := env.Eval(scrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val.String() != "1" {
+		t.Errorf("Expected 1, got %s", val)
+	}
+
+	// The type scrap itself has no value.
+	scrap, err = env.Read([]byte(`t ; t : #a int #b`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	typ, err := env.Infer(scrap)
+	if err != nil || typ != "type = [ #a int, #b ]" {
+		t.Errorf("Expected type = [ #a int, #b ], got %s, %v", typ, err)
+	}
+	if _, err = env.Eval(scrap); err == nil || err.Error() != "cannot evaluate a type" {
+		t.Errorf("Expected 'cannot evaluate a type', got %v", err)
+	}
+}
+
 type MapFetcher map[string]string
 
 func (mf MapFetcher) FetchSha256(key string) ([]byte, error) {

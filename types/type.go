@@ -26,6 +26,7 @@ const (
 	enumKind               // a: the row of tags.
 	emptyKind              // The empty row, which closes a row.
 	extendKind             // aux: the label. a: its type. b: the rest of the row.
+	typeKind               // The sort of a type that a scrap denotes. a: the type.
 )
 
 // A node is a type in a Registry. Its kind says how it uses the other fields.
@@ -149,6 +150,18 @@ func (r *Registry) Enum(tags map[string]TypeRef) TypeRef {
 	return r.add(node{kind: enumKind, a: r.row(tags, emptyRef)})
 }
 
+// Type returns the sort of the type t, for a scrap that denotes t rather
+// than a value. Other scraps may use such a scrap only in type position.
+func (r *Registry) Type(t TypeRef) TypeRef {
+	return r.add(node{kind: typeKind, a: t})
+}
+
+// Denoted returns the type that ref is the sort of, if it is one.
+func (r *Registry) Denoted(ref TypeRef) (TypeRef, bool) {
+	n := r.at(r.Resolve(ref))
+	return n.a, n.kind == typeKind
+}
+
 func (r *Registry) row(labels map[string]TypeRef, tail TypeRef) TypeRef {
 	for _, l := range slices.Sorted(maps.Keys(labels)) {
 		tail = r.extend(r.intern(l), labels[l], tail)
@@ -205,7 +218,7 @@ func (r *Registry) generalize(ref TypeRef) {
 		if n.aux > r.level {
 			r.nodes[ref].kind = genKind
 		}
-	case listKind, recordKind, enumKind:
+	case listKind, recordKind, enumKind, typeKind:
 		r.generalize(n.a)
 	case funcKind, extendKind:
 		r.generalize(n.a)
@@ -234,7 +247,7 @@ func (r *Registry) instantiate(ref TypeRef, fresh *map[TypeRef]TypeRef) TypeRef 
 			(*fresh)[ref] = v
 		}
 		return v
-	case listKind, recordKind, enumKind:
+	case listKind, recordKind, enumKind, typeKind:
 		a := r.instantiate(n.a, fresh)
 		if a == n.a {
 			return ref
@@ -314,7 +327,7 @@ func (r *Registry) unify(a, b TypeRef) error {
 	}
 
 	switch na.kind {
-	case listKind:
+	case listKind, typeKind:
 		return r.unify(na.a, nb.a)
 	case funcKind:
 		if err := r.unify(na.a, nb.a); err != nil {
@@ -356,7 +369,7 @@ func (r *Registry) occurs(v TypeRef, level uint32, t TypeRef) bool {
 			n.aux = level
 			r.set(t, n)
 		}
-	case listKind, recordKind, enumKind:
+	case listKind, recordKind, enumKind, typeKind:
 		return r.occurs(v, level, n.a)
 	case funcKind, extendKind:
 		return r.occurs(v, level, n.a) || r.occurs(v, level, n.b)
@@ -555,6 +568,9 @@ func (s *stringer) write(ref TypeRef, nesting int) {
 				s.write(typ, atomLevel)
 			}
 		})
+	case typeKind:
+		s.WriteString("type = ")
+		s.write(n.a, topLevel)
 	default:
 		panic("bad type-ref")
 	}

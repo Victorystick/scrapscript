@@ -138,6 +138,10 @@ func TestInfer(t *testing.T) {
 		{`{ a = 1 >+ e, b = "" >+ e } ; e = []`, `{ a : list int, b : list text }`},
 		// Where-groups are recursive.
 		{`x ; x = y + 1 ; y = 2`, `int`},
+		// A scrap may denote a type.
+		{`t ; t : int`, `type = int`},
+		{`t ; t : #a a #b ; a : #x #y`, `type = [ #a [ #x, #y ], #b ]`},
+		{`t ; t : int -> text`, `type = int -> text`},
 		{`f ; f = | 0 -> 0 | n -> f (n - 1)`, `int -> int`},
 		{`even
 ; even = | 0 -> #true | n -> odd (n - 1)
@@ -194,6 +198,7 @@ func TestInferFailure(t *testing.T) {
 		{`x ; x = 1 ; x = 2`, `cannot bind x twice`},
 		{`f ; f : c -> int = _ -> 1 ; c : #a #a`, `cannot define tag #a more than once`},
 		{`f ; f : t -> int = _ -> 1 ; t : #a t`, `recursive type t is not supported yet`},
+		{`t + 1 ; t : int`, `cannot use type t as a value`},
 	}
 
 	for _, ex := range examples {
@@ -277,6 +282,11 @@ func TestInferImport(t *testing.T) {
 		{in: `$sha256~~ [ 1, 2 ]`, imp: reg.Func(a, a), result: `list int`},
 		{in: `a ; a = $sha256~~`, imp: reg.Func(a, a), result: `a -> a`},
 		{in: `{ x = a 1, y = a "" } ; a = $sha256~~`, imp: reg.Func(a, a), result: `{ x : int, y : text }`},
+		// A scrap that denotes a type can only be used in type position.
+		{in: `$sha256~~`, imp: reg.Type(IntRef), result: `type = int`},
+		{in: `f ; f : $sha256~~ -> int = _ -> 1`, imp: reg.Type(TextRef), result: `text -> int`},
+		{in: `1 + $sha256~~`, imp: reg.Type(IntRef), err: `cannot use type $sha256~~ as a value`},
+		{in: `f ; f : $sha256~~ = 1`, imp: IntRef, err: `$sha256~~ is a value, not a type`},
 	}
 
 	for _, ex := range examples {
