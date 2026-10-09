@@ -10,11 +10,12 @@ import (
 )
 
 type parser struct {
-	source  *token.Source
-	scanner scanner.Scanner
+	source *token.Source
+	src    []byte
+	tokens scanner.Tokens
 
-	tok  token.Token
-	span token.Span
+	i   int         // index of the current token
+	tok token.Token // kind of the current token
 
 	errors scanner.Errors
 }
@@ -23,7 +24,22 @@ var debug = true
 var stack []string
 
 func (p *parser) next() {
-	p.tok, p.span = p.scanner.Scan()
+	// The last token is EOF; stay there.
+	if p.i < len(p.tokens.Kinds)-1 {
+		p.i++
+	}
+	p.tok = p.tokens.Kinds[p.i]
+}
+
+// span returns the current token's span. Token ends are not stored, so only
+// call this where the end is needed.
+func (p *parser) span() token.Span {
+	return p.tokens.Span(p.src, p.i)
+}
+
+// start returns the offset at which the current token starts.
+func (p *parser) start() int {
+	return int(p.tokens.Starts[p.i])
 }
 
 func (p *parser) expect(tok token.Token) {
@@ -40,7 +56,7 @@ func (p *parser) bail(msg string) {
 	if debug {
 		fmt.Fprintln(os.Stderr, stack)
 	}
-	panic(p.source.Error(p.span, msg))
+	panic(p.source.Error(p.span(), msg))
 }
 
 func ParseExpr(source string) (ast.SourceExpr, error) {
@@ -50,10 +66,6 @@ func ParseExpr(source string) (ast.SourceExpr, error) {
 
 func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	var p parser
-
-	eh := func(e token.Error) {
-		p.errors.Add(e)
-	}
 
 	defer func() {
 		if pnc := recover(); pnc != nil {
@@ -69,9 +81,14 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	}()
 
 	p.source = source
-	p.scanner.Init(p.source, eh)
+	p.src = source.Bytes()
+	var errs []scanner.Error
+	p.tokens, errs = scanner.Scan(p.src)
+	for _, e := range errs {
+		p.errors.Add(source.Error(e.Span(), e.Code.String()))
+	}
+	p.tok = p.tokens.Kinds[0]
 
-	p.next()
 	expr := p.parseExpr()
 	if debug && p.tok != token.EOF {
 		fmt.Fprintf(os.Stderr, "%#v\n", expr)
@@ -146,7 +163,7 @@ func (p *parser) parseParenExpr() ast.Expr {
 func (p *parser) ident() *ast.Ident {
 	p.expect(token.IDENT)
 	ident := &ast.Ident{
-		Pos: p.span,
+		Pos: p.span(),
 	}
 	p.next()
 	return ident
@@ -155,7 +172,7 @@ func (p *parser) ident() *ast.Ident {
 // Parses an identifier as a string.
 func (p *parser) name() string {
 	p.expect(token.IDENT)
-	name := p.source.GetString(p.span)
+	name := p.source.GetString(p.span())
 	p.next()
 	return name
 }
@@ -184,7 +201,7 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 	case token.INT, token.FLOAT, token.HOLE,
 		token.TEXT, token.BYTE, token.BYTES:
 		lit := &ast.Literal{
-			Pos:  p.span,
+			Pos:  p.span(),
 			Kind: p.tok,
 		}
 		p.next()
@@ -250,7 +267,7 @@ func (p *parser) parseBinaryExpr(x ast.Expr, prec int) ast.Expr {
 		}
 
 	case token.ACCESS:
-		span := p.span
+		span := p.span()
 		p.next()
 		return &ast.AccessExpr{
 			Pos: span,
@@ -302,7 +319,7 @@ func (p *parser) parseType() ast.Expr {
 
 func (p *parser) parseRecord() *ast.RecordExpr {
 	p.expect(token.LBRACE)
-	start := p.span.Start
+	start := p.start()
 	p.next()
 
 	// Do we start with a spread?
@@ -341,7 +358,7 @@ func (p *parser) parseRecord() *ast.RecordExpr {
 	}
 
 	p.expect(token.RBRACE)
-	end := p.span.End
+	end := p.span().End
 	p.next()
 
 	return &ast.RecordExpr{
@@ -357,7 +374,7 @@ func (p *parser) parseList() *ast.ListExpr {
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
 	p.expect(token.LBRACK)
-	start := p.span.Start
+	start := p.start()
 	p.next()
 
 	es := make([]ast.Expr, 0)
@@ -374,7 +391,7 @@ func (p *parser) parseList() *ast.ListExpr {
 	}
 
 	p.expect(token.RBRACK)
-	end := p.span.End
+	end := p.span().End
 	p.next()
 
 	return &ast.ListExpr{Pos: token.Span{Start: start, End: end}, Elements: es}
@@ -446,7 +463,7 @@ func (p *parser) parseVariant() *ast.VariantExpr {
 		p.expect(token.IDENT)
 	}
 	id := ast.Ident{
-		Pos: p.span,
+		Pos: p.span(),
 	}
 	p.next()
 
@@ -465,22 +482,22 @@ func (p *parser) parseVariant() *ast.VariantExpr {
 }
 
 func (p *parser) parseImport() *ast.ImportExpr {
-	start := p.span.Start
+	start := p.start()
 
 	// Eat $.
 	p.next()
 
 	// Hash algo.
 	p.expect(token.IDENT)
-	algo := p.source.GetString(p.span)
+	algo := p.source.GetString(p.span())
 	p.next()
 
 	p.expect(token.BYTES)
 	bytes := ast.Literal{
-		Pos:  p.span,
+		Pos:  p.span(),
 		Kind: p.tok,
 	}
-	end := p.span.End
+	end := bytes.Pos.End
 	p.next()
 
 	return &ast.ImportExpr{

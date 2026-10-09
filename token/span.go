@@ -1,14 +1,17 @@
 package token
 
-import "bytes"
+import (
+	"bytes"
+	"sort"
+)
 
 type Source struct {
 	bytes []byte
-	lines []int // indices of new lines
+	lines []int // offsets at which lines start; built on first use
 }
 
 func NewSource(bytes []byte) Source {
-	return Source{bytes, []int{0}}
+	return Source{bytes: bytes}
 }
 
 func (s *Source) Error(span Span, msg string) Error {
@@ -25,12 +28,21 @@ func (s *Source) Bytes() []byte {
 	return s.bytes
 }
 
-func (s *Source) AddLineBreak(offset int) {
-	s.lines = append(s.lines, offset)
-}
-
-func (s *Source) LineCount() int {
-	return len(s.lines)
+// lineStarts returns the offset at which each line starts. Only diagnostics
+// need it, so it is computed on demand instead of while scanning.
+func (s *Source) lineStarts() []int {
+	if s.lines == nil {
+		s.lines = []int{0}
+		for i := 0; ; {
+			j := bytes.IndexByte(s.bytes[i:], '\n')
+			if j < 0 {
+				break
+			}
+			i += j + 1
+			s.lines = append(s.lines, i)
+		}
+	}
+	return s.lines
 }
 
 type Position struct {
@@ -38,51 +50,25 @@ type Position struct {
 }
 
 func (s *Source) GetPosition(offset int) (p Position) {
-	if i := searchInts(s.lines, offset); i >= 0 {
-		p.Line, p.Column = i+1, offset-s.lines[i]+1
+	lines := s.lineStarts()
+	i := sort.Search(len(lines), func(i int) bool { return lines[i] > offset }) - 1
+	if i >= 0 {
+		p.Line, p.Column = i+1, offset-lines[i]+1
 	}
 	return
 }
 
-// GetLine returns the string contents of a 1-indexed line.
+// GetLine returns the string contents of a 1-indexed line, without its newline.
 func (s *Source) GetLine(i int) string {
-	if i <= 0 {
+	lines := s.lineStarts()
+	if i <= 0 || i > len(lines) {
 		return ""
 	}
-
-	span := Span{Start: s.lines[i-1]}
-
-	// If asking for the currently tokenized line, find the next newline.
-	if i == len(s.lines) {
-		offset := bytes.IndexByte(s.bytes[span.Start:], '\n')
-		if offset < 0 {
-			span.End = len(s.bytes)
-		} else {
-			span.End = span.Start + offset
-		}
-	} else if i < len(s.lines) {
-		// Skip newline.
-		span.End = s.lines[i] - 1
+	span := Span{Start: lines[i-1], End: len(s.bytes)}
+	if i < len(lines) {
+		span.End = lines[i] - 1
 	}
-
 	return s.GetString(span)
-}
-
-func searchInts(a []int, x int) int {
-	// This function body is a manually inlined version of:
-	//
-	//   return sort.Search(len(a), func(i int) bool { return a[i] > x }) - 1
-	i, j := 0, len(a)
-	for i < j {
-		h := int(uint(i+j) >> 1) // avoid overflow when computing h
-		// i ≤ h < j
-		if a[h] <= x {
-			i = h + 1
-		} else {
-			j = h
-		}
-	}
-	return i - 1
 }
 
 func (s *Source) GetString(span Span) string {

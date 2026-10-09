@@ -6,7 +6,46 @@ import (
 	"github.com/Victorystick/scrapscript/token"
 )
 
-type ErrorHandler func(err token.Error)
+// ErrCode identifies a scanning error. Its message is only rendered when the
+// error is reported.
+type ErrCode uint8
+
+const (
+	ErrIllegalChar ErrCode = iota + 1
+	ErrNonASCII
+	ErrInvalidUTF8
+	ErrUnterminatedText
+	ErrExpectedHex
+	ErrBase64Padding
+	ErrTooLarge
+)
+
+var errMessages = [...]string{
+	ErrIllegalChar:      "illegal character",
+	ErrNonASCII:         "non-ASCII character outside a text literal",
+	ErrInvalidUTF8:      "illegal UTF-8 encoding",
+	ErrUnterminatedText: "string literal not terminated",
+	ErrExpectedHex:      "expected hex",
+	ErrBase64Padding:    "missing base64 padding",
+	ErrTooLarge:         "source is larger than 4 GiB",
+}
+
+func (c ErrCode) String() string {
+	if int(c) < len(errMessages) && errMessages[c] != "" {
+		return errMessages[c]
+	}
+	return "unknown error"
+}
+
+// Error is a scanning error and the byte span it covers.
+type Error struct {
+	Code       ErrCode
+	Start, End uint32
+}
+
+func (e Error) Span() token.Span {
+	return token.Span{Start: int(e.Start), End: int(e.End)}
+}
 
 type Errors []*token.Error
 

@@ -2,7 +2,9 @@ package token
 
 import "strconv"
 
-type Token int
+// Token is the kind of a token. It fits in a byte, so a scanned token costs
+// five bytes: its kind and its start offset.
+type Token uint8
 
 const (
 	BAD Token = iota
@@ -188,7 +190,7 @@ func (tok Token) Op() string {
 
 func (tok Token) String() string {
 	s := ""
-	if 0 <= tok && tok < Token(len(tokens)) {
+	if int(tok) < len(tokens) {
 		s = tokens[tok]
 	}
 	if s == "" {
@@ -203,24 +205,24 @@ const (
 	CallPrec  = 7
 )
 
+var precedences = func() (p [end_operators]int8) {
+	for i := range p {
+		p[i] = BasePrec
+	}
+	p[WHERE] = WherePrec
+	p[PIPE] = 1
+	p[LPIPE], p[RPIPE] = 2, 2
+	p[ARROW] = 3
+	p[LT], p[GT] = 4, 4
+	p[ADD], p[SUB], p[CONCAT], p[APPEND], p[PREPEND] = 5, 5, 5, 5, 5
+	p[MUL] = 6
+	p[PICK], p[ACCESS], p[SPREAD] = 8, 8, 8
+	return
+}()
+
 func (op Token) Precedence() int {
-	switch op {
-	case WHERE:
-		return WherePrec
-	case PIPE:
-		return 1
-	case LPIPE, RPIPE:
-		return 2
-	case ARROW:
-		return 3
-	case LT, GT:
-		return 4
-	case ADD, SUB, CONCAT, APPEND, PREPEND:
-		return 5
-	case MUL:
-		return 6
-	case PICK, ACCESS, SPREAD:
-		return 8
+	if op < end_operators {
+		return int(precedences[op])
 	}
 	return BasePrec
 }
