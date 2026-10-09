@@ -116,6 +116,8 @@ func TestInfer(t *testing.T) {
 		{`| 1 -> { list = [] } | _ -> { list = [ 1 ] }`, `int -> { list : list int }`},
 		{`| #true -> [1] | #false -> []`, `[ #false, #true ] -> list int`},
 
+		// A tag without a payload has the payload ().
+		{`[#a, #a ()]`, `list [ #a, ...a ]`},
 		// Tags are open; a payload tag is nullary.
 		{`#true #false`, `[ #true [ #false, ...a ], ...b ]`},
 		// Without a catch-all, a match accepts exactly the tags it lists.

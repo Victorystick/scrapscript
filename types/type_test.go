@@ -2,17 +2,22 @@ package types
 
 import "testing"
 
-func TestTypeRefDefaultsToNever(t *testing.T) {
+func TestNoTypeIsInvalid(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("Expected writing NoType to panic")
+		}
+	}()
 	reg := Registry{}
 	var ref TypeRef
-	Eq(t, reg.String(ref), "never")
+	reg.String(ref)
 }
 
 func TestPrimitives(t *testing.T) {
 	reg := Registry{}
 
-	for i, ref := range primitives {
-		Eq(t, primitiveNames[i], reg.String(ref))
+	for _, ref := range primitives {
+		Eq(t, primitiveNames[ref], reg.String(ref))
 	}
 }
 
@@ -56,7 +61,7 @@ func TestEnum(t *testing.T) {
 	Eq(t, reg.String(ref), "[ #l int, #r int ]")
 
 	maybe := func(ref TypeRef) TypeRef {
-		return reg.Enum(map[string]TypeRef{"some": ref, "none": NeverRef})
+		return reg.Enum(map[string]TypeRef{"some": ref, "none": HoleRef})
 	}
 
 	ref = maybe(IntRef)

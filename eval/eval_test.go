@@ -57,6 +57,7 @@ var expressions = []struct {
 	// 	| "hello " ++ name -> name
 	// 	| _ -> "<empty>" <| "hello Oseg"`, Text("Oseg")},
 	{`#empty`, `#empty`},
+	{`#a |> | #a () -> 1`, `1`},
 	{`#fun (x -> x * 2)`, `#fun x -> x * 2`},
 
 	// Destructuring.

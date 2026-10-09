@@ -56,3 +56,14 @@ func TestInferBuiltin(t *testing.T) {
 		}
 	}
 }
+
+func TestInferFailure(t *testing.T) {
+	env := NewEnvironment()
+	scrap, err := env.Read([]byte(`1 + "a"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Infer(scrap); err == nil {
+		t.Error("Expected a type error")
+	}
+}

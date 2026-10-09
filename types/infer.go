@@ -120,7 +120,7 @@ func (c *context) infer(x ast.Node) TypeRef {
 		return field
 	case ast.Variant:
 		tag, payload := c.src.Variant(x)
-		typ := NeverRef
+		typ := HoleRef
 		if payload != ast.None {
 			typ = c.infer(payload)
 		}
@@ -237,7 +237,7 @@ func (c *context) binary(x ast.Node) TypeRef {
 		return c.reg.Func(a, res)
 	}
 	c.bail(x, fmt.Sprintf("can't infer binary expression %s", op.String()))
-	return NeverRef
+	return NoType
 }
 
 // either returns true if a or b is already known to be the primitive typ.
@@ -339,7 +339,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 			if _, ok := tags[tag]; ok {
 				c.bail(v, fmt.Sprintf("cannot define tag #%s more than once", tag))
 			}
-			tags[tag] = NeverRef
+			tags[tag] = HoleRef
 			if payload != ast.None {
 				tags[tag] = c.typ(payload)
 			}
@@ -348,7 +348,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 	}
 
 	c.bail(x, fmt.Sprintf("%s is not a type", c.src.NodeText(x)))
-	return NeverRef
+	return NoType
 }
 
 // alias returns the type of an alias, computing it on first use. Aliases
@@ -420,7 +420,7 @@ func literalTypeRef(tok token.Token) TypeRef {
 		return BytesRef
 	}
 
-	return NeverRef
+	return NoType
 }
 
 // Either pre-pend or ap-pend.
@@ -524,7 +524,7 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 	case ast.Variant:
 		tagTok, payload := c.src.Variant(x)
 		tag := c.src.TokenText(tagTok)
-		typ := NeverRef
+		typ := HoleRef
 		if payload != ast.None {
 			typ = c.reg.Var()
 		}

@@ -9,8 +9,8 @@ import (
 
 // TypeRef references a type node within a Registry.
 //
-// The zero value references the impossible "never" type, which also stands in
-// for the missing payload of a tag.
+// The zero value, NoType, references no type at all. It is invalid to use as
+// a type.
 type TypeRef uint32
 
 type kind uint8
@@ -37,7 +37,7 @@ type node struct {
 
 // The fixed refs of the primitive types and the empty row.
 const (
-	NeverRef TypeRef = iota
+	NoType TypeRef = iota
 	HoleRef
 	IntRef
 	FloatRef
@@ -48,10 +48,11 @@ const (
 	numFixed
 )
 
-var primitives = [...]TypeRef{NeverRef, HoleRef, IntRef, FloatRef, TextRef, ByteRef, BytesRef}
+var primitives = [...]TypeRef{HoleRef, IntRef, FloatRef, TextRef, ByteRef, BytesRef}
 
+// The names of the primitive types, by TypeRef.
 var primitiveNames = [...]string{
-	"never",
+	NoType: "",
 	"()",
 	"int",
 	"float",
@@ -143,7 +144,7 @@ func (r *Registry) Record(fields map[string]TypeRef) TypeRef {
 }
 
 // Enum returns a closed enum type with the given tags. A tag without a
-// payload maps to NeverRef.
+// payload has the payload (), as in `#tag ()`.
 func (r *Registry) Enum(tags map[string]TypeRef) TypeRef {
 	return r.add(node{kind: enumKind, a: r.row(tags, emptyRef)})
 }
@@ -293,6 +294,9 @@ func (r *Registry) rowError(a, b TypeRef, err error) error {
 }
 
 func (r *Registry) unify(a, b TypeRef) error {
+	if a == NoType || b == NoType {
+		panic("cannot unify NoType")
+	}
 	a, b = r.Resolve(a), r.Resolve(b)
 	if a == b {
 		return nil
@@ -511,6 +515,9 @@ func (s *stringer) write(ref TypeRef, nesting int) {
 	n := s.reg.at(ref)
 	switch n.kind {
 	case conKind:
+		if ref == NoType {
+			panic("cannot write NoType")
+		}
 		s.WriteString(primitiveNames[ref])
 	case varKind, genKind:
 		s.variable(ref)
@@ -543,7 +550,7 @@ func (s *stringer) write(ref TypeRef, nesting int) {
 		s.row(n.a, '[', ']', func(label string, typ TypeRef) {
 			s.WriteByte('#')
 			s.WriteString(label)
-			if s.reg.Resolve(typ) != NeverRef {
+			if s.reg.Resolve(typ) != HoleRef {
 				s.WriteByte(' ')
 				s.write(typ, atomLevel)
 			}

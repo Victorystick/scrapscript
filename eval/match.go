@@ -86,9 +86,14 @@ func (m *matcher) match(x ast.Node, val Value) {
 	case ast.Variant:
 		tag, typ := m.src.Variant(x)
 		if val, ok := val.(Variant); ok && m.src.TokenText(tag) == val.tag {
-			// Recursively match the payload, if any.
+			// Recursively match the payload, if any. A tag without a
+			// payload has the payload ().
 			if typ != ast.None {
-				m.match(typ, val.value)
+				payload := val.value
+				if payload == nil {
+					payload = Hole{}
+				}
+				m.match(typ, payload)
 			}
 			return
 		}

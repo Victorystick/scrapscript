@@ -12,9 +12,10 @@ import (
 )
 
 type Scrap struct {
-	expr  ast.SourceExpr
-	typ   types.TypeRef
-	value Value
+	expr     ast.SourceExpr
+	inferred bool
+	typ      types.TypeRef
+	value    Value
 }
 
 func (s Scrap) Sha256() string {
@@ -52,7 +53,7 @@ func NewEnvironment() *Environment {
 	env.inferImport = func(algo string, hash []byte) (types.TypeRef, error) {
 		scrap, err := env.fetch(algo, hash)
 		if err != nil {
-			return types.NeverRef, err
+			return types.NoType, err
 		}
 		return env.infer(scrap)
 	}
@@ -120,10 +121,12 @@ func (e *Environment) Eval(scrap *Scrap) (Value, error) {
 }
 
 func (e *Environment) infer(scrap *Scrap) (types.TypeRef, error) {
-	if scrap.typ == types.NeverRef {
+	if !scrap.inferred {
 		ref, err := types.Infer(&e.reg, e.typeScope, scrap.expr, e.inferImport)
-		scrap.typ = ref
-		return ref, err
+		if err != nil {
+			return types.NoType, err
+		}
+		scrap.typ, scrap.inferred = ref, true
 	}
 	return scrap.typ, nil
 }
@@ -131,7 +134,10 @@ func (e *Environment) infer(scrap *Scrap) (types.TypeRef, error) {
 // Infer returns the string representation of the type of a Scrap.
 func (e *Environment) Infer(scrap *Scrap) (string, error) {
 	ref, err := e.infer(scrap)
-	return e.reg.String(ref), err
+	if err != nil {
+		return "", err
+	}
+	return e.reg.String(ref), nil
 }
 
 // Scrap renders a Value as self-contained scrapscript program.
