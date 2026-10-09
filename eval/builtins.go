@@ -13,20 +13,12 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	var builtIns = make(Variables)
 
 	define := func(name string, typ types.TypeRef, val Func) {
-		builtIns[name] = BuiltInFunc{name, typ, val}
+		builtIns[name] = BuiltInFunc{name, val}
 		scope = scope.Bind(name, typ)
 	}
 
-	// Built-in types
-	builtIns["()"] = Type(types.HoleRef)
-	builtIns["int"] = Type(types.IntRef)
-	builtIns["float"] = Type(types.FloatRef)
-	builtIns["text"] = Type(types.TextRef)
-	builtIns["byte"] = Type(types.ByteRef)
-	builtIns["bytes"] = Type(types.BytesRef)
-
-	a := reg.Unbound()
-	b := reg.Unbound()
+	a := reg.Gen()
+	b := reg.Gen()
 	aToB := reg.Func(a, b)
 	aList := reg.List(a)
 	bList := reg.List(b)
@@ -61,7 +53,6 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 						return nil, err
 					}
 					results.elements[i] = val
-					// TODO: propagate the new type.
 				}
 				return results, nil
 			},
@@ -119,7 +110,7 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 				for i := range elems {
 					elems[i] = val
 				}
-				return List{val.Type(), elems}, nil
+				return List{elems}, nil
 			},
 		}, nil
 	})
@@ -201,36 +192,7 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 		return nil, fmt.Errorf("cannot bytes/from-utf8-text on %T", val)
 	})
 
-	// Use the Y combinator to define recursive functions.
-	// (a -> b) -> a -> b
-	define("fix", reg.Func(aToB, aToB), func(val Value) (Value, error) {
-		fn := Callable(val)
-		if fn == nil {
-			return nil, fmt.Errorf("needed function, but got %T", val)
-		}
-		return ScriptFunc{
-			source: "fix " + val.String(),
-			fn:     fix(fn),
-		}, nil
-	})
-
 	return scope, builtIns
-}
-
-func fix(outer Func) Func {
-	return func(inner Value) (Value, error) {
-		// Note: This calls `fix` for every recursive call, which is not super efficient.
-		self := fix(outer)
-		fn, err := outer(ScriptFunc{"self", self})
-		if err != nil {
-			return nil, err
-		}
-		fn2 := Callable(fn)
-		if fn == nil {
-			return nil, fmt.Errorf("needed function, but got %T", fn)
-		}
-		return fn2(inner)
-	}
 }
 
 func roundFunc(round func(float64) float64) Func {

@@ -6,20 +6,16 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
-	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/token"
-	"github.com/Victorystick/scrapscript/types"
 )
 
 type EvalImport func(algo string, hash []byte) (Value, error)
 
 type context struct {
 	src        *ast.SourceExpr
-	reg        *types.Registry
 	vars       Vars
 	evalImport EvalImport
 	parent     *context
@@ -33,18 +29,6 @@ type Variables map[string]Value
 
 func (v Variables) Get(name string) Value {
 	return v[name]
-}
-
-type Binding struct {
-	name  string
-	value Value
-}
-
-func (b Binding) Get(name string) Value {
-	if b.name == name {
-		return b.value
-	}
-	return nil
 }
 
 func (c *context) ident(x ast.Node) (Value, error) {
@@ -68,7 +52,7 @@ func (c *context) name(t ast.Tok) string {
 }
 
 func (c *context) sub(vars Vars) *context {
-	return &context{c.src, c.reg, vars, c.evalImport, c}
+	return &context{c.src, vars, c.evalImport, c}
 }
 
 func (c *context) error(n ast.Node, msg string) error {
@@ -79,9 +63,10 @@ func (c *context) tokenError(t ast.Tok, msg string) error {
 	return c.src.TokenError(t, msg)
 }
 
-// Eval evaluates a SourceExpr in the context of a set of variables.
-func Eval(se ast.SourceExpr, reg *types.Registry, vars Vars, evalImport EvalImport) (Value, error) {
-	ctx := &context{&se, reg, vars, evalImport, nil}
+// Eval evaluates a SourceExpr in the context of a set of variables. The
+// SourceExpr must have been type-checked.
+func Eval(se ast.SourceExpr, vars Vars, evalImport EvalImport) (Value, error) {
+	ctx := &context{&se, vars, evalImport, nil}
 
 	return ctx.eval(se.Expr)
 }
@@ -99,8 +84,17 @@ func (c *context) eval(x ast.Node) (Value, error) {
 		return c.call(fn, arg)
 	case ast.Where:
 		return c.where(x)
-	case ast.Enum:
-		return c.enum(x)
+	case ast.Variant:
+		tag, payload := c.src.Variant(x)
+		v := Variant{tag: c.name(tag)}
+		if payload != ast.None {
+			val, err := c.eval(payload)
+			if err != nil {
+				return nil, err
+			}
+			v.value = val
+		}
+		return v, nil
 	case ast.Record:
 		return c.recordExpr(x)
 	case ast.List:
@@ -196,9 +190,7 @@ func (c *context) binary(x ast.Node) (Value, error) {
 			}
 			return binop(op, lf, rf)
 		}
-		return nil, c.error(x,
-			fmt.Sprintf("cannot perform addition on %s",
-				c.reg.String(l.Type())))
+		return nil, c.error(x, fmt.Sprintf("cannot perform arithmetic on %s", l))
 
 	case token.APPEND:
 		l, err := c.eval(left)
@@ -219,18 +211,7 @@ func (c *context) binary(x ast.Node) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			typ := c.reg.GetList(ls.typ)
-			if r.Type() != typ {
-				// Special-case empty lists, which have type never.
-				if typ == types.NeverRef {
-					typ = r.Type()
-				} else {
-					return nil, c.error(right,
-						fmt.Sprintf("cannot append %s to %s",
-							c.reg.String(r.Type()), c.reg.String(ls.typ)))
-				}
-			}
-			return List{c.reg.List(typ), append(ls.elements, r)}, nil
+			return List{append(ls.elements, r)}, nil
 		}
 
 		return nil, fmt.Errorf("cannot append to non-list %s", reflect.TypeOf(l))
@@ -254,18 +235,7 @@ func (c *context) binary(x ast.Node) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			typ := c.reg.GetList(ls.typ)
-			if l.Type() != typ {
-				// Special-case empty lists, which have type never.
-				if typ == types.NeverRef {
-					typ = r.Type()
-				} else {
-					return nil, c.error(left,
-						fmt.Sprintf("cannot prepend %s to %s",
-							c.reg.String(l.Type()), c.reg.String(ls.typ)))
-				}
-			}
-			return List{c.reg.List(typ), append([]Value{l}, ls.elements...)}, nil
+			return List{append([]Value{l}, ls.elements...)}, nil
 		}
 
 		return nil, fmt.Errorf("cannot prepend to non-list %s", reflect.TypeOf(r))
@@ -290,16 +260,7 @@ func (c *context) binary(x ast.Node) (Value, error) {
 				return nil, err
 			}
 
-			// Special-case empty lists.
-			typ := ls.typ // a list type
-			if typ != r.typ {
-				if c.reg.GetList(typ) == types.NeverRef {
-					typ = r.typ
-				} else if c.reg.GetList(r.typ) != types.NeverRef {
-					return nil, c.error(left, fmt.Sprintf("cannot concat %s to %s", c.reg.String(ls.typ), c.reg.String(r.typ)))
-				}
-			}
-			return List{typ, append(ls.elements, r.elements...)}, nil
+			return List{append(ls.elements, r.elements...)}, nil
 		}
 
 		if tx, ok := l.(Text); ok {
@@ -322,21 +283,12 @@ func (c *context) binary(x ast.Node) (Value, error) {
 		return c.compose(left, right)
 	case token.LCOMP: // a << b
 		return c.compose(right, left)
-
-	case token.PICK:
-		return c.pick(x, ast.None)
 	}
 
 	return nil, c.error(x, fmt.Sprintf("unhandled %s operator", op))
 }
 
 func (c *context) call(fnX, argX ast.Node) (Value, error) {
-	if c.src.Kind(fnX) == ast.Binary {
-		if op, _, _ := c.src.Binary(fnX); op == token.PICK {
-			return c.pick(fnX, argX)
-		}
-	}
-
 	fn, err := c.fn(fnX)
 	if err != nil {
 		return nil, err
@@ -369,138 +321,31 @@ func (c *context) compose(first, second ast.Node) (Value, error) {
 	}, nil
 }
 
-func (c *context) enum(x ast.Node) (Type, error) {
-	variants := c.src.Variants(x)
-	enum := make(types.MapRef, len(variants))
-	for _, v := range variants {
-		tagTok, typ := c.src.Variant(v)
-		tag := c.name(tagTok)
-		if _, ok := enum[tag]; ok {
-			return Type(types.NeverRef), c.tokenError(tagTok, fmt.Sprintf("cannot define tag #%s more than once", tag))
-		}
-
-		ref := types.NeverRef
-		if typ != ast.None {
-			val, err := c.typeRef(typ)
-			if err != nil {
-				return Type(types.NeverRef), err
-			}
-			ref = val
-		}
-		enum[tag] = ref
-	}
-	return Type(c.reg.Enum(enum)), nil
-}
-
-// typeRef returns the TypeRef of the type expression it is called with.
-func (c *context) typeRef(x ast.Node) (ref types.TypeRef, err error) {
-	switch c.src.Kind(x) {
-	case ast.Ident:
-		var val Value
-		val, err = c.ident(x)
-		if err != nil {
-			return
-		}
-		t, ok := val.(Type)
-		if !ok {
-			return ref, c.error(x, fmt.Sprintf("required a type, got %s", val))
-		}
-		ref = types.TypeRef(t)
-		return
-
-	case ast.Func:
-		arg, body := c.src.Func(x)
-		var argRef, bodyRef types.TypeRef
-		argRef, err = c.typeRef(arg)
-		if err != nil {
-			return
-		}
-		bodyRef, err = c.typeRef(body)
-		if err != nil {
-			return
-		}
-		ref = c.reg.Func(argRef, bodyRef)
-		return
-
-	case ast.Enum:
-		mapRef := make(types.MapRef)
-		for _, v := range c.src.Variants(x) {
-			tag, typ := c.src.Variant(v)
-			value := types.NeverRef
-			if typ != ast.None {
-				value, err = c.typeRef(typ)
-				if err != nil {
-					return
-				}
-			}
-			mapRef[c.name(tag)] = value
-		}
-		ref = c.reg.Enum(mapRef)
-		return
-		// TODO: Handle other expression types.
-	}
-
-	err = c.error(x, fmt.Sprintf("%s does not evaluate to a type", c.src.NodeText(x)))
-	return
-}
-
 func (c *context) recordExpr(x ast.Node) (r Record, err error) {
 	rest, fields := c.src.Record(x)
 
-	// New record.
+	var values map[string]Value
 	if rest == ast.None {
-		ref := make(types.MapRef, fields.Len())
-		values := make(map[string]Value, fields.Len())
-
-		for i := range fields.Len() {
-			tag := c.name(fields.Key(i))
-			var val Value
-			val, err = c.eval(fields.Value(i))
-			if err != nil {
-				return
-			}
-
-			ref[tag] = val.Type()
-			values[tag] = val
-		}
-		r = Record{c.reg.Record(ref), values}
-		return
-	}
-
-	// Record based on another.
-	var other Record
-	other, err = c.record(rest)
-	if err != nil {
-		return
-	}
-	ref := c.reg.GetRecord(other.typ)
-	values := maps.Clone(other.values)
-
-	for i := range fields.Len() {
-		tag, x := c.name(fields.Key(i)), fields.Value(i)
-		var val Value
-		val, err = c.eval(x)
+		values = make(map[string]Value, fields.Len())
+	} else {
+		// A record based on another.
+		var other Record
+		other, err = c.record(rest)
 		if err != nil {
 			return
 		}
-
-		typ, ok := ref[tag]
-		if !ok {
-			err = c.error(x,
-				fmt.Sprintf("cannot set key %s not in the base record", tag))
-			return
-		}
-		if val.Type() != typ {
-			err = c.error(x,
-				fmt.Sprintf("cannot change type of key %s from %s to %s",
-					tag, c.reg.String(typ), c.reg.String(val.Type())))
-			return
-		}
-
-		values[tag] = val
+		values = maps.Clone(other.values)
 	}
 
-	return Record{other.typ, values}, nil
+	for i := range fields.Len() {
+		var val Value
+		val, err = c.eval(fields.Value(i))
+		if err != nil {
+			return
+		}
+		values[c.name(fields.Key(i))] = val
+	}
+	return Record{values}, nil
 }
 
 func (c *context) access(x ast.Node) (Value, error) {
@@ -521,62 +366,13 @@ func (c *context) access(x ast.Node) (Value, error) {
 func (c *context) listExpr(x ast.Node) (ls List, err error) {
 	elems := c.src.List(x)
 	elements := make([]Value, len(elems))
-	typ := types.NeverRef
 	for i, x := range elems {
-		var val Value
-		val, err = c.eval(x)
+		elements[i], err = c.eval(x)
 		if err != nil {
 			return
 		}
-
-		elements[i] = val
-		if val.Type() != typ {
-			if typ == types.NeverRef {
-				typ = val.Type()
-			} else {
-				err = c.error(x, fmt.Sprintf("list elements must all be of type %s, got %s", c.reg.String(typ), c.reg.String(val.Type())))
-				return
-			}
-		}
 	}
-	return List{c.reg.List(typ), elements}, nil
-}
-
-// pick evaluates `typ::tag`, applied to x unless it is None.
-func (c *context) pick(pick ast.Node, x ast.Node) (Value, error) {
-	_, left, right := c.src.Binary(pick)
-	ref, err := c.typeRef(left)
-	if err != nil {
-		return nil, err
-	}
-	// This is always the case for a pick expression. Let's update the ast/parser.
-	if c.src.Kind(right) != ast.Ident {
-		return nil, c.error(right, fmt.Sprintf("cannot pick using non-identifier %s", c.src.NodeText(right)))
-	}
-	tag := c.name(c.src.Main(right))
-	enum := c.reg.GetEnum(ref)
-	if tagTyp, ok := enum[tag]; ok {
-		if tagTyp == types.NeverRef {
-			if x == ast.None {
-				return Variant{ref, tag, nil}, nil
-			} else {
-				return nil, c.error(x, fmt.Sprintf("#%s does not take a value", tag))
-			}
-		} else {
-			if x == ast.None {
-				return nil, c.error(right, fmt.Sprintf("#%s requires a value of type %s", tag, c.reg.String(tagTyp)))
-			} else {
-				val, err := c.eval(x)
-				if err != nil {
-					return nil, err
-				}
-				return Variant{ref, tag, val}, nil
-			}
-		}
-	}
-
-	tags := strings.Join(slices.Sorted(maps.Keys(enum)), ", #")
-	return nil, c.error(pick, fmt.Sprintf("#%s isn't one of the valid tags: #%s", tag, tags))
+	return List{elements}, nil
 }
 
 func (c *context) createFunc(x ast.Node) (ScriptFunc, error) {
@@ -600,7 +396,7 @@ func (c *context) createMatchFunc(x ast.Node) (ScriptFunc, error) {
 		fn: func(a Value) (Value, error) {
 			for _, alt := range c.src.Arms(x) {
 				arg, body := c.src.Func(alt)
-				matches, err := Match(c.src, c.reg, arg, a)
+				matches, err := Match(c.src, arg, a)
 				if err != nil {
 					if err == ErrNoMatch {
 						continue
@@ -614,22 +410,24 @@ func (c *context) createMatchFunc(x ast.Node) (ScriptFunc, error) {
 	}, nil
 }
 
+// where evaluates a where-group, whose bindings are mutually recursive.
+// Bindings are evaluated after the ones they refer to; functions refer to
+// the group's bindings when called, so they can recurse.
 func (c *context) where(x ast.Node) (Value, error) {
-	body, id, typ, val := c.src.Where(x)
-	name := c.name(id)
-
-	// This where is type-only; semantics TBD?
-	expr := val
-	if expr == ast.None {
-		expr = typ
+	body, binds := c.src.Group(x)
+	vars := make(Variables, len(binds))
+	sub := c.sub(vars)
+	for _, comp := range c.src.Components(binds) {
+		for _, b := range comp {
+			_, id, _, val := c.src.Where(b)
+			v, err := sub.eval(val)
+			if err != nil {
+				return nil, err
+			}
+			vars[c.name(id)] = v
+		}
 	}
-
-	v, err := c.eval(expr)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.sub(Binding{name, v}).eval(body)
+	return sub.eval(body)
 }
 
 // Evaluates a value, requiring a certain type.

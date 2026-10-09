@@ -1,99 +1,51 @@
 package types
 
 import (
+	"errors"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 )
 
-// The type's tag within a Registry. An implementation detail.
-type tag int
+// TypeRef references a type node within a Registry.
+//
+// The zero value references the impossible "never" type, which also stands in
+// for the missing payload of a tag.
+type TypeRef uint32
+
+type kind uint8
 
 const (
-	primitiveTag tag = iota
-	listTag
-	funcTag
-	enumTag
-	recordTag
-	unboundTag
-	varTag
+	conKind    kind = iota // A primitive type, one of the fixed refs below.
+	varKind                // An unbound type variable. aux: its level.
+	linkKind               // A bound type variable. a: what it is bound to.
+	genKind                // A generalized type variable of a type scheme.
+	listKind               // a: the element type.
+	funcKind               // a: the argument type. b: the result type.
+	recordKind             // a: the row of fields.
+	enumKind               // a: the row of tags.
+	emptyKind              // The empty row, which closes a row.
+	extendKind             // aux: the label. a: its type. b: the rest of the row.
 )
 
-var tagNames = [...]string{
-	primitiveTag: "primitive",
-	listTag:      "list",
-	funcTag:      "func",
-	enumTag:      "enum",
-	recordTag:    "record",
-	unboundTag:   "unbound",
-	varTag:       "var",
+// A node is a type in a Registry. Its kind says how it uses the other fields.
+type node struct {
+	kind kind
+	aux  uint32
+	a, b TypeRef
 }
 
-// Efficiently encodes a type reference within a Registry.
-//
-// The zero value references the impossible "never" type.
-type TypeRef int
-
-// We use the first 4 bits as the tag, and the remainder
-// for the index.
-func makeTypeRef(tag tag, index int) TypeRef {
-	return TypeRef(int(tag) | (index << 4))
-}
-
-// Extracts a TypeRef into its tag and index.
-func (ref TypeRef) extract() (tag, int) {
-	tag := tag(ref & 0x0f)
-	index := int(ref >> 4)
-	return tag, index
-}
-
-func (ref TypeRef) tag() tag {
-	return tag(ref & 0x0f)
-}
-
-func (ref TypeRef) index() int {
-	return int(ref >> 4)
-}
-
-func (ref TypeRef) hasTag(t tag) bool {
-	return ref.tag() == t
-}
-
-// Returns true if both TypeRefs have the same tag.
-func (ref TypeRef) SameTypeAs(other TypeRef) bool {
-	return ref.hasTag(other.tag())
-}
-
-// IsList returns true if the TypeRef is a list.
-func (ref TypeRef) IsList() bool {
-	return ref.hasTag(listTag)
-}
-
-// IsFunction returns true if the TypeRef is a function.
-func (ref TypeRef) IsFunction() bool {
-	return ref.hasTag(funcTag)
-}
-
-// IsUnbound returns true if the TypeRef is an unbound type.
-func (ref TypeRef) IsUnbound() bool {
-	return ref.hasTag(unboundTag)
-}
-
-// IsVar returns true if the TypeRef is an var type.
-func (ref TypeRef) IsVar() bool {
-	return ref.hasTag(varTag)
-}
-
+// The fixed refs of the primitive types and the empty row.
 const (
-	// Shortcut to the TypeRef for Never.
-	NeverRef TypeRef = TypeRef(int(primitiveTag) | (iota << 4)) // Inlined makeTypeRef
+	NeverRef TypeRef = iota
 	HoleRef
 	IntRef
 	FloatRef
 	TextRef
 	ByteRef
 	BytesRef
+	emptyRef
+	numFixed
 )
 
 var primitives = [...]TypeRef{NeverRef, HoleRef, IntRef, FloatRef, TextRef, ByteRef, BytesRef}
@@ -108,505 +60,535 @@ var primitiveNames = [...]string{
 	"bytes",
 }
 
-type FuncRef struct {
-	Arg, Result TypeRef
-}
-
-type MapRef map[string]TypeRef
-
-// Contains the types of a running application.
+// Registry holds the types of a running application as a graph of nodes.
+//
+// Type variables are bound by overwriting them in place, so a TypeRef must
+// be resolved before its node is inspected. Each variable has the level of
+// the where-binding it was created in. When a binding is done, the variables
+// above the current level are local to it, and are generalized.
 type Registry struct {
-	// The number of unique unbound types.
-	unbound int
-	// Lists just have a TypeRef.
-	lists []TypeRef
-	// Functions map one TypeRef to another.
-	funcs []FuncRef
-	// Enums and records are maps to TypeRefs.
-	enums   []MapRef
-	records []MapRef
-	// Type variables that will point to another type,
-	// or NeverRef if not yet assigned.
-	//
-	// Schemes are types with unbound TypeRefs. When instantiating a type,
-	// all unbound types will be replaced with fresh vars instead.
-	vars []TypeRef
+	nodes  []node
+	labels []string
+	label  map[string]uint32
+	level  uint32
+	// While unifying, the nodes overwritten so far and their old contents,
+	// so that a failed unification can be undone.
+	unifying bool
+	trail    []undo
 }
 
-// Returns the number of types in the registry, for debugging.
-func (c *Registry) Size() int {
-	return len(c.lists) + len(c.funcs) + len(c.enums) + len(c.records)
+type undo struct {
+	ref TypeRef
+	old node
 }
 
-// Strings returns a string representation for TypeRef.
-func (c *Registry) String(ref TypeRef) string {
-	var s stringer
-	s.reg = c
-	s.string(ref, 0)
-	return s.String()
-}
-
-// List returns the TypeRef for a list type.
-func (c *Registry) List(ref TypeRef) TypeRef {
-	return findOrAdd(&c.lists, listTag, ref)
-}
-
-// GetList returns the TypeRef for a list type.
-// It returns `a` for any `list a`.
-func (c *Registry) GetList(ref TypeRef) (res TypeRef) {
-	tag, index := ref.extract()
-	if tag != listTag {
-		return
+// set overwrites a node, remembering its old contents.
+func (r *Registry) set(ref TypeRef, n node) {
+	if r.unifying {
+		r.trail = append(r.trail, undo{ref, r.nodes[ref]})
 	}
-	return c.lists[index]
+	r.nodes[ref] = n
 }
 
-// Func returns the TypeRef for a function type.
-func (c *Registry) Func(from, to TypeRef) TypeRef {
-	return findOrAdd(&c.funcs, funcTag, FuncRef{from, to})
-}
-
-// GetFunc returns the TypeRef for an function type.
-func (c *Registry) GetFunc(ref TypeRef) (res FuncRef) {
-	tag, index := ref.extract()
-	if tag != funcTag {
-		return
+func (r *Registry) at(ref TypeRef) node {
+	if ref < numFixed {
+		if ref == emptyRef {
+			return node{kind: emptyKind}
+		}
+		return node{}
 	}
-	return c.funcs[index]
+	return r.nodes[ref]
 }
 
-// Enum returns the TypeRef for an enum type.
-func (c *Registry) Enum(ref MapRef) TypeRef {
-	return findOrAddMap(&c.enums, enumTag, ref)
-}
-
-// GetEnum returns the TypeRef for an enum type.
-func (c *Registry) GetEnum(ref TypeRef) MapRef {
-	tag, index := ref.extract()
-	if tag != enumTag {
-		return nil
+func (r *Registry) add(n node) TypeRef {
+	if len(r.nodes) == 0 {
+		r.nodes = make([]node, numFixed, 64)
+		r.nodes[emptyRef].kind = emptyKind
 	}
-	return c.enums[index]
+	r.nodes = append(r.nodes, n)
+	return TypeRef(len(r.nodes) - 1)
 }
 
-// Record returns the TypeRef for a record type.
-func (c *Registry) Record(ref MapRef) TypeRef {
-	return findOrAddMap(&c.records, recordTag, ref)
-}
-
-// GetRecord returns the TypeRef for an record type.
-func (c *Registry) GetRecord(ref TypeRef) MapRef {
-	tag, index := ref.extract()
-	if tag != recordTag {
-		return nil
+func (r *Registry) intern(label string) uint32 {
+	if i, ok := r.label[label]; ok {
+		return i
 	}
-	return c.records[index]
+	if r.label == nil {
+		r.label = make(map[string]uint32)
+	}
+	i := uint32(len(r.labels))
+	r.labels = append(r.labels, label)
+	r.label[label] = i
+	return i
 }
 
-// Unbound returns a new unbound TypeRef.
-func (c *Registry) Unbound() (ref TypeRef) {
-	ref = makeTypeRef(unboundTag, c.unbound)
-	c.unbound += 1
-	// fmt.
-	return
+// Size returns the number of nodes in the registry, for debugging.
+func (r *Registry) Size() int {
+	return len(r.nodes)
 }
 
-// Var returns a new variable TypeRef.
-func (c *Registry) Var() (ref TypeRef) {
-	i := len(c.vars)
-	c.vars = append(c.vars, NeverRef)
-	return makeTypeRef(varTag, i)
+// List returns a list type.
+func (r *Registry) List(elem TypeRef) TypeRef {
+	return r.add(node{kind: listKind, a: elem})
 }
 
-// Resolve follows variables to their last bound var.
-func (c *Registry) Resolve(ref TypeRef) TypeRef {
-	// Ignore non-vars.
-	if !ref.IsVar() {
+// Func returns a function type.
+func (r *Registry) Func(arg, result TypeRef) TypeRef {
+	return r.add(node{kind: funcKind, a: arg, b: result})
+}
+
+// Record returns a closed record type with the given fields.
+func (r *Registry) Record(fields map[string]TypeRef) TypeRef {
+	return r.add(node{kind: recordKind, a: r.row(fields, emptyRef)})
+}
+
+// Enum returns a closed enum type with the given tags. A tag without a
+// payload maps to NeverRef.
+func (r *Registry) Enum(tags map[string]TypeRef) TypeRef {
+	return r.add(node{kind: enumKind, a: r.row(tags, emptyRef)})
+}
+
+func (r *Registry) row(labels map[string]TypeRef, tail TypeRef) TypeRef {
+	for _, l := range slices.Sorted(maps.Keys(labels)) {
+		tail = r.extend(r.intern(l), labels[l], tail)
+	}
+	return tail
+}
+
+func (r *Registry) extend(label uint32, typ, rest TypeRef) TypeRef {
+	return r.add(node{kind: extendKind, aux: label, a: typ, b: rest})
+}
+
+// Var returns a new unbound type variable.
+func (r *Registry) Var() TypeRef {
+	return r.add(node{kind: varKind, aux: r.level})
+}
+
+// Gen returns a new generalized type variable, for building type schemes.
+// Each use of a scheme replaces its generalized variables with fresh ones.
+func (r *Registry) Gen() TypeRef {
+	return r.add(node{kind: genKind})
+}
+
+// enter starts a where-binding, whose new variables may be generalized.
+func (r *Registry) enter() { r.level++ }
+
+// exit ends a where-binding.
+func (r *Registry) exit() { r.level-- }
+
+// Resolve follows bound variables to the type they are bound to.
+func (r *Registry) Resolve(ref TypeRef) TypeRef {
+	n := r.at(ref)
+	if n.kind != linkKind {
 		return ref
 	}
-	other := c.Resolve(c.vars[ref.index()])
-	if other == NeverRef {
-		return ref
+	target := r.Resolve(n.a)
+	if target != n.a {
+		n.a = target
+		r.set(ref, n)
 	}
-	c.vars[ref.index()] = other
-	return other
-}
-
-// GetVar returns the TypeRef for an record type.
-func (c *Registry) GetVar(ref TypeRef) TypeRef {
-	c.Resolve(ref)
-	tag, index := ref.extract()
-	if tag != varTag {
-		return ref
-	}
-	return c.vars[index]
-}
-
-func (c *Registry) IsFree(ref TypeRef) bool {
-	return c.Resolve(ref).IsVar()
-}
-
-// VarString returns the string representation of an unresolved variable.
-func VarString(ref TypeRef) string {
-	tag, index := ref.extract()
-	if tag != varTag {
-		panic("VarString: got non-var tag " + tagNames[tag])
-	}
-	return "$" + strconv.FormatInt(int64(index), 10)
-}
-
-type MapTypeRef func(ref TypeRef)
-
-func (c *Registry) traverse(target TypeRef, mtr MapTypeRef) {
-	tag, index := target.extract()
-	switch tag {
-	case listTag:
-		c.traverse(c.lists[index], mtr)
-	case funcTag:
-		fn := c.funcs[index]
-		c.traverse(fn.Arg, mtr)
-		c.traverse(fn.Result, mtr)
-	case enumTag:
-		for _, v := range c.enums[index] {
-			c.traverse(v, mtr)
-		}
-	case recordTag:
-		for _, v := range c.records[index] {
-			c.traverse(v, mtr)
-		}
-	}
-
-	mtr(target)
-}
-
-type Replacer func(ref TypeRef, isArg bool) TypeRef
-
-func (c *Registry) replace(target TypeRef, f Replacer, isArg bool) TypeRef {
-	tag, index := target.extract()
-	switch tag {
-	case unboundTag:
-		return f(target, isArg)
-	case varTag:
-		return f(target, isArg)
-	case listTag:
-		return c.List(c.replace(c.lists[index], f, isArg))
-	case funcTag:
-		fn := c.funcs[index]
-		return c.Func(c.replace(fn.Arg, f, true), c.replace(fn.Result, f, isArg))
-	case enumTag:
-		ref := make(MapRef, len(c.enums[index]))
-		for k, v := range c.enums[index] {
-			ref[k] = c.replace(v, f, isArg)
-		}
-		return c.Enum(ref)
-	case recordTag:
-		ref := make(MapRef, len(c.records[index]))
-		for k, v := range c.records[index] {
-			ref[k] = c.replace(v, f, isArg)
-		}
-		return c.Record(ref)
-	}
-
-	// Else, the target remains unchanged.
 	return target
 }
 
-// bind binds a free variable to a type.
-func (reg *Registry) bind(a, b TypeRef) {
-	// Get to the bottom of `a`.
-	a = reg.Resolve(a)
+func (r *Registry) link(v, to TypeRef) {
+	r.set(v, node{kind: linkKind, a: to})
+}
 
-	if !a.IsVar() {
-		panic("cannot bind non-free var " + reg.String(a))
+// generalize turns the variables of ref that are local to the current
+// binding into generalized ones, in place.
+func (r *Registry) generalize(ref TypeRef) {
+	ref = r.Resolve(ref)
+	n := r.at(ref)
+	switch n.kind {
+	case varKind:
+		if n.aux > r.level {
+			r.nodes[ref].kind = genKind
+		}
+	case listKind, recordKind, enumKind:
+		r.generalize(n.a)
+	case funcKind, extendKind:
+		r.generalize(n.a)
+		r.generalize(n.b)
 	}
-	reg.vars[a.index()] = b
 }
 
-// The opposite of instantiate.
-func (c *Registry) generalize(target TypeRef) TypeRef {
-	var subst Subst
-	return c.replace(target, func(other TypeRef, isArg bool) TypeRef {
-		if other.IsVar() {
-			b := subst.bound(other)
-			if b == NeverRef {
-				if isArg {
-					b = c.Unbound()
-					subst.bind(other, b)
-				} else {
-					return other
-				}
-			}
-			return b
+// Instantiate returns a copy of a type scheme with fresh variables in place
+// of its generalized ones. Parts without generalized variables are shared.
+func (r *Registry) Instantiate(ref TypeRef) TypeRef {
+	var fresh map[TypeRef]TypeRef
+	return r.instantiate(ref, &fresh)
+}
+
+func (r *Registry) instantiate(ref TypeRef, fresh *map[TypeRef]TypeRef) TypeRef {
+	ref = r.Resolve(ref)
+	n := r.at(ref)
+	switch n.kind {
+	case genKind:
+		if *fresh == nil {
+			*fresh = make(map[TypeRef]TypeRef)
 		}
-		return other
-	}, false)
-}
-
-func (c *Registry) Instantiate(target TypeRef) TypeRef {
-	var subst Subst
-	return c.replace(target, func(other TypeRef, isArg bool) TypeRef {
-		if other.IsUnbound() {
-			b := subst.bound(other)
-			if b == NeverRef {
-				if isArg {
-					b = c.Var()
-					subst.bind(other, b)
-				} else {
-					return other
-				}
-			}
-			return b
+		v, ok := (*fresh)[ref]
+		if !ok {
+			v = r.Var()
+			(*fresh)[ref] = v
 		}
-		return other
-	}, false)
+		return v
+	case listKind, recordKind, enumKind:
+		a := r.instantiate(n.a, fresh)
+		if a == n.a {
+			return ref
+		}
+		n.a = a
+		return r.add(n)
+	case funcKind, extendKind:
+		a, b := r.instantiate(n.a, fresh), r.instantiate(n.b, fresh)
+		if a == n.a && b == n.b {
+			return ref
+		}
+		n.a, n.b = a, b
+		return r.add(n)
+	}
+	return ref
 }
 
-func (c *Registry) unify(a, b TypeRef) TypeRef {
-	a = c.Resolve(a)
-	b = c.Resolve(b)
+// Errors from unifying rows, which the enclosing record or enum turns into
+// messages, since rows have no syntax of their own.
+var (
+	// One row lacks a label of the other.
+	errMissingLabel = errors.New("missing label")
+	// The rows can only be equal if they are infinite.
+	errInfiniteRow = errors.New("infinite row")
+)
 
-	// Early out if they are already the same.
+// Unify makes a and b the same type by binding their variables, or returns
+// an error if they can't be.
+//
+// Unification is atomic: if it fails, a and b are left as they were, so
+// that the error shows them as they were.
+func (r *Registry) Unify(a, b TypeRef) error {
+	r.unifying = true
+	err := r.rowError(a, b, r.unify(a, b))
+	r.unifying = false
+	if err != nil {
+		for i := len(r.trail) - 1; i >= 0; i-- {
+			r.nodes[r.trail[i].ref] = r.trail[i].old
+		}
+	}
+	r.trail = r.trail[:0]
+	if e, ok := err.(*typeError); ok {
+		return e.format(r)
+	}
+	return err
+}
+
+// rowError turns an error from unifying the rows of a and b into a message.
+func (r *Registry) rowError(a, b TypeRef, err error) error {
+	switch err {
+	case errMissingLabel:
+		return r.mismatch(a, b)
+	case errInfiniteRow:
+		return r.errorf("cannot construct infinite type '%s' = '%s'", a, b)
+	}
+	return err
+}
+
+func (r *Registry) unify(a, b TypeRef) error {
+	a, b = r.Resolve(a), r.Resolve(b)
 	if a == b {
-		return a
+		return nil
 	}
 
-	tag, index := a.extract()
-	if tag == unboundTag {
-		panic("unexpected unbound var during unification")
+	na, nb := r.at(a), r.at(b)
+	if na.kind == varKind {
+		return r.bind(a, b)
+	}
+	if nb.kind == varKind {
+		return r.bind(b, a)
+	}
+	if na.kind != nb.kind {
+		return r.mismatch(a, b)
 	}
 
-	if tag == varTag {
-		c.traverse(b, func(ref TypeRef) {
-			if a == ref {
-				panic("occurs check failed")
-			}
-		})
-		c.vars[index] = b
-		return a
-	}
-
-	if b.IsVar() {
-		c.unify(b, a)
-		return a
-	}
-
-	bTag, bIndex := b.extract()
-	if tag == bTag {
-		switch tag {
-		case funcTag:
-			aFn := c.GetFunc(a)
-			bFn := c.GetFunc(b)
-
-			c.unify(aFn.Arg, bFn.Arg)
-			c.unify(aFn.Result, bFn.Result)
-		case listTag:
-			c.unify(c.GetList(a), c.GetList(b))
-		case recordTag:
-			return c.unifyRecords(c.records[index], c.records[bIndex])
-		case primitiveTag:
-			if index != bIndex {
-				panic("cannot unify '" + c.String(a) + "' with '" + c.String(b) + "'")
-			}
-		case enumTag:
-			return c.unifyEnums(c.enums[index], c.enums[bIndex])
-		default:
-			panic("cannot unify '" + c.String(a) + "' with '" + c.String(b) + "'")
+	switch na.kind {
+	case listKind:
+		return r.unify(na.a, nb.a)
+	case funcKind:
+		if err := r.unify(na.a, nb.a); err != nil {
+			return err
 		}
-		return a
-	} else {
-		panic("cannot unify '" + c.String(a) + "' with '" + c.String(b) + "'")
+		return r.unify(na.b, nb.b)
+	case recordKind, enumKind:
+		return r.rowError(a, b, r.unifyRows(na.a, nb.a))
+	case extendKind:
+		return r.unifyRows(a, b)
 	}
+	return r.mismatch(a, b)
 }
 
-func ignoreValues(_, _ TypeRef) bool {
-	return true
-}
-
-func (reg *Registry) unifyRecords(a, b MapRef) TypeRef {
-	// We can't unify records with different keys.
-	if !maps.EqualFunc(a, b, ignoreValues) {
-		panic("cannot unify '" + reg.String(reg.Record(a)) + "' with '" + reg.String(reg.Record(b)) + "'")
-	}
-	c := maps.Clone(a)
-	for k, v := range b {
-		c[k] = reg.unify(c[k], v)
-	}
-	return reg.Record(c)
-}
-
-// Merges two known-distinct maps.
-func (reg *Registry) unifyEnums(a, b MapRef) TypeRef {
-	c := maps.Clone(a)
-	for k, v := range b {
-		if ov, ok := c[k]; ok {
-			c[k] = reg.unify(ov, v)
-		} else {
-			c[k] = v
+// bind binds the variable v to the type t.
+func (r *Registry) bind(v, t TypeRef) error {
+	if r.occurs(v, r.at(v).aux, t) {
+		if k := r.at(t).kind; k == extendKind || k == emptyKind {
+			return errInfiniteRow
 		}
+		return r.errorf("cannot construct infinite type '%s' = '%s'", v, t)
 	}
-	return reg.Enum(c)
+	r.link(v, t)
+	return nil
 }
 
-// DebugString returns a string representation for TypeRef.
-func (reg *Registry) DebugString() string {
-	var s stringer
-	s.reg = reg
-
-	s.WriteString("Vars:\n")
-	for i := range reg.vars {
-		s.WriteString("  $")
-		s.WriteString(strconv.Itoa(i))
-		s.WriteString(": ")
-		s.string(makeTypeRef(varTag, i), 0)
-		s.WriteString("\n")
-	}
-	s.WriteString("Functions:\n")
-	for i := range reg.funcs {
-		s.WriteString("  ")
-		s.WriteString(strconv.Itoa(i))
-		s.WriteString(": ")
-		s.string(makeTypeRef(funcTag, i), 0)
-		s.WriteString("\n")
-	}
-	s.WriteString("Lists:\n")
-	for i := range reg.lists {
-		s.WriteString("  ")
-		s.WriteString(strconv.Itoa(i))
-		s.WriteString(": ")
-		s.string(makeTypeRef(listTag, i), 0)
-		s.WriteString("\n")
-	}
-
-	return s.String()
-}
-
-func findOrAdd[T comparable](ls *[]T, tag tag, el T) TypeRef {
-	list := *ls
-	for i, typ := range list {
-		if el == typ {
-			return makeTypeRef(tag, i)
+// occurs returns true if the variable v occurs in t. It also lowers the
+// variables of t to level, since t becomes part of a type that lives as
+// long as v.
+func (r *Registry) occurs(v TypeRef, level uint32, t TypeRef) bool {
+	t = r.Resolve(t)
+	n := r.at(t)
+	switch n.kind {
+	case varKind:
+		if t == v {
+			return true
 		}
-	}
-	i := len(list)
-	*ls = append(list, el)
-	return makeTypeRef(tag, i)
-}
-
-func findOrAddMap(ls *[]MapRef, tag tag, el MapRef) TypeRef {
-	list := *ls
-	for i, typ := range list {
-		if maps.Equal(el, typ) {
-			return makeTypeRef(tag, i)
+		if n.aux > level {
+			n.aux = level
+			r.set(t, n)
 		}
+	case listKind, recordKind, enumKind:
+		return r.occurs(v, level, n.a)
+	case funcKind, extendKind:
+		return r.occurs(v, level, n.a) || r.occurs(v, level, n.b)
 	}
-	i := len(list)
-	*ls = append(list, el)
-	return makeTypeRef(tag, i)
+	return false
 }
 
-var unboundNames = "abcdefghijklmnopqrstuvwxyz"
+// unifyRows unifies two rows, which may list their labels in any order.
+func (r *Registry) unifyRows(a, b TypeRef) error {
+	a, b = r.Resolve(a), r.Resolve(b)
+	if a == b {
+		return nil
+	}
+	na := r.at(a)
+	if na.kind != extendKind {
+		if r.at(b).kind == extendKind {
+			return r.unifyRows(b, a)
+		}
+		// Both are empty or variables.
+		return r.unify(a, b)
+	}
+
+	// Find a's first label in b. If that binds the variable that ends a's
+	// rest, the rows can only be equal if they are infinite.
+	tail := r.rowTail(na.b)
+	openTail := r.at(tail).kind == varKind
+	typ, rest, err := r.rewrite(b, na.aux)
+	if err != nil {
+		return err
+	}
+	if openTail && r.at(tail).kind != varKind {
+		return errInfiniteRow
+	}
+	if err := r.unify(na.a, typ); err != nil {
+		return err
+	}
+	return r.unifyRows(na.b, rest)
+}
+
+// rewrite finds label in row, returning its type and the rest of the row.
+// If the row is open and lacks the label, its tail is extended with it.
+func (r *Registry) rewrite(row TypeRef, label uint32) (typ, rest TypeRef, err error) {
+	row = r.Resolve(row)
+	n := r.at(row)
+	switch n.kind {
+	case extendKind:
+		if n.aux == label {
+			return n.a, n.b, nil
+		}
+		typ, rest, err = r.rewrite(n.b, label)
+		if err != nil {
+			return
+		}
+		return typ, r.extend(n.aux, n.a, rest), nil
+	case varKind:
+		// The new variables live as long as the row's.
+		level := r.level
+		r.level = n.aux
+		typ, rest = r.Var(), r.Var()
+		r.level = level
+		r.link(row, r.extend(label, typ, rest))
+		return typ, rest, nil
+	}
+	return 0, 0, errMissingLabel
+}
+
+// rowTail returns the empty row or variable that ends a row.
+func (r *Registry) rowTail(row TypeRef) TypeRef {
+	for {
+		row = r.Resolve(row)
+		n := r.at(row)
+		if n.kind != extendKind {
+			return row
+		}
+		row = n.b
+	}
+}
+
+// closeEnum closes ref's row if it is an enum whose row ends in a variable.
+func (r *Registry) closeEnum(ref TypeRef) {
+	n := r.at(r.Resolve(ref))
+	if n.kind != enumKind {
+		return
+	}
+	if tail := r.rowTail(n.a); r.at(tail).kind == varKind {
+		r.link(tail, emptyRef)
+	}
+}
+
+func (r *Registry) mismatch(a, b TypeRef) error {
+	return r.errorf("cannot unify '%s' with '%s'", a, b)
+}
+
+// A typeError is an error about two types, which is formatted once the
+// unification that failed has been undone.
+type typeError struct {
+	msg  string
+	a, b TypeRef
+}
+
+func (e *typeError) Error() string { return e.msg }
+
+func (r *Registry) errorf(format string, a, b TypeRef) error {
+	return &typeError{format, a, b}
+}
+
+// format formats the error with its types, which share the names of their
+// variables.
+func (e *typeError) format(r *Registry) error {
+	s := stringer{reg: r}
+	msg := strings.Replace(e.msg, "%s", s.string(e.a), 1)
+	msg = strings.Replace(msg, "%s", s.string(e.b), 1)
+	return errors.New(msg)
+}
+
+// String returns a string representation of a type.
+func (r *Registry) String(ref TypeRef) string {
+	s := stringer{reg: r}
+	return s.string(ref)
+}
+
+const varNames = "abcdefghijklmnopqrstuvwxyz"
 
 type stringer struct {
 	strings.Builder
 	reg *Registry
-	// Mapping from unbound index to
-	unbounds []int
+	// The variables named so far, in order.
+	vars []TypeRef
 }
 
-func (b *stringer) unbound(index int) {
-	i := slices.Index(b.unbounds, index)
+func (s *stringer) string(ref TypeRef) string {
+	s.Reset()
+	s.write(ref, topLevel)
+	return s.String()
+}
+
+func (s *stringer) variable(ref TypeRef) {
+	i := slices.Index(s.vars, ref)
 	if i == -1 {
-		i = len(b.unbounds)
-		b.unbounds = append(b.unbounds, index)
+		i = len(s.vars)
+		s.vars = append(s.vars, ref)
 	}
-	b.WriteByte(unboundNames[i])
-	// b.WriteByte(unboundNames[index])
+	s.WriteByte(varNames[i%len(varNames)])
+	s.WriteString(strings.Repeat("'", i/len(varNames)))
 }
 
-func (b *stringer) string(ref TypeRef, nesting int) {
-	tag, index := ref.extract()
-	switch tag {
-	case primitiveTag:
-		b.WriteString(primitiveNames[index])
-	case listTag:
-		if nesting > 1 {
-			b.WriteByte('(')
+// Nesting levels, at which compound types need parentheses.
+const (
+	topLevel  = iota // anywhere else
+	argLevel         // a function's argument: functions need them
+	atomLevel        // a list's element or a tag's payload: lists too
+)
+
+func (s *stringer) write(ref TypeRef, nesting int) {
+	ref = s.reg.Resolve(ref)
+	n := s.reg.at(ref)
+	switch n.kind {
+	case conKind:
+		s.WriteString(primitiveNames[ref])
+	case varKind, genKind:
+		s.variable(ref)
+	case listKind:
+		if nesting >= atomLevel {
+			s.WriteByte('(')
 		}
-		b.WriteString("list ")
-		b.string(b.reg.lists[index], 2)
-		if nesting > 1 {
-			b.WriteByte(')')
+		s.WriteString("list ")
+		s.write(n.a, atomLevel)
+		if nesting >= atomLevel {
+			s.WriteByte(')')
 		}
-	case funcTag:
-		fn := b.reg.funcs[index]
-		if nesting > 0 {
-			b.WriteByte('(')
+	case funcKind:
+		if nesting >= argLevel {
+			s.WriteByte('(')
 		}
-		b.string(fn.Arg, 1)
-		b.WriteString(" -> ")
-		b.string(fn.Result, 0)
-		if nesting > 0 {
-			b.WriteByte(')')
+		s.write(n.a, argLevel)
+		s.WriteString(" -> ")
+		s.write(n.b, topLevel)
+		if nesting >= argLevel {
+			s.WriteByte(')')
 		}
-	case enumTag:
-		if nesting > 0 {
-			b.WriteByte('(')
-		}
-		b.enum(index)
-		if nesting > 0 {
-			b.WriteByte(')')
-		}
-	case recordTag:
-		b.record(index)
-	case unboundTag:
-		b.unbound(index)
-	case varTag:
-		ref := b.reg.GetVar(ref)
-		if ref == NeverRef {
-			b.WriteByte('$')
-			b.WriteString(strconv.Itoa(index))
-		} else {
-			b.string(ref, nesting)
-		}
+	case recordKind:
+		s.row(n.a, '{', '}', func(label string, typ TypeRef) {
+			s.WriteString(label)
+			s.WriteString(" : ")
+			s.write(typ, topLevel)
+		})
+	case enumKind:
+		s.row(n.a, '[', ']', func(label string, typ TypeRef) {
+			s.WriteByte('#')
+			s.WriteString(label)
+			if s.reg.Resolve(typ) != NeverRef {
+				s.WriteByte(' ')
+				s.write(typ, atomLevel)
+			}
+		})
 	default:
-		// The invalid type.
 		panic("bad type-ref")
 	}
 }
 
-func (b *stringer) enum(index int) {
-	e := b.reg.enums[index]
-	space := len(e) - 1
-	for _, key := range slices.Sorted(maps.Keys(e)) {
-		b.WriteByte('#')
-		b.WriteString(key)
-
-		// Special-case never.
-		if e[key] != NeverRef {
-			b.WriteByte(' ')
-			b.string(e[key], 1)
-		}
-
-		if space > 0 {
-			space -= 1
-			b.WriteByte(' ')
-		}
+// row writes a row's labels in order, followed by its tail if it is open.
+func (s *stringer) row(row TypeRef, open, close byte, label func(string, TypeRef)) {
+	type entry struct {
+		label string
+		typ   TypeRef
 	}
-}
-
-func (b *stringer) record(index int) {
-	r := b.reg.records[index]
-	b.WriteString("{ ")
-	comma := len(r) - 1
-	for _, key := range slices.Sorted(maps.Keys(r)) {
-		b.WriteString(key)
-		b.WriteString(" : ")
-		b.string(r[key], 1)
-
-		if comma > 0 {
-			comma -= 1
-			b.WriteString(", ")
+	var entries []entry
+	for {
+		row = s.reg.Resolve(row)
+		n := s.reg.at(row)
+		if n.kind != extendKind {
+			break
 		}
+		entries = append(entries, entry{s.reg.labels[n.aux], n.a})
+		row = n.b
 	}
-	b.WriteString(" }")
+	slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.label, b.label) })
+
+	s.WriteByte(open)
+	for i, e := range entries {
+		if i > 0 {
+			s.WriteByte(',')
+		}
+		s.WriteByte(' ')
+		label(e.label, e.typ)
+	}
+	isOpen := s.reg.at(row).kind != emptyKind
+	if isOpen {
+		if len(entries) > 0 {
+			s.WriteByte(',')
+		}
+		s.WriteString(" ...")
+		s.write(row, topLevel)
+	}
+	if len(entries) > 0 || isOpen {
+		s.WriteByte(' ')
+	}
+	s.WriteByte(close)
 }

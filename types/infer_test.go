@@ -22,26 +22,25 @@ func TestInfer(t *testing.T) {
 		{`a ; a = 5`, `int`},
 		{`1 + 2`, `int`},
 		// Lists
-		{`[]`, `list $0`}, // empty list has an unbound type for its values
+		{`[]`, `list a`}, // empty list has an unbound type for its values
 		{`[1, 2]`, `list int`},
 		// Records
 		{`{ a = 1 }`, `{ a : int }`},
 		{`{ ..base, a = ~01 } ; base = { a = ~00 }`, `{ a : byte }`},
 		// // Enums
-		{`bool ; bool : #true #false`, `#false #true`},
-		{`e ; e : #l int #r`, `#l int #r`},
-		{`e::r ; e : #l int #r`, `#l int #r`},
-		{`e::l 4 ; e : #l int #r`, `#l int #r`},
-		{`(#horse text #zebra int)::horse "Lucy"`, `#horse text #zebra int`},
+
+		{`#r`, `[ #r, ...a ]`},
+		{`#l 4`, `[ #l int, ...a ]`},
+		{`f (#horse "Lucy") ; f : (#horse text #zebra int) -> int = _ -> 1`, `int`},
 		// Functions
-		{`a -> a`, `$0 -> $0`},
-		{`_ -> "hi"`, `$0 -> text`},
-		{`_ -> _ -> "hi"`, `$0 -> $1 -> text`},
+		{`a -> a`, `a -> a`},
+		{`_ -> "hi"`, `a -> text`},
+		{`_ -> _ -> "hi"`, `a -> b -> text`},
 		{`(_ -> "hi") ()`, `text`},
 
 		// Prepend and append
-		{`a -> a >+ []`, `$1 -> list $1`},
-		{`a -> a +< int`, `list int -> list int`},
+		{`a -> a >+ []`, `a -> list a`},
+		{`a -> a +< 1`, `list int -> list int`},
 		{`a -> a >+ ~~1111`, `byte -> bytes`},
 		{`a -> a +< ~ff`, `bytes -> bytes`},
 
@@ -49,38 +48,38 @@ func TestInfer(t *testing.T) {
 		{`"hi " ++ "you!"`, `text`},
 		{`[] ++ [1]`, `list int`},
 		{`~~1111 ++ ~~`, `bytes`},
-		{`a -> b -> a ++ b`, `list $2 -> list $2 -> list $2`},
+		{`a -> b -> a ++ b`, `list a -> list a -> list a`},
 
 		// Math
 		{`a -> 1.0 + a`, `float -> float`},
 		{`4 - 3`, `int`},
 		{`a -> b -> a * b`, `int -> int -> int`}, // Default to int.
 
-		{`a -> b -> { a = a, b = b }`, `$0 -> $1 -> { a : $0, b : $1 }`},
-		{`(a -> b -> { a = a, b = b }) 1`, `$2 -> { a : int, b : $2 }`},
+		{`a -> b -> { a = a, b = b }`, `a -> b -> { a : a, b : b }`},
+		{`(a -> b -> { a = a, b = b }) 1`, `a -> { a : int, b : a }`},
 		{`(a -> b -> { a = a, b = b }) 1 "yo" `, `{ a : int, b : text }`},
 		{`a ; a : int = 1`, `int`},
 		{`a -> a + 1`, `int -> int`},
 		{`b -> (a ; a : int = b)`, `int -> int`},
 
 		{`f -> f (f 1)`, `(int -> int) -> int`},
-		{`a -> f -> f (f a)`, `$2 -> ($2 -> $2) -> $2`},
-		{`f -> a -> f (f a)`, `($2 -> $2) -> $2 -> $2`},
+		{`a -> f -> f (f a)`, `a -> (a -> a) -> a`},
+		{`f -> a -> f (f a)`, `(a -> a) -> a -> a`},
 
-		{`f -> a -> [ a ]`, `$0 -> $1 -> list $1`},
-		{`(f -> a -> [ a ]) "a"`, `$2 -> list $2`},
+		{`f -> a -> [ a ]`, `a -> b -> list b`},
+		{`(f -> a -> [ a ]) "a"`, `a -> list a`},
 		{`(f -> a -> [ a ]) "a" 3`, `list int`},
 
-		{`a -> (b ; b = a)`, `$0 -> $0`},
-		{`f -> a -> ([ b, b ] ; b = (f a))`, `($1 -> $2) -> $1 -> list $2`},
+		{`a -> (b ; b = a)`, `a -> a`},
+		{`f -> a -> ([ b, b ] ; b = (f a))`, `(a -> b) -> a -> list b`},
 		// If used the same, arguments must be the same.
-		{`a -> b -> [ a, b ]`, `$1 -> $1 -> list $1`},
+		{`a -> b -> [ a, b ]`, `a -> a -> list a`},
 		{`(a -> b -> [ a, b ]) 1`, `int -> list int`},
 
 		{`"to" |> a -> b -> a <| 2`, `text`},
-		{`4 |> a -> b -> a`, `$4 -> int`},
+		{`4 |> a -> b -> a`, `a -> int`},
 
-		{`typ::fun (x -> x * 2) ; typ : #fun (int -> int)`, `#fun (int -> int)`},
+		{`#fun (x -> x * 2)`, `[ #fun (int -> int), ...a ]`},
 
 		{`| "/" -> (status 200 <| page "you're on the index")
 		| "/about" -> (status 200 <| page "you're on the about page")
@@ -89,7 +88,8 @@ func TestInfer(t *testing.T) {
 		; notfound = (status 404 <| page "not found")
 		; status = code -> body -> { code = code, body = body }
 		; page = body -> "<!doctype html><html><body>" ++ body ++ "</body></html>"`, `text -> { body : text, code : int }`},
-		{`t
+		{`f
+; f : t -> int = _ -> 1
 ; t :
   #a a
   #b int
@@ -97,11 +97,11 @@ func TestInfer(t *testing.T) {
 ; a :
   #x
   #y
-  #z`, `#a (#x #y #z) #b int #c byte`},
+  #z`, `[ #a [ #x, #y, #z ], #b int, #c byte ] -> int`},
 
-		{`| n >+ ns -> ns`, `list $2 -> list $2`},
-		{`| ns +< n -> ns`, `list $2 -> list $2`},
-		{`| ns ++ [a, b] -> ns`, `list $2 -> list $2`},
+		{`| n >+ ns -> ns`, `list a -> list a`},
+		{`| ns +< n -> ns`, `list a -> list a`},
+		{`| ns ++ [a, b] -> ns`, `list a -> list a`},
 
 		{`| n >+ ns -> ns <| [1, 2, 3]`, `list int`},
 		{`| ns +< n -> ns <| [1, 2, 3]`, `list int`},
@@ -109,18 +109,43 @@ func TestInfer(t *testing.T) {
 		{`| [1, 2] ++ ns -> ns <| [1, 2, 3]`, `list int`},
 		{`| ns ++ [2, last] -> ns +< last <| [1, 2, 3]`, `list int`},
 		// Is empty.
-		{`| [] -> #true | _ -> #false`, `list $2 -> #false #true`},
-		{`| a >+ _ -> #first a | _ -> #empty`, `list $2 -> #empty #first $2`},
+		{`| [] -> #true | _ -> #false`, `list a -> [ #false, #true, ...b ]`},
+		{`| a >+ _ -> #first a | _ -> #empty`, `list a -> [ #empty, #first a, ...b ]`},
 		// Unifies nested types.
-		{`| [] -> { empty = #true } | _ -> { empty = #false }`, `list $2 -> { empty : (#false #true) }`},
+		{`| [] -> { empty = #true } | _ -> { empty = #false }`, `list a -> { empty : [ #false, #true, ...b ] }`},
 		{`| 1 -> { list = [] } | _ -> { list = [ 1 ] }`, `int -> { list : list int }`},
-		{`| #true -> [1] | #false -> []`, `(#false #true) -> list int`},
+		{`| #true -> [1] | #false -> []`, `[ #false, #true ] -> list int`},
+
+		// Tags are open; a payload tag is nullary.
+		{`#true #false`, `[ #true [ #false, ...a ], ...b ]`},
+		// Without a catch-all, a match accepts exactly the tags it lists.
+		{`| #a #x -> 1 | #b -> 2`, `[ #a [ #x ], #b ] -> int`},
+		{`| #a -> 1 | _ -> 2`, `[ #a, ...a ] -> int`},
+		{`| #a #x -> 1 | #a y -> 2 | #b -> 3`, `[ #a [ #x, ...a ], #b ] -> int`},
+
+		// Records
+		{`r -> r.a`, `{ a : a, ...b } -> a`},
+		{`{ a = 1, b = "" }.b`, `text`},
+		{`| { a = 1 } -> 1 | { a = n } -> n`, `{ a : int } -> int`},
+		{`| { ..r, a = n } -> r`, `{ a : a, ...b } -> { ...b }`},
+
+		// Composition
+		{`f >> g ; f = x -> x + 1 ; g = x -> [x]`, `int -> list int`},
+
+		// Bindings are generalized.
+		{`{ a = 1 >+ e, b = "" >+ e } ; e = []`, `{ a : list int, b : list text }`},
+		// Where-groups are recursive.
+		{`x ; x = y + 1 ; y = 2`, `int`},
+		{`f ; f = | 0 -> 0 | n -> f (n - 1)`, `int -> int`},
+		{`even
+; even = | 0 -> #true | n -> odd (n - 1)
+; odd = | 0 -> #false | n -> even (n - 1)`, `int -> [ #false, #true, ...a ]`},
 	}
 
 	for _, ex := range examples {
 		se := must(parser.ParseExpr(ex.source))
 		var reg Registry
-		typ, err := Infer(&reg, DefaultScope(&reg), se, nil)
+		typ, err := Infer(&reg, nil, se, nil)
 		if err != nil {
 			t.Error(err)
 		} else {
@@ -139,15 +164,12 @@ func TestInferFailure(t *testing.T) {
 		// Lists
 		{`[1, 1.0]`, `cannot unify 'int' with 'float'`},
 		{`[4] ++ ["text"]`, `cannot unify 'int' with 'text'`},
-		{`4 ++ 6`, `cannot unify 'int' with 'list $0'`},
+		{`4 ++ 6`, `cannot unify 'int' with 'list a'`},
 		// Records
-		{`{ ..base, a = 1 } ; base = { a = ~00 }`, `type of a must be byte, not int`},
-		{`{ ..1, a = 1 }`, `cannot spread from non-record type int`},
+		{`{ ..base, a = 1 } ; base = { a = ~00 }`, `cannot unify 'byte' with 'int'`},
+		{`{ ..1, a = 1 }`, `cannot unify 'int' with '{ a : int, ...a }'`},
 		// Enums
-		{`1::a`, `int isn't an enum`},
-		{`a::a ; a : #b`, `#a isn't a valid option for enum #b`},
-		{`a::b 1 ; a : #b`, `#b doesn't take any value`},
-		{`a::b 1 ; a : #b text`, `cannot unify 'int' with 'text'`},
+
 		{`1 + ~dd`, `cannot unify 'byte' with 'int'`},
 		{`a ; a : int = 1.0`, `cannot unify 'float' with 'int'`},
 		{`f ; f : int -> text = a -> 1`, `cannot unify 'int' with 'text'`},
@@ -156,17 +178,26 @@ func TestInferFailure(t *testing.T) {
 		// No imports.
 		{`$sha256~~`, `<internal error> missing infer import function`},
 		// Different return types.
-		{`| [] -> #box int | _ -> #box text`, `cannot unify 'int' with 'text'`},
+		{`| [] -> #box 1 | _ -> #box "a"`, `cannot unify 'int' with 'text'`},
 		// Different input types.
 		{`| #box n -> [ n + 1 ] | #box "o" -> []`, `cannot unify 'int' with 'text'`},
 		// Different fields.
 		{`| [] -> { a = 1 } | _ -> { b = 1 }`, `cannot unify '{ a : int }' with '{ b : int }'`},
+		{`| { a = 1 } -> 1 | { a = 1, b = 2 } -> 2`, `cannot unify '{ a : int }' with '{ a : a, b : b }'`},
+		{`{ a = 1 }.b`, `cannot unify '{ a : int }' with '{ b : a, ...b }'`},
+		{`(| #a -> 1 | #b -> 2) #c`, `cannot unify '[ #a, #b ]' with '[ #c, ...a ]'`},
+		// Function arguments aren't generalized.
+		{`f -> ({ a = g 1, b = g "" } ; g = x -> f x)`, `cannot unify 'int' with 'text'`},
+		{`x -> z -> { a = [z, [x]], b = [x, [z]] }`, `cannot construct infinite type`},
+		{`x ; x = 1 ; x = 2`, `cannot bind x twice`},
+		{`f ; f : c -> int = _ -> 1 ; c : #a #a`, `cannot define tag #a more than once`},
+		{`f ; f : t -> int = _ -> 1 ; t : #a t`, `recursive type t is not supported yet`},
 	}
 
 	for _, ex := range examples {
 		var reg Registry
 		se := must(parser.ParseExpr(ex.source))
-		_, err := Infer(&reg, DefaultScope(&reg), se, nil)
+		_, err := Infer(&reg, nil, se, nil)
 		if err != nil {
 			str := err.Error()
 			if !strings.Contains(str, ex.message) {
@@ -180,9 +211,9 @@ func TestInferFailure(t *testing.T) {
 
 func TestInferInScope(t *testing.T) {
 	examples := []struct{ source, typ string }{
-		{`len`, `list $0 -> int`},
+		{`len`, `list a -> int`},
 		{`len []`, `int`},
-		{`(f -> a -> ([ b, b ] ; b = (f a))) len`, `list $4 -> list int`},
+		{`(f -> a -> ([ b, b ] ; b = (f a))) len`, `list a -> list int`},
 		{`(f -> a -> ([ b, b ] ; b = (f a))) len []`, `list int`},
 
 		{`{ a = id 1, b = id "" }`, `{ a : int, b : text }`},
@@ -196,9 +227,9 @@ func TestInferInScope(t *testing.T) {
 		reg := Registry{}
 		var scope *Scope[TypeRef]
 
-		scope = scope.Bind("len", reg.Func(reg.List(reg.Unbound()), IntRef))
+		scope = scope.Bind("len", reg.Func(reg.List(reg.Gen()), IntRef))
 
-		a := reg.Unbound()
+		a := reg.Gen()
 		scope = scope.Bind("id", reg.Func(a, a))
 
 		ref, err := Infer(&reg, scope, se, nil)
@@ -226,7 +257,7 @@ func (mf MapFetcher) FetchSha256(key string) ([]byte, error) {
 func TestInferImport(t *testing.T) {
 	var reg Registry
 
-	a := reg.Var()
+	a := reg.Gen()
 
 	examples := []struct {
 		in     string  // The input.
@@ -239,17 +270,16 @@ func TestInferImport(t *testing.T) {
 		{in: `$sha256~~`, imp: IntRef, result: `int`},
 		{in: `$sha256~~`, imp: FloatRef, result: `float`},
 		{in: `1 + $sha256~~`, imp: FloatRef, err: `cannot unify 'int' with 'float'`},
-		{in: `$sha256~~`, imp: a, result: `$0`},
-		{in: `a ; a = $sha256~~`, imp: a, result: `$0`},
+		{in: `$sha256~~`, imp: a, result: `a`},
+		{in: `a ; a = $sha256~~`, imp: a, result: `a`},
 		{in: `$sha256~~ [ 1, 2 ]`, imp: reg.Func(a, a), result: `list int`},
-		// TODO: Aliasing allocates new type vars, just importing does not. :/
-		{in: `a ; a = $sha256~~`, imp: reg.Func(a, a), result: `$2 -> $2`},
-		{in: `a ; a = $sha256~~`, imp: reg.Func(a, a), result: `$3 -> $3`},
+		{in: `a ; a = $sha256~~`, imp: reg.Func(a, a), result: `a -> a`},
+		{in: `{ x = a 1, y = a "" } ; a = $sha256~~`, imp: reg.Func(a, a), result: `{ x : int, y : text }`},
 	}
 
 	for _, ex := range examples {
 		se := must(parser.ParseExpr(ex.in))
-		typ, err := Infer(&reg, DefaultScope(&reg), se, func(algo string, hash []byte) (TypeRef, error) {
+		typ, err := Infer(&reg, nil, se, func(algo string, hash []byte) (TypeRef, error) {
 			return ex.imp, nil
 		})
 		if err != nil {

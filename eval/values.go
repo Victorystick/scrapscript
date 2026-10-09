@@ -7,14 +7,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/Victorystick/scrapscript/types"
 )
 
 // Values
 
 type Value interface {
-	Type() types.TypeRef
 	String() string
 	eq(other Value) bool
 }
@@ -26,21 +23,15 @@ type Text string
 type Byte byte
 type Bytes []byte
 
-// A named type that may be referenced in e.g. a pick expression.
-type Type types.TypeRef
-
 type Record struct {
-	typ    types.TypeRef
 	values map[string]Value
 }
 
 type List struct {
-	typ      types.TypeRef
 	elements []Value
 }
 
 type Variant struct {
-	typ   types.TypeRef
 	tag   string
 	value Value
 }
@@ -51,7 +42,6 @@ type Func func(Value) (Value, error)
 // A built-in function.
 type BuiltInFunc struct {
 	name string
-	typ  types.TypeRef
 	fn   Func
 }
 
@@ -74,8 +64,6 @@ func Equals(a, b Value) bool {
 	case Byte:
 		return a.eq(b)
 	case Bytes:
-		return a.eq(b)
-	case Type:
 		return a.eq(b)
 	case Record:
 		return a.eq(b)
@@ -115,19 +103,13 @@ func (bs Bytes) eq(other Value) bool {
 	o, ok := other.(Bytes)
 	return ok && bytes.Equal(bs, o)
 }
-func (t Type) eq(other Value) bool {
-	o, ok := other.(Type)
-	return ok && t == o
-}
 func (i Record) eq(other Value) bool {
 	o, ok := other.(Record)
-	return ok && i.typ == o.typ &&
-		maps.EqualFunc(i.values, o.values, Equals)
+	return ok && maps.EqualFunc(i.values, o.values, Equals)
 }
 func (l List) eq(other Value) bool {
 	o, ok := other.(List)
-	return ok && l.typ == o.typ &&
-		slices.EqualFunc(l.elements, o.elements, Equals)
+	return ok && slices.EqualFunc(l.elements, o.elements, Equals)
 }
 func (v Variant) eq(other Value) bool {
 	o, ok := other.(Variant)
@@ -141,26 +123,6 @@ func (sf ScriptFunc) eq(other Value) bool {
 	o, ok := other.(ScriptFunc)
 	// TODO: This is very incomplete.
 	return ok && sf.source == o.source
-}
-
-// Type
-func (h Hole) Type() types.TypeRef   { return types.HoleRef }
-func (i Int) Type() types.TypeRef    { return types.IntRef }
-func (f Float) Type() types.TypeRef  { return types.FloatRef }
-func (t Text) Type() types.TypeRef   { return types.TextRef }
-func (b Byte) Type() types.TypeRef   { return types.ByteRef }
-func (bs Bytes) Type() types.TypeRef { return types.BytesRef }
-func (t Type) Type() types.TypeRef {
-	// TODO: Should a type return itself, or a special type?
-	return types.NeverRef
-}
-func (r Record) Type() types.TypeRef       { return r.typ }
-func (l List) Type() types.TypeRef         { return l.typ }
-func (v Variant) Type() types.TypeRef      { return v.typ }
-func (bf BuiltInFunc) Type() types.TypeRef { return bf.typ }
-func (sf ScriptFunc) Type() types.TypeRef {
-	// TODO: implement
-	return types.NeverRef
 }
 
 // String
@@ -188,9 +150,6 @@ func (b Byte) String() string {
 }
 func (bs Bytes) String() string {
 	return "~~" + base64.StdEncoding.EncodeToString(bs)
-}
-func (t Type) String() string {
-	return "<type>"
 }
 func (r Record) String() string {
 	var b strings.Builder

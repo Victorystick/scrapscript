@@ -7,7 +7,6 @@ import (
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/token"
-	"github.com/Victorystick/scrapscript/types"
 )
 
 type bail struct{}
@@ -19,7 +18,6 @@ var (
 
 type matcher struct {
 	src  *ast.SourceExpr
-	reg  *types.Registry
 	vars Variables
 	err  error
 }
@@ -37,8 +35,8 @@ func (m *matcher) errorf(n ast.Node, format string, args ...any) {
 
 // Matches an expression onto val returning new bindings.
 // It is a match if err is nil.
-func Match(src *ast.SourceExpr, reg *types.Registry, x ast.Node, val Value) (vars Variables, err error) {
-	m := matcher{src, reg, make(Variables), err}
+func Match(src *ast.SourceExpr, x ast.Node, val Value) (vars Variables, err error) {
+	m := matcher{src, make(Variables), err}
 
 	defer func() {
 		if pnc := recover(); pnc != nil {
@@ -88,9 +86,10 @@ func (m *matcher) match(x ast.Node, val Value) {
 	case ast.Variant:
 		tag, typ := m.src.Variant(x)
 		if val, ok := val.(Variant); ok && m.src.TokenText(tag) == val.tag {
-			// TODO: handle nil
-			// Recursively match further.
-			m.match(typ, val.value)
+			// Recursively match the payload, if any.
+			if typ != ast.None {
+				m.match(typ, val.value)
+			}
 			return
 		}
 
@@ -110,14 +109,11 @@ func (m *matcher) match(x ast.Node, val Value) {
 
 			// If there's a rest expression; clone the record, clear used keys and recurse.
 			if rest != ast.None {
-				ref := maps.Clone(m.reg.GetRecord(record.typ))
 				restVals := maps.Clone(record.values)
 				for i := range fields.Len() {
-					tag := m.src.TokenText(fields.Key(i))
-					delete(ref, tag)
-					delete(restVals, tag)
+					delete(restVals, m.src.TokenText(fields.Key(i)))
 				}
-				m.match(rest, Record{m.reg.Record(ref), restVals})
+				m.match(rest, Record{restVals})
 			}
 
 			return
@@ -145,14 +141,14 @@ func (m *matcher) match(x ast.Node, val Value) {
 				// Match head.
 				m.match(left, list.elements[0])
 				// Match tail.
-				m.match(right, List{list.typ, list.elements[1:]})
+				m.match(right, List{list.elements[1:]})
 				return
 			}
 		}
 		if op == token.APPEND {
 			if list, ok := val.(List); ok && len(list.elements) > 0 {
 				// Match head.
-				m.match(left, List{list.typ, list.elements[:len(list.elements)-1]})
+				m.match(left, List{list.elements[:len(list.elements)-1]})
 				// Match tail.
 				m.match(right, list.elements[0])
 				return
@@ -172,7 +168,7 @@ func (m *matcher) match(x ast.Node, val Value) {
 					for index, elem := range head {
 						m.match(sublist[index], elem)
 					}
-					m.match(right, List{list.typ, tail})
+					m.match(right, List{tail})
 					return
 				}
 
@@ -185,7 +181,7 @@ func (m *matcher) match(x ast.Node, val Value) {
 
 					head, tail := split(list.elements, len(list.elements)-len(sublist))
 
-					m.match(left, List{list.typ, head})
+					m.match(left, List{head})
 					for index, elem := range tail {
 						m.match(sublist[index], elem)
 					}

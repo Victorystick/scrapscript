@@ -106,10 +106,13 @@ func (e *Environment) Read(script []byte) (*Scrap, error) {
 	return scrap, nil
 }
 
-// Eval evaluates a Scrap.
+// Eval type-checks and evaluates a Scrap.
 func (e *Environment) Eval(scrap *Scrap) (Value, error) {
 	if scrap.value == nil {
-		value, err := Eval(scrap.expr, &e.reg, e.vars, e.evalImport)
+		if _, err := e.infer(scrap); err != nil {
+			return nil, err
+		}
+		value, err := Eval(scrap.expr, e.vars, e.evalImport)
 		scrap.value = value
 		return value, err
 	}
@@ -133,12 +136,6 @@ func (e *Environment) Infer(scrap *Scrap) (string, error) {
 
 // Scrap renders a Value as self-contained scrapscript program.
 func (e *Environment) Scrap(value Value) string {
-	if vr, ok := value.(Variant); ok {
-		if vr.value == nil {
-			return fmt.Sprintf("(%s)::%s", e.reg.String(vr.typ), vr.tag)
-		}
-		return fmt.Sprintf("(%s)::%s %s", e.reg.String(vr.typ), vr.tag, e.Scrap(vr.value))
-	}
 	return value.String()
 }
 

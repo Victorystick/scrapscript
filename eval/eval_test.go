@@ -30,11 +30,10 @@ var expressions = []struct {
 	{`"hello" ++ " " ++ "world"`, `"hello world"`},
 	// Functions
 	{`2 |> | _ -> 3`, `3`},
-	// eval(t, `f #true ; f = | #true -> 1 | #false -> 2`, 1)
-	// eval(t, `bool::true |> | #true -> 1 | #false -> 2 ; bool : #true #false`, 1)
+	{`f #true ; f = | #true -> 1 | #false -> 2`, `1`},
 	{`f 2 ; f = | a -> a + a`, `4`},
 	{`2 |> | a -> a + a`, `4`},
-	{`hand::l 5 |> | #l n -> n * 2 | #r n -> n * 3 ; hand : #l int #r int`, `10`},
+	{`#l 5 |> | #l n -> n * 2 | #r n -> n * 3`, `10`},
 	{`f "b"
 ; f =
   | "a" -> 1
@@ -53,19 +52,24 @@ var expressions = []struct {
 	    | "dog" -> "puppy"
 	    |   a   -> "baby " ++ a`, `"kitten"`},
 	{`(x -> x) (y -> y)`, `y -> y`},
-	{`m::just 2 |> | #just 2 -> "two" | #just _ -> "other" | #no -> "x" ; m : #just int #no`, `"two"`},
+	{`#just 2 |> | #just 2 -> "two" | #just _ -> "other" | #no -> "x"`, `"two"`},
 	// {`| "hey" -> ""
 	// 	| "hello " ++ name -> name
 	// 	| _ -> "<empty>" <| "hello Oseg"`, Text("Oseg")},
-	{`box::empty ; box : #empty`, `#empty`},
-	{`typ::fun (x -> x * 2) ; typ : #fun (int -> int)`, `#fun x -> x * 2`},
+	{`#empty`, `#empty`},
+	{`#fun (x -> x * 2)`, `#fun x -> x * 2`},
 
 	// Destructuring.
 	{`{ a = 1, b = 2 } |> | { a = c, b = d } -> c + d`, `3`},
-	{`{ a = 1 } |> | { a = 2 } -> c | { a = c } -> c`, `1`},
+	{`{ a = 1 } |> | { a = 2 } -> 0 | { a = c } -> c`, `1`},
 	{`3 |> a -> b -> a`, `b -> a`},
 
-	{`#true #false`, `<type>`}, // TODO: should be `#true #false`
+	{`#true #false`, `#true #false`},
+
+	// Where-groups are recursive.
+	{`f 1 ; b = 2 ; f = a -> b`, `2`},
+	{`count 3
+	; count = | 0 -> [] | n -> count (n - 1) +< n`, `[ 1, 2, 3 ]`},
 
 	{`list/repeat 2`, `list/repeat 2`},
 	{`text/repeat 3`, `text/repeat 3`},
@@ -83,7 +87,7 @@ var expressions = []struct {
 
 func TestScrapItentity(t *testing.T) {
 	var scraps = []string{
-		`(#horse text #zebra int)::horse "Lucy"`,
+		`#horse "Lucy"`,
 	}
 
 	for _, scrap := range scraps {
@@ -105,27 +109,24 @@ var failures = []struct {
 	source string
 	error  string
 }{
-	{`f 1 ; f = a -> b`, "unknown variable b"},
-	{`f 1 ; b = 2 ; f = a -> b`, "unknown variable b"},
-	{`{} |> | { b = a } -> a`, "cannot bind to missing key b"},
+	{`f 1 ; f = a -> b`, "unbound variable: b"},
+	{`{} |> | { b = a } -> a`, "cannot unify '{ b : a }' with '{}'"},
 	{`[ 1, ] |> | [] -> "four"`, `[] -> "four" had no alternative for [ 1 ]`},
-	{`[] ++ ""`, `non-list value ""`},
-	{`"" ++ []`, `non-text value []`},
+	{`[] ++ ""`, `cannot unify 'list a' with 'text'`},
+	{`"" ++ []`, `cannot unify 'text' with 'list a'`},
 	{`1 -> x`, `function parameter must be an identifier`},
-	{`hand::left 5 ; hand : #l int #r int`, `#left isn't one of the valid tags: #l, #r`},
-	{`{ a = 2 } |> | { a = a, b = a } -> ()`, `cannot bind to missing key b`},
+	{`#left 5 |> | #l n -> n | #r n -> n`, `cannot unify '[ #l a, #r a ]' with '[ #left int, ...b ]'`},
+	{`{ a = 2 } |> | { a = a, b = b } -> ()`, `cannot unify '{ a : a, b : b }' with '{ a : int }'`},
 	{`{ a = 2, b = 1 } |> | { a = a, b = a } -> ()`, `cannot bind a twice`},
-	{`c ; c : #a #a`, `cannot define tag #a more than once`},
-	{`a::x 1 ; a : #x f ; f = x -> 2`, `required a type, got x -> 2`},
-	{`1::a`, `1 does not evaluate to a type`},
-	{`box::empty 1 ; box : #empty`, `#empty does not take a value`},
-	{`box::with ; box : #with int`, `#with requires a value of type int`},
-	{`["a"] +< ~be`, `cannot append byte to list text`},
-	{`1 >+ [~~abcd]`, `cannot prepend int to list bytes`},
-	{`[1, 1.2]`, `list elements must all be of type int, got float`},
-	{`{ b = 1 }.a`, `record { b = 1 } has no key a`},
-	{`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`, `cannot set key b not in the base record`},
-	{`{ ..{ a = 2 }, a = "x"}`, `cannot change type of key a from int to text`},
+	{`f ; f : c -> int = _ -> 1 ; c : #a #a`, `cannot define tag #a more than once`},
+	{`g ; g : #x f -> int = _ -> 1 ; f = x -> 2`, `unknown type f`},
+	{`a::x`, `Expected EOF got DEFINE`},
+	{`["a"] +< ~be`, `cannot unify 'list text' with 'bytes'`},
+	{`1 >+ [~~abcd]`, `cannot unify 'bytes' with 'int'`},
+	{`[1, 1.2]`, `cannot unify 'int' with 'float'`},
+	{`{ b = 1 }.a`, `cannot unify '{ b : int }' with '{ a : a, ...b }'`},
+	{`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`, `cannot unify '{ a : int, c : int }' with '{ a : int, b : text, ...a }'`},
+	{`{ ..{ a = 2 }, a = "x"}`, `cannot unify 'int' with 'text'`},
 }
 
 func TestEval(t *testing.T) {
@@ -154,11 +155,9 @@ var exp2str = []struct{ source, result string }{
 	; g = { a = 1, b = "x", c = ~00 }`, `{ a = 2, b = "x", c = ~FF }`},
 	{`{ ..{ a = 2, c = 1 }, a = 1 }`, `{ a = 1, c = 1 }`},
 	{`{ a = 2, b = 3, c = 4 } |>
-    | { ..x, a = 1, b = 2, c = 3 } -> ()
-    | {      a = 1, b = b,       } -> ()
-    | {      a = 1, b = 2,       } -> ()
-    | { ..x,               c = c } -> { c = c, x = x }`, `{ c = 4, x = { a = 2, b = 3 } }`},
-	{`a ; a : #x int #y float #z`, "<type>"}, // TODO: should be `#x int #y float #z`
+    | { ..x, a = 1, b = 2, c = 3 } -> 0
+    | { ..x, a = 1, b = b,       } -> b
+    | { ..x,               c = c } -> c + x.a`, `6`},
 	{`~ff`, "~FF"},
 	{`~~abcd`, "~~abcd"},
 	{`f 1 <| 2 ; f = a -> b -> a + b`, "3"},
@@ -167,10 +166,10 @@ var exp2str = []struct{ source, result string }{
 	{`2 * ceil 2.2 + 1`, "7"},
 	{`-3 - 5`, `-8`},
 
-	{`(hand::l 5 |>
+	{`(#l 5 |>
 			| #l n -> n * 2
 			| #r n -> n * 3)
-	; hand : #l int #r int`, `10`},
+	; double : int -> int = n -> n * 2`, `10`},
 
 	{`list/map text/length ["hey", "beautiful"]`, `[ 3, 9 ]`},
 	{`list/map text/length`, `list/map text/length`},
@@ -183,17 +182,15 @@ var exp2str = []struct{ source, result string }{
 	{`[ 4 + 2, 5 - 1, ]`, "[ 6, 4 ]"},
 	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four"`, `"four"`},
 
-	{`fix (fn -> a -> a) <| 4`, `4`},
-
 	// Generates a list of numbers from 0 to n inclusive.
-	{`fix (seq -> | 0 -> [0] | n -> seq (n - 1) +< n) 4`, `[ 0, 1, 2, 3, 4 ]`},
+	{`seq 4 ; seq = | 0 -> [0] | n -> seq (n - 1) +< n`, `[ 0, 1, 2, 3, 4 ]`},
 
 	{`list/map fib (seq 10)
-	; seq = fix (seq -> | 0 -> [0] | n -> seq (n - 1) +< n)
-    ; fib = fix (fib ->
+	; seq = | 0 -> [0] | n -> seq (n - 1) +< n
+    ; fib =
         | 0 -> 0
         | 1 -> 1
-        | n -> fib (n - 1) + fib (n - 2))`, `[ 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55 ]`},
+        | n -> fib (n - 1) + fib (n - 2)`, `[ 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55 ]`},
 }
 
 func TestEvalString(t *testing.T) {

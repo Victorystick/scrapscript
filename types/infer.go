@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/token"
@@ -35,7 +36,17 @@ func (s *Scope[T]) Bind(name string, val T) *Scope[T] {
 	return &Scope[T]{s, name, val}
 }
 
+// TypeScope maps names of values to their types, which may be schemes.
 type TypeScope = *Scope[TypeRef]
+
+// An alias is a type-only binding, whose type is computed on first use.
+type alias struct {
+	typ     ast.Node
+	scope   *Scope[*alias]
+	ref     TypeRef
+	done    bool
+	pending bool
+}
 
 type InferImport func(algo string, hash []byte) (TypeRef, error)
 
@@ -43,6 +54,7 @@ type context struct {
 	src         *ast.SourceExpr
 	reg         *Registry
 	scope       TypeScope
+	aliases     *Scope[*alias]
 	inferImport InferImport
 }
 
@@ -50,23 +62,12 @@ func (c *context) bail(n ast.Node, msg string) {
 	panic(c.src.Error(n, msg))
 }
 
-func (c *context) bind(name string, ref TypeRef) TypeScope {
+func (c *context) bind(name string, ref TypeRef) {
 	c.scope = c.scope.Bind(name, ref)
-	return c.scope
 }
 
-// Unbinds the last bound variable.
-func (c *context) unbind() {
-	c.scope = c.scope.parent
-}
-
-func DefaultScope(reg *Registry) (scope TypeScope) {
-	for _, p := range primitives {
-		scope = scope.Bind(reg.String(p), p)
-	}
-	return
-}
-
+// Infer infers the type of se, given the types of the values in scope. The
+// result is generalized, so that it can be used as a type scheme.
 func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, inferImport InferImport) (ref TypeRef, err error) {
 	context := context{
 		src:         &se,
@@ -75,7 +76,9 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, inferImport InferI
 		inferImport: inferImport,
 	}
 
+	level := reg.level
 	defer func() {
+		reg.level = level
 		if pnc := recover(); pnc != nil {
 			if e, ok := pnc.(token.Error); ok {
 				err = e
@@ -85,11 +88,12 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, inferImport InferI
 		}
 	}()
 
+	reg.enter()
 	ref = context.infer(se.Expr)
+	reg.exit()
+	reg.generalize(ref)
 	return ref, err
 }
-
-type InferFunc func(expr ast.Node) TypeRef
 
 func (c *context) infer(x ast.Node) TypeRef {
 	switch c.src.Kind(x) {
@@ -97,97 +101,58 @@ func (c *context) infer(x ast.Node) TypeRef {
 		return literalTypeRef(c.src.LiteralKind(x))
 	case ast.Ident:
 		name := c.src.TokenText(c.src.Main(x))
-		ref := c.scope.Lookup(name)
-		if ref == NeverRef {
+		bound := c.scope.Get(name)
+		if bound == nil {
 			c.bail(x, "unbound variable: "+name)
 		}
-		return c.reg.Instantiate(ref)
+		return c.reg.Instantiate(bound.val)
 	case ast.Where:
 		return c.where(x)
 	case ast.List:
 		return c.list(x)
 	case ast.Record:
 		return c.record(x)
+	case ast.Access:
+		rec, key := c.src.Access(x)
+		field := c.reg.Var()
+		row := c.reg.extend(c.reg.intern(c.src.TokenText(key)), field, c.reg.Var())
+		c.ensure(rec, c.infer(rec), c.reg.add(node{kind: recordKind, a: row}))
+		return field
+	case ast.Variant:
+		tag, payload := c.src.Variant(x)
+		typ := NeverRef
+		if payload != ast.None {
+			typ = c.infer(payload)
+		}
+		row := c.reg.extend(c.reg.intern(c.src.TokenText(tag)), typ, c.reg.Var())
+		return c.reg.add(node{kind: enumKind, a: row})
 	case ast.Enum:
-		return c.enum(x, c.infer)
+		c.bail(x, "cannot use a type as a value")
 
 	case ast.Func:
 		arg, body := c.src.Func(x)
-		// Not sure how to juggle vars vs unbound. :/
+		if c.src.Kind(arg) != ast.Ident {
+			c.bail(arg, "function parameter must be an identifier")
+		}
 		binder := c.reg.Var()
-		c.bind(c.src.NodeText(arg), binder)
-		defer c.unbind()
+		scope := c.scope
+		if name := c.src.NodeText(arg); name != "_" {
+			c.bind(name, binder)
+		}
 		ret := c.infer(body)
+		c.scope = scope
 		return c.reg.Func(binder, ret)
 
 	case ast.MatchFunc:
-		argTy := c.reg.Var()
-		bodyTy := c.reg.Var()
-		for _, opt := range c.src.Arms(x) {
-			arg, body := c.src.Func(opt)
-			boundVars := c.match(&argTy, arg)
-			bodyTy = c.ensure(body, bodyTy, c.infer(body))
-			// Unbind all bound variables.
-			for i := 0; i < boundVars; i++ {
-				c.unbind()
-			}
-		}
-		return c.reg.Func(argTy, bodyTy)
+		return c.matchFunc(x)
 
 	case ast.Call:
 		fn, arg := c.src.Call(x)
-		// Special-case pick with a value.
-		if c.src.Kind(fn) == ast.Binary {
-			if op, _, _ := c.src.Binary(fn); op == token.PICK {
-				return c.pick(fn, arg)
-			}
-		}
-
 		return c.call(x, fn, arg)
 
 	case ast.Binary:
-		op, l, r := c.src.Binary(x)
-		if op == token.PICK {
-			return c.pick(x, ast.None)
-		}
+		return c.binary(x)
 
-		left := c.infer(l)
-		right := c.infer(r)
-		switch op {
-		case token.PREPEND:
-			return c.pend(l, r, left, right)
-		case token.APPEND:
-			return c.pend(r, l, right, left)
-		case token.CONCAT:
-			if left == TextRef || right == TextRef {
-				c.ensure(x, left, right)
-				return TextRef
-			}
-			if left == BytesRef || right == BytesRef {
-				c.ensure(x, left, right)
-				return BytesRef
-			}
-			// Local var to ensure left and right are lists.
-			a := c.reg.List(c.reg.Var())
-			c.ensure(x, left, right)
-			c.ensure(x, left, a)
-			return a
-		case token.ADD, token.SUB, token.MUL:
-			if left == FloatRef || right == FloatRef {
-				c.ensure(x, left, right)
-				return FloatRef
-			}
-			// Assume int, like ML does.
-			c.ensure(l, left, IntRef)
-			return c.ensure(r, right, IntRef)
-
-		// Pipes are essentially just calls.
-		case token.LPIPE:
-			return c.call(x, l, r)
-		case token.RPIPE:
-			return c.call(x, r, l)
-		}
-		panic(fmt.Sprintf("can't infer binary expression %s", op.String()))
 	case ast.Import:
 		if c.inferImport == nil {
 			c.bail(x, "<internal error> missing infer import function")
@@ -201,28 +166,17 @@ func (c *context) infer(x ast.Node) TypeRef {
 		if err != nil {
 			c.bail(x, err.Error())
 		}
-		return ref
+		return c.reg.Instantiate(ref)
 	}
 
 	panic(fmt.Sprintf("can't infer node %s", c.src.Kind(x)))
 }
 
-func (c *context) ensure(x ast.Node, got, want TypeRef) TypeRef {
-	if got != want {
-		// Really? Must make this API better.
-		defer func() {
-			if pnc := recover(); pnc != nil {
-				if msg, ok := pnc.(string); ok {
-					c.bail(x, msg)
-				} else {
-					panic(pnc)
-				}
-			}
-		}()
-
-		return c.reg.unify(got, want)
+// ensure unifies got with want, failing at x if they differ.
+func (c *context) ensure(x ast.Node, got, want TypeRef) {
+	if err := c.reg.Unify(got, want); err != nil {
+		c.bail(x, err.Error())
 	}
-	return want
 }
 
 func (c *context) call(x, fn, arg ast.Node) TypeRef {
@@ -233,219 +187,221 @@ func (c *context) call(x, fn, arg ast.Node) TypeRef {
 	return res
 }
 
-// The expression type is passed by pointer so that we can update it.
-func (c *context) match(ty *TypeRef, x ast.Node) int {
-	switch c.src.Kind(x) {
-	case ast.Ident:
-		name := c.src.TokenText(c.src.Main(x))
-		// Ignore _.
-		if name == "_" {
-			return 0
-		}
-
-		c.bind(name, *ty)
-		return 1
-
-	case ast.Literal:
-		c.ensure(x, *ty, literalTypeRef(c.src.LiteralKind(x)))
-		return 0
-
-	case ast.Binary:
-		op, l, r := c.src.Binary(x)
-		if op == token.PREPEND {
-			val := c.reg.Var()
-			valList := c.reg.List(val)
-			c.ensure(x, *ty, valList)
-			return c.match(&val, l) + c.match(&valList, r)
-		}
-		if op == token.APPEND {
-			val := c.reg.Var()
-			valList := c.reg.List(val)
-			c.ensure(x, *ty, valList)
-			return c.match(&valList, l) + c.match(&val, r)
-		}
-		if op == token.CONCAT {
-			val := c.reg.Var()
-			valList := c.reg.List(val)
-			c.ensure(x, *ty, valList)
-			return c.match(&valList, l) + c.match(&valList, r)
-		}
-
-	case ast.List:
-		val := c.reg.Var()
-		c.ensure(x, c.reg.List(val), *ty)
-
-		bindings := 0
-		for _, v := range c.src.List(x) {
-			bindings += c.match(&val, v)
-		}
-		return bindings
-
-	case ast.Variant:
-		bindings := 0
-		tag, typ := c.src.Variant(x)
-		name := c.src.TokenText(tag)
-		vRef := NeverRef
-		if typ != ast.None {
-			vRef = c.reg.Var()
-			bindings += c.match(&vRef, typ)
-		}
-		ref := c.reg.Enum(map[string]TypeRef{name: vRef})
-		*ty = c.ensure(x, *ty, ref)
-		return bindings
-
-	default:
-		c.bail(x, fmt.Sprintf("cannot match on %s", c.src.Kind(x)))
+func (c *context) binary(x ast.Node) TypeRef {
+	op, l, r := c.src.Binary(x)
+	switch op {
+	// Pipes are just calls.
+	case token.LPIPE:
+		return c.call(x, l, r)
+	case token.RPIPE:
+		return c.call(x, r, l)
 	}
-	// Unreachable.
-	return 0
+
+	left := c.infer(l)
+	right := c.infer(r)
+	switch op {
+	case token.PREPEND:
+		return c.pend(l, r, left, right)
+	case token.APPEND:
+		return c.pend(r, l, right, left)
+	case token.CONCAT:
+		if c.either(left, right, TextRef) {
+			c.ensure(x, left, right)
+			return TextRef
+		}
+		if c.either(left, right, BytesRef) {
+			c.ensure(x, left, right)
+			return BytesRef
+		}
+		c.ensure(x, left, right)
+		c.ensure(x, left, c.reg.List(c.reg.Var()))
+		return left
+	case token.ADD, token.SUB, token.MUL:
+		if c.either(left, right, FloatRef) {
+			c.ensure(x, left, right)
+			return FloatRef
+		}
+		// Assume int, like ML does.
+		c.ensure(l, left, IntRef)
+		c.ensure(r, right, IntRef)
+		return IntRef
+	case token.RCOMP, token.LCOMP:
+		// f >> g is x -> g (f x).
+		f, g := left, right
+		if op == token.LCOMP {
+			f, g = right, left
+		}
+		a, b, res := c.reg.Var(), c.reg.Var(), c.reg.Var()
+		c.ensure(x, f, c.reg.Func(a, b))
+		c.ensure(x, g, c.reg.Func(b, res))
+		return c.reg.Func(a, res)
+	}
+	c.bail(x, fmt.Sprintf("can't infer binary expression %s", op.String()))
+	return NeverRef
 }
 
+// either returns true if a or b is already known to be the primitive typ.
+func (c *context) either(a, b, typ TypeRef) bool {
+	return c.reg.Resolve(a) == typ || c.reg.Resolve(b) == typ
+}
+
+// where infers the type of a where-group's body. The group's bindings are
+// mutually recursive. Each strongly connected component of them is inferred
+// in turn, and generalized before the components that use it.
 func (c *context) where(x ast.Node) TypeRef {
-	body, id, typ, val := c.src.Where(x)
-	name := c.src.TokenText(id)
+	body, binds := c.src.Group(x)
+	scope, aliases := c.scope, c.aliases
+	defer func() { c.scope, c.aliases = scope, aliases }()
 
-	// This where is type-only; semantics TBD?
-	if val == ast.None {
-		c.bind(name, c.reg.generalize(c.typ(typ)))
-		defer c.unbind()
-		return c.infer(body)
+	seen := make(map[string]bool, len(binds))
+	var group []*alias
+	for _, b := range binds {
+		_, id, typ, val := c.src.Where(b)
+		name := c.src.TokenText(id)
+		if seen[name] {
+			c.bail(b, fmt.Sprintf("cannot bind %s twice", name))
+		}
+		seen[name] = true
+
+		if val == ast.None {
+			a := &alias{typ: typ}
+			group = append(group, a)
+			c.aliases = c.aliases.Bind(name, a)
+		}
+	}
+	// Aliases see each other.
+	for _, a := range group {
+		a.scope = c.aliases
 	}
 
-	tyVal := c.infer(val)
-
-	// If there's an annotation, make sure it matches the inferred type.
-	if typ != ast.None {
-		c.ensure(typ, tyVal, c.typ(typ))
+	for _, comp := range c.src.Components(binds) {
+		c.reg.enter()
+		vars := make([]TypeRef, len(comp))
+		for i, b := range comp {
+			vars[i] = c.reg.Var()
+			c.bind(c.src.TokenText(c.src.Main(b)), vars[i])
+		}
+		for i, b := range comp {
+			_, _, typ, val := c.src.Where(b)
+			ref := c.infer(val)
+			// If there's an annotation, make sure it matches the inferred type.
+			if typ != ast.None {
+				c.ensure(typ, ref, c.typ(typ))
+			}
+			c.ensure(val, vars[i], ref)
+		}
+		c.reg.exit()
+		for _, v := range vars {
+			c.reg.generalize(v)
+		}
 	}
 
-	c.bind(name, c.reg.generalize(tyVal))
-	defer c.unbind()
 	return c.infer(body)
 }
 
+var primitiveTypes = map[string]TypeRef{
+	"int":   IntRef,
+	"float": FloatRef,
+	"text":  TextRef,
+	"byte":  ByteRef,
+	"bytes": BytesRef,
+}
+
+// typ returns the type that the type expression x denotes.
 func (c *context) typ(x ast.Node) TypeRef {
 	switch c.src.Kind(x) {
 	case ast.Ident:
 		name := c.src.TokenText(c.src.Main(x))
-		ref := c.scope.Lookup(name)
-		if ref == NeverRef {
-			c.bail(x, fmt.Sprintf("unknown type %s", name))
+		if ref, ok := primitiveTypes[name]; ok {
+			return ref
 		}
-		return ref
+		if a := c.aliases.Lookup(name); a != nil {
+			return c.alias(x, name, a)
+		}
+		c.bail(x, fmt.Sprintf("unknown type %s", name))
+	case ast.Literal:
+		if c.src.LiteralKind(x) == token.HOLE {
+			return HoleRef
+		}
+	case ast.Call:
+		fn, arg := c.src.Call(x)
+		if c.src.Kind(fn) == ast.Ident && c.src.NodeText(fn) == "list" {
+			return c.reg.List(c.typ(arg))
+		}
 	case ast.Func:
 		arg, body := c.src.Func(x)
-		return c.reg.Func(
-			c.typ(arg),
-			c.typ(body),
-		)
+		return c.reg.Func(c.typ(arg), c.typ(body))
 	case ast.Enum:
-		return c.enum(x, c.typ)
+		tags := make(map[string]TypeRef)
+		for _, v := range c.src.Variants(x) {
+			tagTok, payload := c.src.Variant(v)
+			tag := c.src.TokenText(tagTok)
+			if _, ok := tags[tag]; ok {
+				c.bail(v, fmt.Sprintf("cannot define tag #%s more than once", tag))
+			}
+			tags[tag] = NeverRef
+			if payload != ast.None {
+				tags[tag] = c.typ(payload)
+			}
+		}
+		return c.reg.Enum(tags)
 	}
 
-	c.bail(x, fmt.Sprintf("cannot infer type of %s", c.src.Kind(x)))
+	c.bail(x, fmt.Sprintf("%s is not a type", c.src.NodeText(x)))
 	return NeverRef
 }
 
+// alias returns the type of an alias, computing it on first use. Aliases
+// have no type variables, so their types can be shared.
+func (c *context) alias(x ast.Node, name string, a *alias) TypeRef {
+	if a.done {
+		return a.ref
+	}
+	if a.pending {
+		c.bail(x, fmt.Sprintf("recursive type %s is not supported yet", name))
+	}
+	a.pending = true
+	aliases := c.aliases
+	c.aliases = a.scope
+	a.ref = c.typ(a.typ)
+	c.aliases = aliases
+	a.pending, a.done = false, true
+	return a.ref
+}
+
 func (c *context) list(x ast.Node) TypeRef {
-	res := NeverRef
-
+	elem := c.reg.Var()
 	for _, v := range c.src.List(x) {
-		typ := c.infer(v)
-
-		if res == NeverRef {
-			res = typ
-			continue
-		}
-
-		c.ensure(v, res, typ)
+		c.ensure(v, elem, c.infer(v))
 	}
-
-	if res == NeverRef {
-		res = c.reg.Var()
-	}
-	return c.reg.List(res)
+	return c.reg.List(elem)
 }
 
 func (c *context) record(x ast.Node) TypeRef {
 	rest, fields := c.src.Record(x)
 
-	// If there is a rest/spread, our type is equal to that.
+	// A spread record may only have its existing fields updated, keeping
+	// their types.
 	if rest != ast.None {
 		restTy := c.infer(rest)
-		rec := c.reg.GetRecord(restTy)
-		if rec == nil {
-			c.bail(rest, fmt.Sprintf("cannot spread from non-record type %s", c.reg.String(restTy)))
-		}
+		row := c.reg.Var()
 		for i := range fields.Len() {
 			k, v := c.src.TokenText(fields.Key(i)), fields.Value(i)
-			expected, ok := rec[k]
-			if !ok {
-				c.bail(v, fmt.Sprintf("cannot set %s not in the base record", k))
-
-			}
-			actual := c.infer(v)
-			if actual != expected {
-				c.bail(v, fmt.Sprintf("type of %s must be %s, not %s", k, c.reg.String(expected), c.reg.String(actual)))
-			}
+			row = c.reg.extend(c.reg.intern(k), c.infer(v), row)
 		}
+		c.ensure(x, restTy, c.reg.add(node{kind: recordKind, a: row}))
 		return restTy
 	}
 
-	ref := make(MapRef, fields.Len())
+	ref := make(map[string]TypeRef, fields.Len())
 	for i := range fields.Len() {
-		ref[c.src.TokenText(fields.Key(i))] = c.infer(fields.Value(i))
+		k := c.src.TokenText(fields.Key(i))
+		if _, ok := ref[k]; ok {
+			c.bail(fields.Value(i), fmt.Sprintf("cannot set %s twice", k))
+		}
+		ref[k] = c.infer(fields.Value(i))
 	}
 	return c.reg.Record(ref)
-}
-
-func (c *context) enum(x ast.Node, rec InferFunc) TypeRef {
-	variants := c.src.Variants(x)
-	ref := make(MapRef, len(variants))
-	for _, v := range variants {
-		tag, typ := c.src.Variant(v)
-		vRef := NeverRef
-		if typ != ast.None {
-			vRef = rec(typ)
-		}
-		ref[c.src.TokenText(tag)] = vRef
-	}
-	return c.reg.Enum(ref)
-}
-
-func (c *context) pick(x ast.Node, val ast.Node) TypeRef {
-	_, l, r := c.src.Binary(x)
-	ref := c.infer(l)
-	enum := c.reg.GetEnum(ref)
-	if enum == nil {
-		c.bail(l, fmt.Sprintf("%s isn't an enum", c.reg.String(ref)))
-	}
-
-	if c.src.Kind(r) == ast.Ident {
-		tag := c.src.NodeText(r)
-		typ, ok := enum[tag]
-		if !ok {
-			c.bail(r,
-				fmt.Sprintf("#%s isn't a valid option for enum %s",
-					tag, c.reg.String(ref)))
-		}
-
-		// We expect no value.
-		if typ == NeverRef {
-			// But there was one.
-			if val != ast.None {
-				c.bail(val, fmt.Sprintf("#%s doesn't take any value", tag))
-			}
-		} else {
-			valRef := c.infer(val)
-			c.ensure(val, valRef, typ)
-		}
-
-		return ref
-	}
-
-	// TODO: better error handling?
-	return NeverRef
 }
 
 func literalTypeRef(tok token.Token) TypeRef {
@@ -470,12 +426,170 @@ func literalTypeRef(tok token.Token) TypeRef {
 // Either pre-pend or ap-pend.
 func (c *context) pend(singleX, listX ast.Node, single, list TypeRef) TypeRef {
 	// Special-case bytes.
-	if single == ByteRef || list == BytesRef {
+	if c.reg.Resolve(single) == ByteRef || c.reg.Resolve(list) == BytesRef {
 		c.ensure(singleX, single, ByteRef)
 		c.ensure(listX, list, BytesRef)
 		return BytesRef
 	}
 
-	c.ensure(singleX, c.reg.List(single), list)
+	c.ensure(listX, list, c.reg.List(single))
 	return list
+}
+
+// A position in a match function's argument, as a path of /-separated steps
+// into it. The root is the empty path.
+type position string
+
+func (p position) step(s string) position { return p + "/" + position(s) }
+
+// within returns true if p is at or below other.
+func (p position) within(other position) bool {
+	return p == other || strings.HasPrefix(string(p), string(other)+"/")
+}
+
+// The positions in a match function's arms that matter for its type.
+type arms struct {
+	// The positions that some arm matches with a catch-all pattern.
+	catchAll []position
+	// The positions that some arm matches with a tag, and their types.
+	enums []positioned
+	// The names bound by the current arm.
+	bound map[string]bool
+}
+
+type positioned struct {
+	at  position
+	typ TypeRef
+}
+
+// matchFunc infers the type of a match function. A tag pattern only closes
+// the enum it matches if no arm matches the same position, or one above it,
+// with a catch-all pattern. So a match function without a catch-all accepts
+// exactly the tags it lists.
+func (c *context) matchFunc(x ast.Node) TypeRef {
+	argTy := c.reg.Var()
+	bodyTy := c.reg.Var()
+	var m arms
+	for _, arm := range c.src.Arms(x) {
+		arg, body := c.src.Func(arm)
+		scope := c.scope
+		m.bound = make(map[string]bool)
+		c.pattern(&m, arg, argTy, "")
+		c.ensure(body, bodyTy, c.infer(body))
+		c.scope = scope
+	}
+
+	for _, e := range m.enums {
+		if !e.at.coveredBy(m.catchAll) {
+			c.reg.closeEnum(e.typ)
+		}
+	}
+	return c.reg.Func(argTy, bodyTy)
+}
+
+func (p position) coveredBy(catchAll []position) bool {
+	for _, c := range catchAll {
+		if p.within(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// pattern infers the type of the pattern x at position at, unifying it with
+// ty and binding its names.
+func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
+	switch c.src.Kind(x) {
+	case ast.Ident:
+		m.catchAll = append(m.catchAll, at)
+		name := c.src.TokenText(c.src.Main(x))
+		if name == "_" {
+			return
+		}
+		if m.bound[name] {
+			c.bail(x, fmt.Sprintf("cannot bind %s twice", name))
+		}
+		m.bound[name] = true
+		c.bind(name, ty)
+		return
+
+	case ast.Literal:
+		kind := c.src.LiteralKind(x)
+		if kind == token.FLOAT {
+			c.bail(x, "cannot match on floats")
+		}
+		c.ensure(x, ty, literalTypeRef(kind))
+		return
+
+	case ast.Variant:
+		tagTok, payload := c.src.Variant(x)
+		tag := c.src.TokenText(tagTok)
+		typ := NeverRef
+		if payload != ast.None {
+			typ = c.reg.Var()
+		}
+		row := c.reg.extend(c.reg.intern(tag), typ, c.reg.Var())
+		c.ensure(x, ty, c.reg.add(node{kind: enumKind, a: row}))
+		m.enums = append(m.enums, positioned{at, ty})
+		if payload != ast.None {
+			c.pattern(m, payload, typ, at.step("#"+tag))
+		}
+		return
+
+	case ast.Record:
+		rest, fields := c.src.Record(x)
+		tail := TypeRef(emptyRef)
+		if rest != ast.None {
+			tail = c.reg.Var()
+		}
+		row := tail
+		types := make([]TypeRef, fields.Len())
+		for i := range fields.Len() {
+			types[i] = c.reg.Var()
+			row = c.reg.extend(c.reg.intern(c.src.TokenText(fields.Key(i))), types[i], row)
+		}
+		c.ensure(x, ty, c.reg.add(node{kind: recordKind, a: row}))
+		for i := range fields.Len() {
+			c.pattern(m, fields.Value(i), types[i], at.step("."+c.src.TokenText(fields.Key(i))))
+		}
+		if rest != ast.None {
+			// The rest is a record of the remaining fields, but not a
+			// catch-all for the record.
+			c.pattern(m, rest, c.reg.add(node{kind: recordKind, a: tail}), at.step(".."))
+		}
+		return
+
+	case ast.List:
+		elem := c.reg.Var()
+		c.ensure(x, ty, c.reg.List(elem))
+		for _, v := range c.src.List(x) {
+			c.pattern(m, v, elem, at.step("[]"))
+		}
+		return
+
+	case ast.Binary:
+		// Parts of a list are lists, but don't catch all of it.
+		op, l, r := c.src.Binary(x)
+		elem := c.reg.Var()
+		list := c.reg.List(elem)
+		switch op {
+		case token.PREPEND:
+			c.ensure(x, ty, list)
+			c.pattern(m, l, elem, at.step("[]"))
+			c.pattern(m, r, list, at.step("[..]"))
+			return
+		case token.APPEND:
+			c.ensure(x, ty, list)
+			c.pattern(m, l, list, at.step("[..]"))
+			c.pattern(m, r, elem, at.step("[]"))
+			return
+		case token.CONCAT:
+			c.ensure(x, ty, list)
+			c.pattern(m, l, list, at.step("[..]"))
+			c.pattern(m, r, list, at.step("[..]"))
+			return
+		}
+	}
+
+	c.bail(x, fmt.Sprintf("cannot match on %s", c.src.Kind(x)))
 }

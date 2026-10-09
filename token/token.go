@@ -34,7 +34,6 @@ const (
 	// Relating to types.
 
 	DEFINE // :
-	PICK   // ::
 	OPTION // #
 	ACCESS // .
 	SPREAD // ..
@@ -98,7 +97,6 @@ var tokens = [...]string{
 	IMPORT: "IMPORT",
 
 	DEFINE: "DEFINE",
-	PICK:   "PICK",
 	OPTION: "OPTION",
 	ACCESS: "ACCESS",
 	SPREAD: "SPREAD",
@@ -140,7 +138,6 @@ var operators = [...]string{
 	IMPORT: "$",
 
 	DEFINE: ":",
-	PICK:   "::",
 	OPTION: "#",
 	ACCESS: ".",
 	SPREAD: "..",
@@ -216,7 +213,7 @@ var precedences = func() (p [end_operators]int8) {
 	p[LT], p[GT] = 4, 4
 	p[ADD], p[SUB], p[CONCAT], p[APPEND], p[PREPEND] = 5, 5, 5, 5, 5
 	p[MUL] = 6
-	p[PICK], p[ACCESS], p[SPREAD] = 8, 8, 8
+	p[ACCESS], p[SPREAD] = 8, 8
 	return
 }()
 

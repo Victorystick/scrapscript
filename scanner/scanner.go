@@ -152,7 +152,7 @@ func (s *scanner) token() token.Token {
 		}
 		return s.switch2(token.GT, '+', token.PREPEND)
 	case ':':
-		return s.switch2(token.DEFINE, ':', token.PICK)
+		return token.DEFINE
 	case '#':
 		return token.OPTION
 	case '.':

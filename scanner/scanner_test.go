@@ -51,7 +51,6 @@ var elements = []elt{
 	{token.WHERE, ";", operator},
 
 	{token.DEFINE, ":", operator},
-	{token.PICK, "::", operator},
 	{token.OPTION, "#", operator},
 	{token.ACCESS, ".", operator},
 	{token.SPREAD, "..", operator},

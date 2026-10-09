@@ -22,9 +22,6 @@ func TestLists(t *testing.T) {
 	ints := reg.List(IntRef)
 	bytes := reg.List(ByteRef)
 
-	Eq(t, ints, TypeRef(listTag))
-
-	Eq(t, ints, reg.List(IntRef))
 	Neq(t, ints, bytes)
 
 	Eq(t, reg.String(ints), "list int")
@@ -55,43 +52,38 @@ func TestFunc(t *testing.T) {
 func TestEnum(t *testing.T) {
 	reg := Registry{}
 
-	enum := MapRef{"l": IntRef, "r": IntRef}
-	ref := reg.Enum(enum)
-
-	Eq(t, reg.String(ref), "#l int #r int")
+	ref := reg.Enum(map[string]TypeRef{"l": IntRef, "r": IntRef})
+	Eq(t, reg.String(ref), "[ #l int, #r int ]")
 
 	maybe := func(ref TypeRef) TypeRef {
-		return reg.Enum(MapRef{"some": ref, "none": NeverRef})
+		return reg.Enum(map[string]TypeRef{"some": ref, "none": NeverRef})
 	}
 
 	ref = maybe(IntRef)
-
-	Eq(t, reg.String(ref), "#none #some int")
-
-	Eq(t, reg.String(maybe(ref)), "#none #some (#none #some int)")
+	Eq(t, reg.String(ref), "[ #none, #some int ]")
+	Eq(t, reg.String(maybe(ref)), "[ #none, #some [ #none, #some int ] ]")
+	Eq(t, reg.String(maybe(reg.List(IntRef))), "[ #none, #some (list int) ]")
 
 	inc := reg.Func(IntRef, IntRef)
-	typ := MapRef{"fun": inc}
-	Eq(t, reg.String(reg.Enum(typ)), "#fun (int -> int)")
+	Eq(t, reg.String(reg.Enum(map[string]TypeRef{"fun": inc})), "[ #fun (int -> int) ]")
 }
 
 func TestRecord(t *testing.T) {
 	reg := Registry{}
 
-	record := MapRef{"x": IntRef, "y": IntRef}
-	ref := reg.Record(record)
+	ref := reg.Record(map[string]TypeRef{"x": IntRef, "y": IntRef})
 	Eq(t, reg.String(ref), "{ x : int, y : int }")
 
 	inc := reg.Func(IntRef, IntRef)
-	typ := MapRef{"inc": inc}
-	Eq(t, reg.String(reg.Record(typ)), "{ inc : (int -> int) }")
+	Eq(t, reg.String(reg.Record(map[string]TypeRef{"inc": inc})), "{ inc : int -> int }")
+	Eq(t, reg.String(reg.Record(nil)), "{}")
 }
 
 func TestGeneric(t *testing.T) {
 	reg := Registry{}
 
-	a := reg.Unbound()
-	b := reg.Unbound()
+	a := reg.Gen()
+	b := reg.Gen()
 
 	listFold := reg.Func(b, reg.Func(reg.Func(b, reg.Func(a, b)), reg.Func(reg.List(a), b)))
 	Eq(t, reg.String(listFold), "a -> (a -> b -> a) -> list b -> a")
@@ -103,57 +95,55 @@ func TestGeneric(t *testing.T) {
 func TestInstantiate(t *testing.T) {
 	reg := Registry{}
 
-	// Only unbound types _introduced_ by arrows should be replaced.
-	a := reg.Unbound()
-	b := reg.Unbound()
-	f := reg.Func(a, b)
-	Eq(t, reg.String(f), "a -> b")
-
-	l := reg.List(a)
-	Eq(t, reg.String(l), "list a")
+	a := reg.Gen()
+	b := reg.Gen()
+	f := reg.Func(a, reg.Func(b, a))
 
 	g := reg.Instantiate(f)
 	h := reg.Instantiate(f)
-	Eq(t, reg.String(g), "$0 -> a")
-	Eq(t, reg.String(h), "$1 -> a")
+	Neq(t, g, f)
+	Neq(t, g, h)
 
-	Eq(t, reg.String(reg.Instantiate(l)), "list a")
-	Eq(t, reg.String(reg.Instantiate(reg.Func(a, l))), "$2 -> list $2")
+	// Instantiating replaces each generalized variable consistently.
+	Eq(t, reg.Unify(g, reg.Func(IntRef, reg.Func(TextRef, IntRef))), nil)
+	Eq(t, reg.String(g), "int -> text -> int")
+	Eq(t, reg.String(h), "a -> b -> a")
+	Eq(t, reg.String(f), "a -> b -> a")
+
+	// Types without generalized variables are shared.
+	l := reg.List(IntRef)
+	Eq(t, reg.Instantiate(l), l)
 }
 
 func TestGeneralize(t *testing.T) {
 	reg := Registry{}
 
-	// Only type variables _introduced_ by arrows should be replaced.
-	a := reg.Var()
-	b := reg.Var()
-	f := reg.Func(a, b)
-	Eq(t, reg.String(f), "$0 -> $1")
+	outer := reg.Var()
+	reg.enter()
+	inner := reg.Var()
+	f := reg.Func(inner, outer)
+	reg.exit()
+	reg.generalize(f)
 
-	l := reg.List(a)
-	Eq(t, reg.String(l), "list $0")
-
-	g := reg.generalize(f)
-	h := reg.generalize(f)
-	Eq(t, reg.String(g), "a -> $1")
-	Eq(t, reg.String(h), "a -> $1")
-
-	Eq(t, reg.String(reg.generalize(l)), "list $0")
-	Eq(t, reg.String(reg.generalize(reg.Func(a, l))), "a -> list a")
-
+	// Only the variable local to the binding is generalized.
+	g := reg.Instantiate(f)
+	Eq(t, reg.Unify(g, reg.Func(IntRef, TextRef)), nil)
+	Eq(t, reg.String(f), "a -> text")
+	Eq(t, reg.String(outer), "text")
 }
 
-func TestGetVar(t *testing.T) {
+func TestUnifyLowersLevels(t *testing.T) {
 	reg := Registry{}
 
-	a := reg.Var()
-	b := reg.Var()
-	c := reg.Var()
-	reg.bind(a, b)
-	reg.bind(b, c)
-	reg.bind(c, IntRef)
+	outer := reg.Var()
+	reg.enter()
+	inner := reg.Var()
+	Eq(t, reg.Unify(outer, reg.List(inner)), nil)
+	reg.exit()
+	reg.generalize(inner)
 
-	Eq(t, reg.GetVar(a), IntRef)
+	// inner escaped into outer's type, so it isn't generalized.
+	Eq(t, reg.at(reg.Resolve(inner)).kind, varKind)
 }
 
 func TestResolve(t *testing.T) {
@@ -164,42 +154,76 @@ func TestResolve(t *testing.T) {
 
 	Eq(t, reg.Resolve(a), a)
 	Eq(t, reg.Resolve(b), b)
-	Eq(t, reg.IsFree(a), true)
-	Eq(t, reg.IsFree(b), true)
 
-	reg.bind(a, b)
-
-	Eq(t, reg.IsFree(a), true)
-	Eq(t, reg.IsFree(b), true)
+	Eq(t, reg.Unify(a, b), nil)
 	Eq(t, reg.Resolve(a), b)
-	Eq(t, reg.Resolve(b), b)
 
-	reg.bind(b, IntRef)
-
-	Eq(t, reg.IsFree(a), false)
-	Eq(t, reg.IsFree(b), false)
+	Eq(t, reg.Unify(b, IntRef), nil)
 	Eq(t, reg.Resolve(a), IntRef)
 	Eq(t, reg.Resolve(b), IntRef)
 }
 
-func TestUnify_J(t *testing.T) {
+func TestUnify(t *testing.T) {
 	reg := Registry{}
 
 	res := reg.Var()
 	a := reg.Var()
 	fn := reg.Func(a, reg.List(a))
-	reg.unify(fn, reg.Func(IntRef, res))
+	Eq(t, reg.Unify(fn, reg.Func(IntRef, res)), nil)
 
 	Eq(t, reg.String(res), "list int")
 }
 
+func TestUnifyOccurs(t *testing.T) {
+	reg := Registry{}
+
+	a := reg.Var()
+	b := reg.Var()
+	Eq(t, reg.Unify(b, reg.List(a)), nil)
+	// a occurs in b only through b's binding.
+	Eq(t, reg.Unify(a, reg.List(b)).Error(), "cannot construct infinite type 'a' = 'list (list a)'")
+}
+
+func TestUnifyRows(t *testing.T) {
+	reg := Registry{}
+
+	open := func(labels map[string]TypeRef) TypeRef {
+		return reg.add(node{kind: recordKind, a: reg.row(labels, reg.Var())})
+	}
+
+	// Open rows take each other's labels, in any order.
+	x := open(map[string]TypeRef{"a": IntRef})
+	y := open(map[string]TypeRef{"b": TextRef})
+	Eq(t, reg.Unify(x, y), nil)
+	Eq(t, reg.String(x), "{ a : int, b : text, ...a }")
+
+	// A closed row can't take labels.
+	closed := reg.Record(map[string]TypeRef{"a": IntRef, "b": TextRef})
+	Eq(t, reg.Unify(x, closed), nil)
+	Eq(t, reg.String(x), "{ a : int, b : text }")
+	Eq(t, reg.Unify(open(map[string]TypeRef{"c": IntRef}), closed).Error(),
+		"cannot unify '{ c : int, ...a }' with '{ a : int, b : text }'")
+
+	// Shared labels must have the same types.
+	Eq(t, reg.Unify(open(map[string]TypeRef{"a": TextRef}), closed).Error(),
+		"cannot unify 'text' with 'int'")
+
+	// A row can't contain itself.
+	r := reg.Var()
+	z := reg.add(node{kind: recordKind, a: reg.extend(reg.intern("a"), IntRef, r)})
+	w := reg.add(node{kind: recordKind, a: reg.extend(reg.intern("b"), IntRef, r)})
+	Neq(t, reg.Unify(z, w), nil)
+}
+
 func Neq[T comparable](t *testing.T, a, b T) {
+	t.Helper()
 	if a == b {
 		t.Errorf("Expected %v NOT to be %v", a, b)
 	}
 }
 
 func Eq[T comparable](t *testing.T, a, b T) {
+	t.Helper()
 	if a != b {
 		t.Errorf("Expected %v to be %v", a, b)
 	}

@@ -9,11 +9,11 @@ import (
 )
 
 const fibSource = `list/map fib (seq 15)
-; seq = fix (seq -> | 0 -> [0] | n -> seq (n - 1) +< n)
-; fib = fix (fib ->
+; seq = | 0 -> [0] | n -> seq (n - 1) +< n
+; fib =
     | 0 -> 0
     | 1 -> 1
-    | n -> fib (n - 1) + fib (n - 2))`
+    | n -> fib (n - 1) + fib (n - 2)`
 
 // inferSource is a where-chain of 1000 bindings that type-check, drawn from
 // the types tests.
@@ -50,7 +50,7 @@ func BenchmarkEval(b *testing.B) {
 	e, scrap := readBench(b, fibSource)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Eval(scrap.expr, &e.reg, e.vars, e.evalImport); err != nil {
+		if _, err := Eval(scrap.expr, e.vars, e.evalImport); err != nil {
 			b.Fatal(err)
 		}
 	}

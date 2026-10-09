@@ -11,15 +11,15 @@ import (
 var benchBindings = []string{
 	`f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`,
 	`hand : #l int #r int`,
-	`h = (hand::l 5 |> | #l n -> n * 2 | #r n -> n * 3)`,
+	`h = (#l 5 |> | #l n -> n * 2 | #r n -> n * 3)`,
 	`r = { ..{ a = 2, c = 1 }, a = 1, b = "x" }`,
 	`xs = ["prefix"] ++ ["in" ++ "fix"] +< "postfix"`,
 	`g = | ns ++ [2, last] -> ns +< last`,
 	`inc : int -> int = a -> a + 1`,
-	`fib = fix (fib -> | 0 -> 0 | 1 -> 1 | n -> fib (n - 1) + fib (n - 2))`,
+	`fib = | 0 -> 0 | 1 -> 1 | n -> fib (n - 1) + fib (n - 2)`,
 	`s = bytes/to-utf8-text <| ~~aGVsbG8gd29ybGQ= +< ~21`,
 	`v = list/fold 0 (a -> b -> a + text/length b) ["hey", "beautiful"]`,
-	`m = m::just 2 |> | #just 2 -> "two" | #just _ -> "other" | #no -> "x"`,
+	`m = #just 2 |> | #just 2 -> "two" | #just _ -> "other" | #no -> "x"`,
 	`p = foo.a.b`,
 }
 

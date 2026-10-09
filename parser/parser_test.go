@@ -14,7 +14,6 @@ import (
 func TestParseExpr(t *testing.T) {
 	binops := []string{
 		"1 + 2",
-		"f::a",
 		"f 1 + 2",
 		"1 + f 2",
 	}
@@ -55,7 +54,7 @@ func TestParseExpr(t *testing.T) {
 
 	fns := []string{
 		"f 1 2",
-		"f::a 1",
+		"f #a 1",
 		"f (1 + 2)",
 	}
 	for _, src := range fns {
@@ -108,8 +107,8 @@ func TestParseEnum(t *testing.T) {
 		`#true #false`,
 		`#1 #2 #4 #8 #16 #32`,
 		`#tag (#a #b)`,
-		`my-type::left ; my-type : #left #right`,
-		`animal::horse "Lucy"
+		`#left ; my-type : #left #right`,
+		`#horse "Lucy"
 ; animal :
   #horse text
   #zebra int
@@ -152,11 +151,11 @@ func TestMatchFunc(t *testing.T) {
 func TestParses(t *testing.T) {
 	valid := []string{
 		`f "b" ; f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`,
-		`bool::true ; bool : #true #false`,
+		`#true ; bool : #true #false`,
 		`| "hey" -> "" | "hello " ++ name -> name | _ -> ""`,
 		`a |> | a -> a ; f = 1`,
-		`hand::l ; hand : #l int #r int`,
-		`(hand::left 5 |>
+		`#l ; hand : #l int #r int`,
+		`(#left 5 |>
 | #l n -> n * 2
 | #r n -> n * 3)
   ; hand : #l int #r int`,
@@ -198,7 +197,8 @@ func TestParseError(t *testing.T) {
 	examples := []struct{ source, message string }{
 		{`{ a = b ..c }`, `Expected RBRACE got SPREAD`},
 		{`{ a = 1, ..other }`, `A spread must be first in a record.`},
-		{`a::1 ; a : #a`, `Expected IDENT got INT`},
+		{`#"a"`, `Expected IDENT got TEXT`},
+		{`a::b`, `Expected EOF got DEFINE`},
 	}
 
 	for _, example := range examples {

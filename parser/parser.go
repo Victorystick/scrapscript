@@ -17,6 +17,8 @@ type parser struct {
 	i   int         // index of the current token
 	tok token.Token // kind of the current token
 
+	inType bool // parsing a type annotation, where tags form enum types
+
 	// The tree being built; see ast.SourceExpr.
 	kinds []ast.Kind
 	mains []ast.Tok
@@ -183,6 +185,10 @@ func (p *parser) parsePlainExpr(prec int) ast.Node {
 				break
 			}
 			left = val
+		} else if p.tok == token.OPTION && !p.inType && token.CallPrec > prec {
+			// A tag in argument position takes no payload.
+			right := p.parseTag()
+			left = p.add(ast.Call, 0, uint32(left), uint32(right))
 		} else if p.tok != token.EOF && (!p.tok.IsOperator() || startsSimpleValue(p.tok)) && token.CallPrec > prec {
 			right := p.parseBinaryExpr(ast.None, token.CallPrec-1)
 			left = p.add(ast.Call, 0, uint32(left), uint32(right))
@@ -254,7 +260,10 @@ func (p *parser) parseUnaryExpr() ast.Node {
 		return p.parseMatchFuncExpr()
 
 	case token.OPTION:
-		return p.parseEnum()
+		if p.inType {
+			return p.parseEnum()
+		}
+		return p.parseVariantExpr()
 
 	case token.IMPORT:
 		return p.parseImport()
@@ -287,11 +296,6 @@ func (p *parser) parseBinaryExpr(x ast.Node, prec int) ast.Node {
 		p.next()
 		right := p.parsePlainExpr(op.Precedence())
 		return p.add(ast.Binary, at, uint32(x), uint32(right))
-
-	case token.PICK:
-		at := p.at()
-		p.next()
-		return p.add(ast.Binary, at, uint32(x), uint32(p.ident()))
 
 	case token.ACCESS:
 		p.next()
@@ -330,9 +334,8 @@ func (p *parser) parseWhereExpr(x ast.Node) ast.Node {
 }
 
 func (p *parser) parseType() ast.Node {
-	if p.tok == token.OPTION {
-		return p.parseEnum()
-	}
+	p.inType = true
+	defer func() { p.inType = false }()
 
 	// TODO: only allow a subset of expressions here.
 	return p.parseBinaryExpr(ast.None, token.BasePrec)
@@ -440,12 +443,7 @@ func (p *parser) parseMatchFuncExpr() ast.Node {
 	for p.tok == token.PIPE {
 		p.next()
 
-		var arg ast.Node
-		if p.tok == token.OPTION {
-			arg = p.parseVariant()
-		} else {
-			arg = p.parseBinaryExpr(ast.None, token.ARROW.Precedence()+1)
-		}
+		arg := p.parseBinaryExpr(ast.None, token.ARROW.Precedence()+1)
 		p.expect(token.ARROW)
 		arrow := p.at()
 		p.next()
@@ -477,15 +475,7 @@ func (p *parser) parseVariant() ast.Node {
 		stack = append(stack, "parseVariant")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
-	// Eat option.
-	p.next()
-
-	if p.tok != token.INT {
-		p.expect(token.IDENT)
-	}
-	tag := p.at()
-	p.next()
-
+	tag := p.tagTok()
 	typ := ast.None
 
 	if !p.tok.IsOperator() && p.tok != token.EOF {
@@ -495,6 +485,43 @@ func (p *parser) parseVariant() ast.Node {
 	}
 
 	return p.add(ast.Variant, tag, uint32(typ), 0)
+}
+
+// tagTok consumes a '#' and the tag after it, and returns the tag's token.
+func (p *parser) tagTok() ast.Tok {
+	p.expect(token.OPTION)
+	p.next()
+
+	if p.tok != token.INT {
+		p.expect(token.IDENT)
+	}
+	tag := p.at()
+	p.next()
+	return tag
+}
+
+// parseTag parses a tag without a payload.
+func (p *parser) parseTag() ast.Node {
+	return p.add(ast.Variant, p.tagTok(), 0, 0)
+}
+
+// parseVariantExpr parses a tag value, which takes the next atom as its
+// payload, if there is one. A tag payload is itself nullary.
+func (p *parser) parseVariantExpr() ast.Node {
+	if debug {
+		stack = append(stack, "parseVariantExpr")
+		defer func() { stack = stack[:len(stack)-1] }()
+	}
+	tag := p.tagTok()
+	payload := ast.None
+
+	if p.tok == token.OPTION {
+		payload = p.parseTag()
+	} else if startsSimpleValue(p.tok) {
+		payload = p.parseBinaryExpr(ast.None, token.CallPrec-1)
+	}
+
+	return p.add(ast.Variant, tag, uint32(payload), 0)
 }
 
 func (p *parser) parseImport() ast.Node {
