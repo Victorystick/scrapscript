@@ -52,8 +52,9 @@ const (
 
 	// Function definition.
 
-	ARROW // ->
-	PIPE  // |
+	ARROW  // ->
+	PIPE   // |
+	FORALL // =>
 
 	// Function application.
 
@@ -115,10 +116,11 @@ var tokens = [...]string{
 	LT: "LT",
 	GT: "GT",
 
-	ARROW: "ARROW",
-	PIPE:  "PIPE",
-	LPIPE: "LPIPE",
-	RPIPE: "RPIPE",
+	ARROW:  "ARROW",
+	PIPE:   "PIPE",
+	FORALL: "FORALL",
+	LPIPE:  "LPIPE",
+	RPIPE:  "RPIPE",
 
 	LPAREN: "LPAREN",
 	LBRACK: "LBRACK",
@@ -150,10 +152,11 @@ var operators = [...]string{
 	APPEND:  "+<",
 	PREPEND: ">+",
 
-	ARROW: "->",
-	PIPE:  "|",
-	LPIPE: "<|",
-	RPIPE: "|>",
+	ARROW:  "->",
+	PIPE:   "|",
+	FORALL: "=>",
+	LPIPE:  "<|",
+	RPIPE:  "|>",
 
 	RCOMP: ">>",
 	LCOMP: "<<",

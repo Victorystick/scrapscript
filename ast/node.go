@@ -27,30 +27,38 @@ const (
 	Func                  // Main: '->'. Lhs: the parameter. Rhs: the body.
 	MatchFunc             // Lhs..Rhs: the arms, which are Func nodes.
 	Call                  // Lhs: the function. Rhs: the argument.
-	Variant               // Main: the tag after '#'. Lhs: the payload type, or None.
-	Enum                  // Lhs..Rhs: the Variant nodes.
+	Variant               // Main: the tag after '#'. Lhs: the payload, or None.
 	Record                // Main: '{'. Lhs: the spread record, or None. Rhs: see Record.
 	Access                // Main: the key. Lhs: the record.
 	List                  // Main: '['. Lhs..Rhs: the elements, then the ']' token.
 	Where                 // Main: the bound name. Lhs: the body. Rhs: see Where.
 	Import                // Main: '$', followed by the algorithm and hash tokens.
+
+	// Types. A type also uses Ident and Import for names, Literal for (),
+	// Call for type application and Func for function types.
+
+	Forall     // Main: the variable before '=>'. Lhs: the type it is bound in.
+	RecordType // Main: '{'. Lhs: the row tail, an Ident, or None. Rhs: see Record.
+	Enum       // Main: '['. Lhs: the row tail, an Ident, or None. Rhs: see Enum.
 )
 
 var kindStrings = [...]string{
-	Invalid:   "Invalid",
-	Ident:     "Ident",
-	Literal:   "Literal",
-	Binary:    "Binary",
-	Func:      "Func",
-	MatchFunc: "MatchFunc",
-	Call:      "Call",
-	Variant:   "Variant",
-	Enum:      "Enum",
-	Record:    "Record",
-	Access:    "Access",
-	List:      "List",
-	Where:     "Where",
-	Import:    "Import",
+	Invalid:    "Invalid",
+	Ident:      "Ident",
+	Literal:    "Literal",
+	Binary:     "Binary",
+	Func:       "Func",
+	MatchFunc:  "MatchFunc",
+	Call:       "Call",
+	Variant:    "Variant",
+	Record:     "Record",
+	Access:     "Access",
+	List:       "List",
+	Where:      "Where",
+	Import:     "Import",
+	Forall:     "Forall",
+	RecordType: "RecordType",
+	Enum:       "Enum",
 }
 
 func (k Kind) String() string {
@@ -114,10 +122,22 @@ func (se *SourceExpr) Call(n Node) (fn, arg Node) {
 // Arms returns a MatchFunc node's arms, which are Func nodes.
 func (se *SourceExpr) Arms(n Node) []Node { return se.extra(se.Data[n]) }
 
-// Variants returns an Enum node's Variant nodes.
-func (se *SourceExpr) Variants(n Node) []Node { return se.extra(se.Data[n]) }
+// Enum returns an Enum node's row tail, which may be None, and its Variant
+// nodes. Its Rhs indexes Extra at: the ']' token, the variant count n, then
+// the n variants.
+func (se *SourceExpr) Enum(n Node) (tail Node, variants []Node) {
+	d := se.Data[n]
+	count := uint32(se.Extra[d.Rhs+1])
+	start := d.Rhs + 2
+	return Node(d.Lhs), se.Extra[start : start+count]
+}
 
-// Variant returns a Variant node's tag and payload type, which may be None.
+// Forall returns a Forall node's variable and the type it is bound in.
+func (se *SourceExpr) Forall(n Node) (param Tok, typ Node) {
+	return se.Mains[n], Node(se.Data[n].Lhs)
+}
+
+// Variant returns a Variant node's tag and payload, which may be None.
 func (se *SourceExpr) Variant(n Node) (tag Tok, typ Node) {
 	return se.Mains[n], Node(se.Data[n].Lhs)
 }
@@ -131,7 +151,7 @@ func (f Fields) Value(i int) Node { return f[2*i+1] }
 
 // Record returns a Record node's spread record, which may be None, and its
 // fields. Its Rhs indexes Extra at: the '}' token, the field count n, then
-// the n fields.
+// the n fields. For a RecordType, it returns the row tail and the field types.
 func (se *SourceExpr) Record(n Node) (rest Node, fields Fields) {
 	d := se.Data[n]
 	count := uint32(se.Extra[d.Rhs+1])
@@ -150,12 +170,17 @@ func (se *SourceExpr) List(n Node) []Node {
 	return se.Extra[d.Lhs : d.Rhs-1]
 }
 
-// Where returns a Where node's body, bound name, and its type annotation and
-// value, either of which may be None. Its Rhs indexes Extra at: the type, then
-// the value.
+// Where returns a Where node's body, bound name, its annotation, which may be
+// None, and its value. Its Rhs indexes Extra at: the annotation, the value,
+// then 1 for a sort binding, whose value is a type and annotation a kind.
 func (se *SourceExpr) Where(n Node) (body Node, id Tok, typ, val Node) {
 	d := se.Data[n]
 	return Node(d.Lhs), se.Mains[n], se.Extra[d.Rhs], se.Extra[d.Rhs+1]
+}
+
+// Sort returns true if a Where node is a sort binding, which binds a type.
+func (se *SourceExpr) Sort(n Node) bool {
+	return se.Extra[se.Data[n].Rhs+2] != 0
 }
 
 // Import returns an Import node's algorithm and hash tokens.
@@ -171,8 +196,6 @@ func (se *SourceExpr) First(n Node) Tok {
 	case MatchFunc:
 		arg, _ := se.Func(se.Arms(n)[0])
 		return se.First(arg)
-	case Enum:
-		return se.First(se.Variants(n)[0])
 	case Variant:
 		// The token before the tag is its '#'.
 		return se.Mains[n] - 1
@@ -189,26 +212,19 @@ func (se *SourceExpr) Last(n Node) Tok {
 		arms := se.Arms(n)
 		_, body := se.Func(arms[len(arms)-1])
 		return se.Last(body)
-	case Enum:
-		vs := se.Variants(n)
-		return se.Last(vs[len(vs)-1])
+	case Forall:
+		return se.Last(Node(se.Data[n].Lhs))
 	case Variant:
 		if _, typ := se.Variant(n); typ != None {
 			return se.Last(typ)
 		}
-	case Record:
+	case Record, RecordType, Enum:
 		return Tok(se.Extra[se.Data[n].Rhs])
 	case List:
 		return Tok(se.Extra[se.Data[n].Rhs-1])
 	case Where:
-		_, id, typ, val := se.Where(n)
-		switch {
-		case val != None:
-			return se.Last(val)
-		case typ != None:
-			return se.Last(typ)
-		}
-		return id
+		_, _, _, val := se.Where(n)
+		return se.Last(val)
 	case Import:
 		_, hash := se.Import(n)
 		return hash

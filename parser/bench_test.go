@@ -10,7 +10,7 @@ import (
 // benchBindings are bindings that the parser accepts, drawn from the tests.
 var benchBindings = []string{
 	`f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`,
-	`hand : #l int #r int`,
+	`hand : type = [#l int, #r int]`,
 	`h = (#l 5 |> | #l n -> n * 2 | #r n -> n * 3)`,
 	`r = { ..{ a = 2, c = 1 }, a = 1, b = "x" }`,
 	`xs = ["prefix"] ++ ["in" ++ "fix"] +< "postfix"`,

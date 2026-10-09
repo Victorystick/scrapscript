@@ -107,29 +107,50 @@ func TestParseEnum(t *testing.T) {
 		`#true #false`,
 		`#1 #2 #4 #8 #16 #32`,
 		`#tag (#a #b)`,
-		`#left ; my-type : #left #right`,
+		`#left ; my-type : type = [#left, #right]`,
 		`#horse "Lucy"
-; animal :
-  #horse text
-  #zebra int
+; animal : type =
+  [ #horse text
+  , #zebra int
+  ]
 `,
-		// 		`my-org::my-config
-		// { name = "my-server-001"
-		// , cpus = #4
-		// , mem  = #16
-		// }
-		// ; my-org :
-		//     #my-config
-		//       { name : text
-		//       , cpus : #1 #2 #4 #8
-		//       , mem  : #1 #2 #4 #8 #16 #32
-		//       }`,
 	}
 
 	for _, src := range valid {
 		_, err := ParseExpr(src)
 		if err != nil {
 			writeParseError(t, src, err)
+		}
+	}
+}
+
+func TestParseTypes(t *testing.T) {
+	examples := []struct {
+		source string
+		sort   bool
+	}{
+		{`x ; x : int = 1`, false},
+		{`f ; f : int -> list int -> () = _ -> _ -> ()`, false},
+		{`f ; f : [#a, #b int, #c (list int), ..r] -> { a : int, ..r } = _ -> {}`, false},
+		{`id ; id : a => a -> a = x -> x`, false},
+		{`f ; f : $sha256~~ -> int = _ -> 1`, false},
+		{`t ; t : type = int`, true},
+		{`t ; t : type = [#a { b : text }, #c]`, true},
+		{`t ; t : type = {}`, true},
+		{`t ; t : type = []`, true},
+		{`t ; t : type = { ..r }`, true},
+		{`t ; t : type -> type = s => { state : s }`, true},
+		{`t ; t = a => b => [#left a, #right b]`, true},
+	}
+
+	for _, ex := range examples {
+		se, err := ParseExpr(ex.source)
+		if err != nil {
+			writeParseError(t, ex.source, err)
+			continue
+		}
+		if sort := se.Sort(se.Expr); sort != ex.sort {
+			t.Errorf("%s: expected sort binding to be %v", ex.source, ex.sort)
 		}
 	}
 }
@@ -151,15 +172,15 @@ func TestMatchFunc(t *testing.T) {
 func TestParses(t *testing.T) {
 	valid := []string{
 		`f "b" ; f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`,
-		`#true ; bool : #true #false`,
+		`#true ; bool : type = [#true, #false]`,
 		`| "hey" -> "" | "hello " ++ name -> name | _ -> ""`,
 		`a |> | a -> a ; f = 1`,
-		`#l ; hand : #l int #r int`,
+		`#l ; hand : type = [#l int, #r int]`,
 		`(#left 5 |>
 | #l n -> n * 2
 | #r n -> n * 3)
-  ; hand : #l int #r int`,
-		`t ; t : #a a #b int #c byte ; a : #x #y #z`,
+  ; hand : type = [#l int, #r int]`,
+		`t ; t : type = [#a a, #b int, #c byte] ; a : type = [#x, #y, #z]`,
 		`[]`,
 		`[ "yo", 2, ]`,
 		`[ "yo", 2 ]`,
@@ -199,6 +220,11 @@ func TestParseError(t *testing.T) {
 		{`{ a = 1, ..other }`, `A spread must be first in a record.`},
 		{`#"a"`, `Expected IDENT got TEXT`},
 		{`a::b`, `Expected EOF got DEFINE`},
+		{`t ; t : #a #b`, `Unexpected OPTION`},
+		{`t ; t : type`, `Expected ASSIGN got EOF`},
+		{`t ; t : type = [#a, #b,]`, `A type cannot end in a trailing comma.`},
+		{`t ; t : type = [#a, ..r, #b]`, `Expected RBRACK got COMMA`},
+		{`t ; t : type = { a = int }`, `Expected DEFINE got ASSIGN`},
 	}
 
 	for _, example := range examples {

@@ -607,7 +607,7 @@ func (s *stringer) row(row TypeRef, open, close byte, label func(string, TypeRef
 		if len(entries) > 0 {
 			s.WriteByte(',')
 		}
-		s.WriteString(" ...")
+		s.WriteString(" ..")
 		s.write(row, topLevel)
 	}
 	if len(entries) > 0 || isOpen {

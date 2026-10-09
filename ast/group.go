@@ -16,7 +16,7 @@ func (se *SourceExpr) Group(n Node) (body Node, binds []Node) {
 
 // Components orders a group's value bindings by their references to each
 // other. It returns the strongly connected components of the reference graph,
-// each after the components it refers to. Type-only bindings are left out.
+// each after the components it refers to. Sort bindings are left out.
 //
 // A reference is any identifier in a binding's value that names a binding of
 // the group. Shadowing isn't taken into account, so a component may be larger
@@ -24,7 +24,7 @@ func (se *SourceExpr) Group(n Node) (body Node, binds []Node) {
 func (se *SourceExpr) Components(binds []Node) [][]Node {
 	index := make(map[string]int, len(binds))
 	for i, b := range binds {
-		if _, _, _, val := se.Where(b); val != None {
+		if !se.Sort(b) {
 			index[se.TokenText(se.Mains[b])] = i
 		}
 	}
@@ -40,7 +40,7 @@ func (se *SourceExpr) Components(binds []Node) [][]Node {
 		onPath: make([]bool, len(binds)),
 	}
 	for i, b := range binds {
-		if _, _, _, val := se.Where(b); val != None && t.order[i] == 0 {
+		if !se.Sort(b) && t.order[i] == 0 {
 			t.visit(i)
 		}
 	}

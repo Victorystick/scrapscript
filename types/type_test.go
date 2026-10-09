@@ -200,14 +200,14 @@ func TestUnifyRows(t *testing.T) {
 	x := open(map[string]TypeRef{"a": IntRef})
 	y := open(map[string]TypeRef{"b": TextRef})
 	Eq(t, reg.Unify(x, y), nil)
-	Eq(t, reg.String(x), "{ a : int, b : text, ...a }")
+	Eq(t, reg.String(x), "{ a : int, b : text, ..a }")
 
 	// A closed row can't take labels.
 	closed := reg.Record(map[string]TypeRef{"a": IntRef, "b": TextRef})
 	Eq(t, reg.Unify(x, closed), nil)
 	Eq(t, reg.String(x), "{ a : int, b : text }")
 	Eq(t, reg.Unify(open(map[string]TypeRef{"c": IntRef}), closed).Error(),
-		"cannot unify '{ c : int, ...a }' with '{ a : int, b : text }'")
+		"cannot unify '{ c : int, ..a }' with '{ a : int, b : text }'")
 
 	// Shared labels must have the same types.
 	Eq(t, reg.Unify(open(map[string]TypeRef{"a": TextRef}), closed).Error(),

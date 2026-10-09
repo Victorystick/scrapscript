@@ -300,8 +300,11 @@ func (c *context) where(x ast.Node, inferBody func(ast.Node) TypeRef) TypeRef {
 		}
 		seen[name] = true
 
-		if val == ast.None {
-			a := &alias{typ: typ}
+		if c.src.Sort(b) {
+			if typ != ast.None && c.src.NodeText(typ) != "type" || c.src.Kind(val) == ast.Forall {
+				c.bail(b, "type constructors are not supported yet")
+			}
+			a := &alias{typ: val}
 			group = append(group, a)
 			c.aliases = c.aliases.Bind(name, a)
 		}
@@ -374,8 +377,10 @@ func (c *context) typ(x ast.Node) TypeRef {
 		arg, body := c.src.Func(x)
 		return c.reg.Func(c.typ(arg), c.typ(body))
 	case ast.Enum:
+		tail, variants := c.src.Enum(x)
+		c.closedRow(tail)
 		tags := make(map[string]TypeRef)
-		for _, v := range c.src.Variants(x) {
+		for _, v := range variants {
 			tagTok, payload := c.src.Variant(v)
 			tag := c.src.TokenText(tagTok)
 			if _, ok := tags[tag]; ok {
@@ -387,10 +392,31 @@ func (c *context) typ(x ast.Node) TypeRef {
 			}
 		}
 		return c.reg.Enum(tags)
+	case ast.RecordType:
+		tail, fields := c.src.Record(x)
+		c.closedRow(tail)
+		ref := make(map[string]TypeRef, fields.Len())
+		for i := range fields.Len() {
+			k := c.src.TokenText(fields.Key(i))
+			if _, ok := ref[k]; ok {
+				c.bail(fields.Value(i), fmt.Sprintf("cannot define field %s more than once", k))
+			}
+			ref[k] = c.typ(fields.Value(i))
+		}
+		return c.reg.Record(ref)
+	case ast.Forall:
+		c.bail(x, "type variables are not supported yet")
 	}
 
 	c.bail(x, fmt.Sprintf("%s is not a type", c.src.NodeText(x)))
 	return NoType
+}
+
+// closedRow fails at tail, unless it is None.
+func (c *context) closedRow(tail ast.Node) {
+	if tail != ast.None {
+		c.bail(tail, "row variables are not supported yet")
+	}
 }
 
 // alias returns the type of an alias, computing it on first use. Aliases

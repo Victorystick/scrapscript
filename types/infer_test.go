@@ -29,9 +29,9 @@ func TestInfer(t *testing.T) {
 		{`{ ..base, a = ~01 } ; base = { a = ~00 }`, `{ a : byte }`},
 		// // Enums
 
-		{`#r`, `[ #r, ...a ]`},
-		{`#l 4`, `[ #l int, ...a ]`},
-		{`f (#horse "Lucy") ; f : (#horse text #zebra int) -> int = _ -> 1`, `int`},
+		{`#r`, `[ #r, ..a ]`},
+		{`#l 4`, `[ #l int, ..a ]`},
+		{`f (#horse "Lucy") ; f : [#horse text, #zebra int] -> int = _ -> 1`, `int`},
 		// Functions
 		{`a -> a`, `a -> a`},
 		{`_ -> "hi"`, `a -> text`},
@@ -79,7 +79,7 @@ func TestInfer(t *testing.T) {
 		{`"to" |> a -> b -> a <| 2`, `text`},
 		{`4 |> a -> b -> a`, `a -> int`},
 
-		{`#fun (x -> x * 2)`, `[ #fun (int -> int), ...a ]`},
+		{`#fun (x -> x * 2)`, `[ #fun (int -> int), ..a ]`},
 
 		{`| "/" -> (status 200 <| page "you're on the index")
 		| "/about" -> (status 200 <| page "you're on the about page")
@@ -90,14 +90,14 @@ func TestInfer(t *testing.T) {
 		; page = body -> "<!doctype html><html><body>" ++ body ++ "</body></html>"`, `text -> { body : text, code : int }`},
 		{`f
 ; f : t -> int = _ -> 1
-; t :
-  #a a
-  #b int
-  #c byte
-; a :
-  #x
-  #y
-  #z`, `[ #a [ #x, #y, #z ], #b int, #c byte ] -> int`},
+; t : type =
+  [ #a a
+  , #b int
+  , #c byte
+  ]
+; a : type = [#x, #y, #z]`, `[ #a [ #x, #y, #z ], #b int, #c byte ] -> int`},
+		{`f ; f : { a : int, b : [#x] } -> int = r -> r.a`, `{ a : int, b : [ #x ] } -> int`},
+		{`f ; f : () -> {} -> [] -> int = _ -> _ -> _ -> 1`, `() -> {} -> [] -> int`},
 
 		{`| n >+ ns -> ns`, `list a -> list a`},
 		{`| ns +< n -> ns`, `list a -> list a`},
@@ -109,27 +109,27 @@ func TestInfer(t *testing.T) {
 		{`| [1, 2] ++ ns -> ns <| [1, 2, 3]`, `list int`},
 		{`| ns ++ [2, last] -> ns +< last <| [1, 2, 3]`, `list int`},
 		// Is empty.
-		{`| [] -> #true | _ -> #false`, `list a -> [ #false, #true, ...b ]`},
-		{`| a >+ _ -> #first a | _ -> #empty`, `list a -> [ #empty, #first a, ...b ]`},
+		{`| [] -> #true | _ -> #false`, `list a -> [ #false, #true, ..b ]`},
+		{`| a >+ _ -> #first a | _ -> #empty`, `list a -> [ #empty, #first a, ..b ]`},
 		// Unifies nested types.
-		{`| [] -> { empty = #true } | _ -> { empty = #false }`, `list a -> { empty : [ #false, #true, ...b ] }`},
+		{`| [] -> { empty = #true } | _ -> { empty = #false }`, `list a -> { empty : [ #false, #true, ..b ] }`},
 		{`| 1 -> { list = [] } | _ -> { list = [ 1 ] }`, `int -> { list : list int }`},
 		{`| #true -> [1] | #false -> []`, `[ #false, #true ] -> list int`},
 
 		// A tag without a payload has the payload ().
-		{`[#a, #a ()]`, `list [ #a, ...a ]`},
+		{`[#a, #a ()]`, `list [ #a, ..a ]`},
 		// Tags are open; a payload tag is nullary.
-		{`#true #false`, `[ #true [ #false, ...a ], ...b ]`},
+		{`#true #false`, `[ #true [ #false, ..a ], ..b ]`},
 		// Without a catch-all, a match accepts exactly the tags it lists.
 		{`| #a #x -> 1 | #b -> 2`, `[ #a [ #x ], #b ] -> int`},
-		{`| #a -> 1 | _ -> 2`, `[ #a, ...a ] -> int`},
-		{`| #a #x -> 1 | #a y -> 2 | #b -> 3`, `[ #a [ #x, ...a ], #b ] -> int`},
+		{`| #a -> 1 | _ -> 2`, `[ #a, ..a ] -> int`},
+		{`| #a #x -> 1 | #a y -> 2 | #b -> 3`, `[ #a [ #x, ..a ], #b ] -> int`},
 
 		// Records
-		{`r -> r.a`, `{ a : a, ...b } -> a`},
+		{`r -> r.a`, `{ a : a, ..b } -> a`},
 		{`{ a = 1, b = "" }.b`, `text`},
 		{`| { a = 1 } -> 1 | { a = n } -> n`, `{ a : int } -> int`},
-		{`| { ..r, a = n } -> r`, `{ a : a, ...b } -> { ...b }`},
+		{`| { ..r, a = n } -> r`, `{ a : a, ..b } -> { ..b }`},
 
 		// Composition
 		{`f >> g ; f = x -> x + 1 ; g = x -> [x]`, `int -> list int`},
@@ -139,13 +139,13 @@ func TestInfer(t *testing.T) {
 		// Where-groups are recursive.
 		{`x ; x = y + 1 ; y = 2`, `int`},
 		// A scrap may denote a type.
-		{`t ; t : int`, `type = int`},
-		{`t ; t : #a a #b ; a : #x #y`, `type = [ #a [ #x, #y ], #b ]`},
-		{`t ; t : int -> text`, `type = int -> text`},
+		{`t ; t : type = int`, `type = int`},
+		{`t ; t : type = [#a a, #b] ; a : type = [#x, #y]`, `type = [ #a [ #x, #y ], #b ]`},
+		{`t ; t : type = int -> list text`, `type = int -> list text`},
 		{`f ; f = | 0 -> 0 | n -> f (n - 1)`, `int -> int`},
 		{`even
 ; even = | 0 -> #true | n -> odd (n - 1)
-; odd = | 0 -> #false | n -> even (n - 1)`, `int -> [ #false, #true, ...a ]`},
+; odd = | 0 -> #false | n -> even (n - 1)`, `int -> [ #false, #true, ..a ]`},
 	}
 
 	for _, ex := range examples {
@@ -173,7 +173,7 @@ func TestInferFailure(t *testing.T) {
 		{`4 ++ 6`, `cannot unify 'int' with 'list a'`},
 		// Records
 		{`{ ..base, a = 1 } ; base = { a = ~00 }`, `cannot unify 'byte' with 'int'`},
-		{`{ ..1, a = 1 }`, `cannot unify 'int' with '{ a : int, ...a }'`},
+		{`{ ..1, a = 1 }`, `cannot unify 'int' with '{ a : int, ..a }'`},
 		// Enums
 
 		{`1 + ~dd`, `cannot unify 'byte' with 'int'`},
@@ -190,15 +190,20 @@ func TestInferFailure(t *testing.T) {
 		// Different fields.
 		{`| [] -> { a = 1 } | _ -> { b = 1 }`, `cannot unify '{ a : int }' with '{ b : int }'`},
 		{`| { a = 1 } -> 1 | { a = 1, b = 2 } -> 2`, `cannot unify '{ a : int }' with '{ a : a, b : b }'`},
-		{`{ a = 1 }.b`, `cannot unify '{ a : int }' with '{ b : a, ...b }'`},
-		{`(| #a -> 1 | #b -> 2) #c`, `cannot unify '[ #a, #b ]' with '[ #c, ...a ]'`},
+		{`{ a = 1 }.b`, `cannot unify '{ a : int }' with '{ b : a, ..b }'`},
+		{`(| #a -> 1 | #b -> 2) #c`, `cannot unify '[ #a, #b ]' with '[ #c, ..a ]'`},
 		// Function arguments aren't generalized.
 		{`f -> ({ a = g 1, b = g "" } ; g = x -> f x)`, `cannot unify 'int' with 'text'`},
 		{`x -> z -> { a = [z, [x]], b = [x, [z]] }`, `cannot construct infinite type`},
 		{`x ; x = 1 ; x = 2`, `cannot bind x twice`},
-		{`f ; f : c -> int = _ -> 1 ; c : #a #a`, `cannot define tag #a more than once`},
-		{`f ; f : t -> int = _ -> 1 ; t : #a t`, `recursive type t is not supported yet`},
-		{`t + 1 ; t : int`, `cannot use type t as a value`},
+		{`f ; f : c -> int = _ -> 1 ; c : type = [#a, #a]`, `cannot define tag #a more than once`},
+		{`f ; f : { a : int, a : text } -> int = _ -> 1`, `cannot define field a more than once`},
+		{`f ; f : t -> int = _ -> 1 ; t : type = [#a t]`, `recursive type t is not supported yet`},
+		{`t + 1 ; t : type = int`, `cannot use type t as a value`},
+		{`f ; f : [#a, ..r] -> int = _ -> 1`, `row variables are not supported yet`},
+		{`f ; f : a => a -> a = x -> x`, `type variables are not supported yet`},
+		{`1 ; t : type -> type = s => [#a s]`, `type constructors are not supported yet`},
+		{`1 ; option = a => [#some a, #none]`, `type constructors are not supported yet`},
 	}
 
 	for _, ex := range examples {

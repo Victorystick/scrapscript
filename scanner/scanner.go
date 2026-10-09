@@ -155,7 +155,7 @@ func (s *scanner) token() token.Token {
 	case '"':
 		return s.text(start)
 	case '=':
-		return token.ASSIGN
+		return s.switch2(token.ASSIGN, '>', token.FORALL)
 	case '+':
 		if s.at(start+1) == '<' {
 			s.pos++

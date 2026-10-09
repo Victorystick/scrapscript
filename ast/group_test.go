@@ -17,8 +17,8 @@ func TestComponents(t *testing.T) {
 		// Mutually recursive bindings share a component.
 		{`x ; a = b ; b = c ; c = a ; d = a`, `a,b,c d`},
 		{`x ; f = n -> f n`, `f`},
-		// Type-only bindings are left out.
-		{`x ; t : int ; a = 1`, `a`},
+		// Sort bindings are left out.
+		{`x ; t : type = int ; a = 1`, `a`},
 	}
 
 	for _, ex := range examples {

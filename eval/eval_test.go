@@ -117,17 +117,17 @@ var failures = []struct {
 	{`[] ++ ""`, `cannot unify 'list a' with 'text'`},
 	{`"" ++ []`, `cannot unify 'text' with 'list a'`},
 	{`1 -> x`, `function parameter must be an identifier`},
-	{`#left 5 |> | #l n -> n | #r n -> n`, `cannot unify '[ #l a, #r a ]' with '[ #left int, ...b ]'`},
+	{`#left 5 |> | #l n -> n | #r n -> n`, `cannot unify '[ #l a, #r a ]' with '[ #left int, ..b ]'`},
 	{`{ a = 2 } |> | { a = a, b = b } -> ()`, `cannot unify '{ a : a, b : b }' with '{ a : int }'`},
 	{`{ a = 2, b = 1 } |> | { a = a, b = a } -> ()`, `cannot bind a twice`},
-	{`f ; f : c -> int = _ -> 1 ; c : #a #a`, `cannot define tag #a more than once`},
-	{`g ; g : #x f -> int = _ -> 1 ; f = x -> 2`, `unknown type f`},
+	{`f ; f : c -> int = _ -> 1 ; c : type = [#a, #a]`, `cannot define tag #a more than once`},
+	{`g ; g : [#x f] -> int = _ -> 1 ; f = x -> 2`, `unknown type f`},
 	{`a::x`, `Expected EOF got DEFINE`},
 	{`["a"] +< ~be`, `cannot unify 'list text' with 'bytes'`},
 	{`1 >+ [~~abcd]`, `cannot unify 'bytes' with 'int'`},
 	{`[1, 1.2]`, `cannot unify 'int' with 'float'`},
-	{`{ b = 1 }.a`, `cannot unify '{ b : int }' with '{ a : a, ...b }'`},
-	{`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`, `cannot unify '{ a : int, c : int }' with '{ a : int, b : text, ...a }'`},
+	{`{ b = 1 }.a`, `cannot unify '{ b : int }' with '{ a : a, ..b }'`},
+	{`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`, `cannot unify '{ a : int, c : int }' with '{ a : int, b : text, ..a }'`},
 	{`{ ..{ a = 2 }, a = "x"}`, `cannot unify 'int' with 'text'`},
 }
 
@@ -263,7 +263,7 @@ func TestEvalImport(t *testing.T) {
 func TestImportType(t *testing.T) {
 	env := NewEnvironment()
 	env.UseFetcher(MapFetcher{
-		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445": `t ; t : #a int #b`,
+		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445": `t ; t : type = [#a int, #b]`,
 	})
 
 	scrap, err := env.Read([]byte(`f (#a 1) ; f : $sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445 -> int = | #a n -> n | #b -> 0`))
@@ -279,7 +279,7 @@ func TestImportType(t *testing.T) {
 	}
 
 	// The type scrap itself has no value.
-	scrap, err = env.Read([]byte(`t ; t : #a int #b`))
+	scrap, err = env.Read([]byte(`t ; t : type = [#a int, #b]`))
 	if err != nil {
 		t.Fatal(err)
 	}

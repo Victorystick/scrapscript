@@ -17,8 +17,6 @@ type parser struct {
 	i   int         // index of the current token
 	tok token.Token // kind of the current token
 
-	inType bool // parsing a type annotation, where tags form enum types
-
 	// The tree being built; see ast.SourceExpr.
 	kinds []ast.Kind
 	mains []ast.Tok
@@ -41,6 +39,11 @@ func (p *parser) next() {
 		p.i++
 	}
 	p.tok = p.tokens.Kinds[p.i]
+}
+
+// peek returns the kind of the token after the current one.
+func (p *parser) peek() token.Token {
+	return p.tokens.Kinds[min(p.i+1, len(p.tokens.Kinds)-1)]
 }
 
 // span returns the current token's span. Token ends are not stored, so only
@@ -185,7 +188,7 @@ func (p *parser) parsePlainExpr(prec int) ast.Node {
 				break
 			}
 			left = val
-		} else if p.tok == token.OPTION && !p.inType && token.CallPrec > prec {
+		} else if p.tok == token.OPTION && token.CallPrec > prec {
 			// A tag in argument position takes no payload.
 			right := p.parseTag()
 			left = p.add(ast.Call, 0, uint32(left), uint32(right))
@@ -260,9 +263,6 @@ func (p *parser) parseUnaryExpr() ast.Node {
 		return p.parseMatchFuncExpr()
 
 	case token.OPTION:
-		if p.inType {
-			return p.parseEnum()
-		}
 		return p.parseVariantExpr()
 
 	case token.IMPORT:
@@ -317,28 +317,156 @@ func (p *parser) parseWhereExpr(x ast.Node) ast.Node {
 	}
 
 	id := p.identTok()
-	typ, val := ast.None, ast.None
-
+	typ := ast.None
 	if p.tok == token.DEFINE {
 		p.next()
-
 		typ = p.parseType()
 	}
 
-	if p.tok == token.ASSIGN {
-		p.next()
-		val = p.parsePlainExpr(token.BasePrec)
-	}
+	p.expect(token.ASSIGN)
+	p.next()
 
-	return p.add(ast.Where, id, uint32(x), p.addExtra(typ, val))
+	// A sort binding binds a type. Its annotation is a kind, or it has none
+	// and its type starts with a type variable.
+	sort := p.isKind(typ) || p.tok == token.IDENT && p.peek() == token.FORALL
+	if sort {
+		return p.add(ast.Where, id, uint32(x), p.addExtra(typ, p.parseType(), 1))
+	}
+	val := p.parsePlainExpr(token.BasePrec)
+	return p.add(ast.Where, id, uint32(x), p.addExtra(typ, val, 0))
 }
 
-func (p *parser) parseType() ast.Node {
-	p.inType = true
-	defer func() { p.inType = false }()
+// isKind returns true if the annotation t is a kind: a type whose final
+// result is `type`, such as `type` or `type -> type`.
+func (p *parser) isKind(t ast.Node) bool {
+	for p.kinds[t] == ast.Func {
+		t = ast.Node(p.data[t].Rhs)
+	}
+	return p.kinds[t] == ast.Ident && p.source.GetString(p.tokens.Span(p.src, int(p.mains[t]))) == "type"
+}
 
-	// TODO: only allow a subset of expressions here.
-	return p.parseBinaryExpr(ast.None, token.BasePrec)
+// parseType parses a type, or a kind:
+//
+//	type  = NAME "=>" type | arrow
+//	arrow = tapp [ "->" arrow ]
+func (p *parser) parseType() ast.Node {
+	if debug {
+		stack = append(stack, "parseType")
+		defer func() { stack = stack[:len(stack)-1] }()
+	}
+	if p.tok == token.IDENT && p.peek() == token.FORALL {
+		param := p.identTok()
+		p.next()
+		return p.add(ast.Forall, param, uint32(p.parseType()), 0)
+	}
+	return p.parseArrowType()
+}
+
+func (p *parser) parseArrowType() ast.Node {
+	t := p.parseTypeApp()
+	if p.tok != token.ARROW {
+		return t
+	}
+	arrow := p.at()
+	p.next()
+	return p.add(ast.Func, arrow, uint32(t), uint32(p.parseArrowType()))
+}
+
+// parseTypeApp parses a type application, which is left-associative:
+//
+//	tapp = tatom { tatom }
+func (p *parser) parseTypeApp() ast.Node {
+	t := p.parseTypeAtom()
+	for startsTypeAtom(p.tok) {
+		t = p.add(ast.Call, 0, uint32(t), uint32(p.parseTypeAtom()))
+	}
+	return t
+}
+
+// Returns true if tok is the start of a type atom.
+func startsTypeAtom(tok token.Token) bool {
+	switch tok {
+	case token.IDENT, token.HOLE, token.LPAREN, token.LBRACE, token.LBRACK, token.IMPORT:
+		return true
+	}
+	return false
+}
+
+// parseTypeAtom parses a type name, (), a parenthesised type, a record or
+// enum type, or a hash reference to a type scrap.
+func (p *parser) parseTypeAtom() ast.Node {
+	switch p.tok {
+	case token.IDENT:
+		return p.ident()
+	case token.HOLE:
+		lit := p.add(ast.Literal, p.at(), 0, 0)
+		p.next()
+		return lit
+	case token.LPAREN:
+		p.next()
+		t := p.parseType()
+		p.expect(token.RPAREN)
+		p.next()
+		return t
+	case token.LBRACE:
+		start := p.at()
+		tail, info := p.parseRow(token.RBRACE, 2, func() {
+			key := p.identTok()
+			p.expect(token.DEFINE)
+			p.next()
+			p.scratch = append(p.scratch, ast.Node(key), p.parseType())
+		})
+		return p.add(ast.RecordType, start, uint32(tail), info)
+	case token.LBRACK:
+		start := p.at()
+		tail, info := p.parseRow(token.RBRACK, 1, func() {
+			tag := p.tagTok()
+			payload := ast.None
+			if startsTypeAtom(p.tok) {
+				payload = p.parseTypeAtom()
+			}
+			p.scratch = append(p.scratch, p.add(ast.Variant, tag, uint32(payload), 0))
+		})
+		return p.add(ast.Enum, start, uint32(tail), info)
+	case token.IMPORT:
+		return p.parseImport()
+	}
+
+	p.unexpected()
+	return ast.None
+}
+
+// parseRow parses the comma-separated labels of a record or enum type, from
+// its opening bracket to close, and an optional `..NAME` tail last. Each
+// label adds width entries to scratch. It returns the tail and the index in
+// Extra of: the closing token, the label count, then the labels' entries.
+func (p *parser) parseRow(close token.Token, width int, label func()) (tail ast.Node, info uint32) {
+	p.next()
+	top := len(p.scratch)
+	for p.tok != close {
+		if p.tok == token.SPREAD {
+			p.next()
+			tail = p.ident()
+			break
+		}
+		label()
+		if p.tok != token.COMMA {
+			break
+		}
+		p.next()
+		if p.tok == close {
+			p.bail("A type cannot end in a trailing comma.")
+		}
+	}
+
+	p.expect(close)
+	end := p.at()
+	p.next()
+
+	count := (len(p.scratch) - top) / width
+	info = p.addExtra(ast.Node(end), ast.Node(count))
+	p.flush(top)
+	return tail, info
 }
 
 func (p *parser) parseRecord() ast.Node {
@@ -453,38 +581,6 @@ func (p *parser) parseMatchFuncExpr() ast.Node {
 
 	lhs, rhs := p.flush(top)
 	return p.add(ast.MatchFunc, 0, lhs, rhs)
-}
-
-func (p *parser) parseEnum() ast.Node {
-	if debug {
-		stack = append(stack, "parseEnum")
-		defer func() { stack = stack[:len(stack)-1] }()
-	}
-	top := len(p.scratch)
-
-	for p.tok == token.OPTION {
-		p.scratch = append(p.scratch, p.parseVariant())
-	}
-
-	lhs, rhs := p.flush(top)
-	return p.add(ast.Enum, 0, lhs, rhs)
-}
-
-func (p *parser) parseVariant() ast.Node {
-	if debug {
-		stack = append(stack, "parseVariant")
-		defer func() { stack = stack[:len(stack)-1] }()
-	}
-	tag := p.tagTok()
-	typ := ast.None
-
-	if !p.tok.IsOperator() && p.tok != token.EOF {
-		typ = p.parseBinaryExpr(ast.None, token.ARROW.Precedence()+1)
-	} else if p.tok == token.LPAREN {
-		typ = p.parseParenExpr()
-	}
-
-	return p.add(ast.Variant, tag, uint32(typ), 0)
 }
 
 // tagTok consumes a '#' and the tag after it, and returns the tag's token.
