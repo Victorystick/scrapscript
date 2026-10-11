@@ -204,6 +204,25 @@ func (c *context) imported(x ast.Node) TypeRef {
 	return ref
 }
 
+// check checks that x has the type want. A function's parameter takes the
+// argument type of want before its body is checked, so that an annotation
+// informs the inference of the body, as for `++`.
+func (c *context) check(x ast.Node, want TypeRef) {
+	if c.src.Kind(x) == ast.Func {
+		arg, body := c.src.Func(x)
+		if n := c.reg.at(c.reg.Resolve(want)); n.kind == funcKind && c.src.Kind(arg) == ast.Ident {
+			scope := c.scope
+			if name := c.src.NodeText(arg); name != "_" {
+				c.bind(name, n.a)
+			}
+			c.check(body, n.b)
+			c.scope = scope
+			return
+		}
+	}
+	c.ensure(x, c.infer(x), want)
+}
+
 // ensure unifies got with want, failing at x if they differ.
 func (c *context) ensure(x ast.Node, got, want TypeRef) {
 	if err := c.reg.Unify(got, want); err != nil {
@@ -306,10 +325,30 @@ func (c *context) where(x ast.Node, inferBody func(ast.Node) TypeRef) TypeRef {
 		a.scope = c.aliases
 	}
 	for _, a := range group {
-		c.check(a)
+		c.checkAlias(a)
 	}
 
-	for _, comp := range c.src.Components(binds) {
+	// An annotated binding has the type its annotation declares, everywhere
+	// in the group, so references to it don't make it part of a component.
+	annotated := make(map[ast.Node]bool)
+	for _, b := range binds {
+		if _, id, typ, _ := c.src.Where(b); typ != ast.None && !c.src.Sort(b) {
+			annotated[b] = true
+			c.bind(c.src.TokenText(id), c.annotation(typ, func(string) TypeRef { return c.reg.Gen() }))
+		}
+	}
+
+	for _, comp := range c.src.Components(binds, func(b ast.Node) bool { return annotated[b] }) {
+		if b := comp[0]; annotated[b] {
+			// Check the value with the annotation's type variables rigid, so
+			// that it can't assume anything about them.
+			_, _, typ, val := c.src.Where(b)
+			c.reg.enter()
+			c.check(val, c.annotation(typ, c.reg.rigid))
+			c.reg.exit()
+			continue
+		}
+
 		c.reg.enter()
 		vars := make([]TypeRef, len(comp))
 		for i, b := range comp {
@@ -317,13 +356,8 @@ func (c *context) where(x ast.Node, inferBody func(ast.Node) TypeRef) TypeRef {
 			c.bind(c.src.TokenText(c.src.Main(b)), vars[i])
 		}
 		for i, b := range comp {
-			_, _, typ, val := c.src.Where(b)
-			ref := c.infer(val)
-			// If there's an annotation, make sure it matches the inferred type.
-			if typ != ast.None {
-				c.ensure(typ, ref, c.typ(typ))
-			}
-			c.ensure(val, vars[i], ref)
+			_, _, _, val := c.src.Where(b)
+			c.ensure(val, vars[i], c.infer(val))
 		}
 		c.reg.exit()
 		for _, v := range vars {

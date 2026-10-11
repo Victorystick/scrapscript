@@ -96,24 +96,42 @@ func TestInfer(t *testing.T) {
   , #c byte
   ]
 ; a : type = [#x, #y, #z]`, `[ #a [ #x, #y, #z ], #b int, #c byte ] -> int`},
-		{`f ; f : { a : int, b : [#x] } -> int = r -> r.a`, `{ a : int, b : [ #x ] } -> int`},
-		{`f ; f : () -> {} -> [] -> int = _ -> _ -> _ -> 1`, `() -> {} -> [] -> int`},
+		{`get-a ; get-a : { a : int, b : [#x] } -> int = r -> r.a`, `{ a : int, b : [ #x ] } -> int`},
+		{`ignore ; ignore : () -> {} -> [] -> int = _ -> _ -> _ -> 1`, `() -> {} -> [] -> int`},
 		// Type constructors.
-		{`f ; f : option int -> int = | #some n -> n | #none -> 0 ; option = a => [#some a, #none]`,
+		{`or-zero ; or-zero : option int -> int = | #some n -> n | #none -> 0 ; option = a => [#some a, #none]`,
 			`[ #none, #some int ] -> int`},
-		{`f ; f : either int (option text) -> int = _ -> 1
+		{`ignore ; ignore : either int (option text) -> int = _ -> 1
 ; option : type -> type = a => [#some a, #none]
 ; either : type -> type -> type = a => b => [#left a, #right b]`,
 			`[ #left int, #right [ #none, #some text ] ] -> int`},
-		{`f ; f : turn int = { state = 1, out = "", next = #read-line }
+		{`start ; start : turn int = { state = 1, out = "", next = #read-line }
 ; turn = s => { state : s, out : text, next : next-action }
 ; next-action : type = [#read-line, #exit int]`,
 			`{ next : [ #exit int, #read-line ], out : text, state : int }`},
 		// A type constructor's parameters may be rows.
 		{`1 ; t : type -> row -> type = a => r => { a : a, ..r } ; u = r => [#u (t int r), ..r]`, `int`},
+		// Annotated bindings are checked against, and used with, their schemes.
+		{`id ; id : a => a -> a = x -> x`, `a -> a`},
+		{`{ a = id 1, b = id "" } ; id : a => a -> a = x -> x`, `{ a : int, b : text }`},
+		{`swap ; swap : a => b => { l : a, r : b } -> { l : b, r : a } = p -> { l = p.r, r = p.l }`,
+			`{ l : a, r : b } -> { l : b, r : a }`},
+		{`get-a ; get-a : t => r => { a : t, ..r } -> t = x -> x.a`, `{ a : a, ..b } -> a`},
+		{`get-a { a = 1, b = "" } ; get-a : t => r => { a : t, ..r } -> t = x -> x.a`, `int`},
+		{`get-a ; get-a : r => has-a int r -> int = x -> x.a ; has-a = t => r => { a : t, ..r }`, `{ a : int, ..a } -> int`},
+		{`to-list ; to-list : a => [#some a, #none] -> list a = | #some x -> [x] | #none -> []`, `[ #none, #some a ] -> list a`},
+		// An annotation informs the inference of its value's body.
+		{`join ; join : text -> text -> text = a -> b -> a ++ b`, `text -> text -> text`},
+		// A variable that the annotation doesn't bind keeps its own name.
+		{`singleton ; singleton : b => b -> list b = x -> [x]`, `a -> list a`},
+		// Annotated bindings may recurse at other types: polymorphic recursion.
+		{`nest ; nest : a => int -> a -> int = | 0 -> _ -> 0 | n -> x -> nest (n - 1) [x]`, `int -> a -> int`},
+		// The group's other bindings see an annotated binding's scheme.
+		{`both ; both = x -> { a = id x, b = id 1 } ; id : a => a -> a = x -> x`, `a -> { a : a, b : int }`},
+		{`id ; id : a => a -> a = x -> id2 x ; id2 = y -> y`, `a -> a`},
 		// Type variables and aliases shadow the builtins.
-		{`f ; f : t text -> int = _ -> 1 ; t = int => [#a int]`, `[ #a text ] -> int`},
-		{`f ; f : int -> int = _ -> "" ; int : type = text`, `text -> text`},
+		{`ignore ; ignore : t text -> int = _ -> 1 ; t = int => [#a int]`, `[ #a text ] -> int`},
+		{`empty ; empty : int -> int = _ -> "" ; int : type = text`, `text -> text`},
 
 		{`| n >+ ns -> ns`, `list a -> list a`},
 		{`| ns +< n -> ns`, `list a -> list a`},
@@ -212,12 +230,22 @@ func TestInferFailure(t *testing.T) {
 		{`f -> ({ a = g 1, b = g "" } ; g = x -> f x)`, `cannot unify 'int' with 'text'`},
 		{`x -> z -> { a = [z, [x]], b = [x, [z]] }`, `cannot construct infinite type`},
 		{`x ; x = 1 ; x = 2`, `cannot bind x twice`},
-		{`f ; f : c -> int = _ -> 1 ; c : type = [#a, #a]`, `cannot define tag #a more than once`},
-		{`f ; f : { a : int, a : text } -> int = _ -> 1`, `cannot define field a more than once`},
-		{`f ; f : t -> int = _ -> 1 ; t : type = [#a t]`, `recursive type t is not supported yet`},
+		{`ignore ; ignore : c -> int = _ -> 1 ; c : type = [#a, #a]`, `cannot define tag #a more than once`},
+		{`ignore ; ignore : { a : int, a : text } -> int = _ -> 1`, `cannot define field a more than once`},
+		{`ignore ; ignore : t -> int = _ -> 1 ; t : type = [#a t]`, `recursive type t is not supported yet`},
 		{`t + 1 ; t : type = int`, `cannot use type t as a value`},
-		{`f ; f : [#a, ..r] -> int = _ -> 1`, `unknown row variable r`},
-		{`f ; f : a => a -> a = x -> x`, `type variables are not supported yet`},
+		{`ignore ; ignore : [#a, ..r] -> int = _ -> 1`, `unknown row variable r`},
+		// Annotations with type variables are checked with them rigid.
+		{`inc ; inc : a => a -> a = x -> x + 1`, `cannot unify 'a' with 'int'`},
+		{`coerce ; coerce : a => b => a -> b = x -> x`, `cannot unify 'a' with 'b'`},
+		{`to-int ; to-int : a => a -> int = x -> x`, `cannot unify 'a' with 'int'`},
+		{`drop-rest ; drop-rest : r => { a : int, ..r } -> { a : int } = x -> x`, `cannot unify '{ a : int, ..r }' with '{ a : int }'`},
+		{`get-a ; get-a : r => { ..r } -> int = x -> x.a`, `cannot unify '{ ..r }' with '{ a : a, ..b }'`},
+		{`ignore ; ignore : a => [#x, ..a] -> a = _ -> 1`, `a is a row, not a type`},
+		{`id ; id : int -> (a => a) = x -> x`, `type variables must be bound at the start of an annotation`},
+		// A rigid variable can't escape into a type from outside its annotation.
+		{`y -> (always-y ; always-y : a => a -> a = x -> y)`, `type variable 'a' would escape its annotation through 'b'`},
+		{`one ; one : a => a => a = 1`, `cannot bind type variable a twice`},
 		// Kinds.
 		{`1 ; t : type = a => [#a a]`, `t has kind type -> type, not type`},
 		{`1 ; t : type -> type = int`, `t has kind type, not type -> type`},
@@ -227,17 +255,17 @@ func TestInferFailure(t *testing.T) {
 		{`1 ; t : type -> int = a => a`, `int is not a kind of types`},
 		{`1 ; t = a => a => [#a a]`, `cannot bind type variable a twice`},
 		// Type constructors.
-		{`f ; f : option -> int = _ -> 1 ; option = a => [#some a, #none]`, `option takes 1 type argument, not 0`},
-		{`f ; f : option int text -> int = _ -> 1 ; option = a => [#some a, #none]`, `option takes 1 type argument, not 2`},
-		{`f ; f : either int -> int = _ -> 1 ; either = a => b => [#left a, #right b]`, `either takes 2 type arguments, not 1`},
-		{`f ; f : int text -> int = _ -> 1`, `int is not a type constructor`},
-		{`f ; f : t int -> int = _ -> 1 ; t : type = int`, `t is not a type constructor`},
-		{`f ; f : list -> int = _ -> 1`, `list takes 1 type argument, not 0`},
-		{`f ; f : list int int -> int = _ -> 1`, `list takes 1 type argument, not 2`},
+		{`ignore ; ignore : option -> int = _ -> 1 ; option = a => [#some a, #none]`, `option takes 1 type argument, not 0`},
+		{`ignore ; ignore : option int text -> int = _ -> 1 ; option = a => [#some a, #none]`, `option takes 1 type argument, not 2`},
+		{`ignore ; ignore : either int -> int = _ -> 1 ; either = a => b => [#left a, #right b]`, `either takes 2 type arguments, not 1`},
+		{`ignore ; ignore : int text -> int = _ -> 1`, `int is not a type constructor`},
+		{`ignore ; ignore : t int -> int = _ -> 1 ; t : type = int`, `t is not a type constructor`},
+		{`ignore ; ignore : list -> int = _ -> 1`, `list takes 1 type argument, not 0`},
+		{`ignore ; ignore : list int int -> int = _ -> 1`, `list takes 1 type argument, not 2`},
 		{`1 ; t = f => f int`, `f is not a type constructor`},
 		{`1 ; t = a => [#a b]`, `unknown type b`},
 		{`1 ; t = a => { a : a, ..a }`, `a is a row, not a type`},
-		{`f ; f : t int -> int = _ -> 1 ; t = r => { ..r }`, `int is not a row variable, as t's parameter r must be`},
+		{`ignore ; ignore : t int -> int = _ -> 1 ; t = r => { ..r }`, `int is not a row variable, as t's parameter r must be`},
 		{`1 ; t = a => [#a (t a)]`, `recursive type t is not supported yet`},
 		{`t ; t = a => [#a a]`, `exporting type constructors is not supported yet`},
 		// Sort bindings are checked even when unused.
@@ -327,9 +355,9 @@ func TestInferImport(t *testing.T) {
 		{in: `{ x = a 1, y = a "" } ; a = $sha256~~`, imp: reg.Func(a, a), result: `{ x : int, y : text }`},
 		// A scrap that denotes a type can only be used in type position.
 		{in: `$sha256~~`, imp: reg.Type(IntRef), result: `type = int`},
-		{in: `f ; f : $sha256~~ -> int = _ -> 1`, imp: reg.Type(TextRef), result: `text -> int`},
+		{in: `ignore ; ignore : $sha256~~ -> int = _ -> 1`, imp: reg.Type(TextRef), result: `text -> int`},
 		{in: `1 + $sha256~~`, imp: reg.Type(IntRef), err: `cannot use type $sha256~~ as a value`},
-		{in: `f ; f : $sha256~~ = 1`, imp: IntRef, err: `$sha256~~ is a value, not a type`},
+		{in: `one ; one : $sha256~~ = 1`, imp: IntRef, err: `$sha256~~ is a value, not a type`},
 	}
 
 	for _, ex := range examples {

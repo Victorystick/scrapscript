@@ -266,7 +266,7 @@ func TestImportType(t *testing.T) {
 		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445": `t ; t : type = [#a int, #b]`,
 	})
 
-	scrap, err := env.Read([]byte(`f (#a 1) ; f : $sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445 -> int = | #a n -> n | #b -> 0`))
+	scrap, err := env.Read([]byte(`or-zero (#a 1) ; or-zero : $sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445 -> int = | #a n -> n | #b -> 0`))
 	if err != nil {
 		t.Fatal(err)
 	}

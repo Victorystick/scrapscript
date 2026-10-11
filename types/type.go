@@ -27,6 +27,7 @@ const (
 	emptyKind              // The empty row, which closes a row.
 	extendKind             // aux: the label. a: its type. b: the rest of the row.
 	typeKind               // The sort of a type that a scrap denotes. a: the type.
+	rigidKind              // A rigid type variable, equal only to itself. aux: its level. a: its name's label.
 )
 
 // A node is a type in a Registry. Its kind says how it uses the other fields.
@@ -178,6 +179,12 @@ func (r *Registry) Var() TypeRef {
 	return r.add(node{kind: varKind, aux: r.level})
 }
 
+// rigid returns a new rigid type variable named name, which stands for a type
+// that an annotation leaves to its user, so it is equal only to itself.
+func (r *Registry) rigid(name string) TypeRef {
+	return r.add(node{kind: rigidKind, aux: r.level, a: TypeRef(r.intern(name))})
+}
+
 // Gen returns a new generalized type variable, for building type schemes.
 // Each use of a scheme replaces its generalized variables with fresh ones.
 func (r *Registry) Gen() TypeRef {
@@ -272,6 +279,8 @@ var (
 	errMissingLabel = errors.New("missing label")
 	// The rows can only be equal if they are infinite.
 	errInfiniteRow = errors.New("infinite row")
+	// A variable occurs in the type it is bound to.
+	errOccurs = errors.New("occurs")
 )
 
 // Unify makes a and b the same type by binding their variables, or returns
@@ -344,37 +353,49 @@ func (r *Registry) unify(a, b TypeRef) error {
 
 // bind binds the variable v to the type t.
 func (r *Registry) bind(v, t TypeRef) error {
-	if r.occurs(v, r.at(v).aux, t) {
+	switch err := r.occurs(v, r.at(v).aux, t); err {
+	case nil:
+	case errOccurs:
 		if k := r.at(t).kind; k == extendKind || k == emptyKind {
 			return errInfiniteRow
 		}
 		return r.errorf("cannot construct infinite type '%s' = '%s'", v, t)
+	default:
+		return err
 	}
 	r.link(v, t)
 	return nil
 }
 
-// occurs returns true if the variable v occurs in t. It also lowers the
-// variables of t to level, since t becomes part of a type that lives as
-// long as v.
-func (r *Registry) occurs(v TypeRef, level uint32, t TypeRef) bool {
+// occurs returns errOccurs if the variable v occurs in t. It also lowers
+// the variables of t to level, since t becomes part of a type that lives as
+// long as v. A rigid variable can't be lowered, so if t has one from a
+// deeper level, it would escape the annotation that introduced it.
+func (r *Registry) occurs(v TypeRef, level uint32, t TypeRef) error {
 	t = r.Resolve(t)
 	n := r.at(t)
 	switch n.kind {
 	case varKind:
 		if t == v {
-			return true
+			return errOccurs
 		}
 		if n.aux > level {
 			n.aux = level
 			r.set(t, n)
 		}
+	case rigidKind:
+		if n.aux > level {
+			return r.errorf("type variable '%s' would escape its annotation through '%s'", t, v)
+		}
 	case listKind, recordKind, enumKind, typeKind:
 		return r.occurs(v, level, n.a)
 	case funcKind, extendKind:
-		return r.occurs(v, level, n.a) || r.occurs(v, level, n.b)
+		if err := r.occurs(v, level, n.a); err != nil {
+			return err
+		}
+		return r.occurs(v, level, n.b)
 	}
-	return false
+	return nil
 }
 
 // unifyRows unifies two rows, which may list their labels in any order.
@@ -388,8 +409,11 @@ func (r *Registry) unifyRows(a, b TypeRef) error {
 		if r.at(b).kind == extendKind {
 			return r.unifyRows(b, a)
 		}
-		// Both are empty or variables.
-		return r.unify(a, b)
+		// Both are empty, variables or rigid; different closed ends differ.
+		if na.kind == varKind || r.at(b).kind == varKind {
+			return r.unify(a, b)
+		}
+		return errMissingLabel
 	}
 
 	// Find a's first label in b. If that binds the variable that ends a's
@@ -480,6 +504,8 @@ func (r *Registry) errorf(format string, a, b TypeRef) error {
 // variables.
 func (e *typeError) format(r *Registry) error {
 	s := stringer{reg: r}
+	s.reserve(e.a)
+	s.reserve(e.b)
 	msg := strings.Replace(e.msg, "%s", s.string(e.a), 1)
 	msg = strings.Replace(msg, "%s", s.string(e.b), 1)
 	return errors.New(msg)
@@ -488,6 +514,7 @@ func (e *typeError) format(r *Registry) error {
 // String returns a string representation of a type.
 func (r *Registry) String(ref TypeRef) string {
 	s := stringer{reg: r}
+	s.reserve(ref)
 	return s.string(ref)
 }
 
@@ -496,8 +523,12 @@ const varNames = "abcdefghijklmnopqrstuvwxyz"
 type stringer struct {
 	strings.Builder
 	reg *Registry
-	// The variables named so far, in order.
-	vars []TypeRef
+	// The names of the variables named so far.
+	names map[TypeRef]string
+	// The number of names tried so far.
+	next int
+	// The names of rigid variables, which other variables must not take.
+	taken map[string]bool
 }
 
 func (s *stringer) string(ref TypeRef) string {
@@ -506,14 +537,37 @@ func (s *stringer) string(ref TypeRef) string {
 	return s.String()
 }
 
-func (s *stringer) variable(ref TypeRef) {
-	i := slices.Index(s.vars, ref)
-	if i == -1 {
-		i = len(s.vars)
-		s.vars = append(s.vars, ref)
+// reserve reserves the names of the rigid variables in ref.
+func (s *stringer) reserve(ref TypeRef) {
+	ref = s.reg.Resolve(ref)
+	n := s.reg.at(ref)
+	switch n.kind {
+	case rigidKind:
+		if s.taken == nil {
+			s.taken = make(map[string]bool)
+		}
+		s.taken[s.reg.labels[n.a]] = true
+	case listKind, recordKind, enumKind, typeKind:
+		s.reserve(n.a)
+	case funcKind, extendKind:
+		s.reserve(n.a)
+		s.reserve(n.b)
 	}
-	s.WriteByte(varNames[i%len(varNames)])
-	s.WriteString(strings.Repeat("'", i/len(varNames)))
+}
+
+func (s *stringer) variable(ref TypeRef) {
+	name, ok := s.names[ref]
+	for !ok {
+		i := s.next
+		s.next++
+		name = string(varNames[i%len(varNames)]) + strings.Repeat("'", i/len(varNames))
+		ok = !s.taken[name]
+	}
+	if s.names == nil {
+		s.names = make(map[TypeRef]string)
+	}
+	s.names[ref] = name
+	s.WriteString(name)
 }
 
 // Nesting levels, at which compound types need parentheses.
@@ -534,6 +588,8 @@ func (s *stringer) write(ref TypeRef, nesting int) {
 		s.WriteString(primitiveNames[ref])
 	case varKind, genKind:
 		s.variable(ref)
+	case rigidKind:
+		s.WriteString(s.reg.labels[n.a])
 	case listKind:
 		if nesting >= atomLevel {
 			s.WriteByte('(')

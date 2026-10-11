@@ -417,7 +417,7 @@ func (c *context) where(x ast.Node) (Value, error) {
 	body, binds := c.src.Group(x)
 	vars := make(Variables, len(binds))
 	sub := c.sub(vars)
-	for _, comp := range c.src.Components(binds) {
+	for _, comp := range c.src.Components(binds, nil) {
 		for _, b := range comp {
 			_, id, _, val := c.src.Where(b)
 			v, err := sub.eval(val)

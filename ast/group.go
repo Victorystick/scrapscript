@@ -19,12 +19,13 @@ func (se *SourceExpr) Group(n Node) (body Node, binds []Node) {
 // each after the components it refers to. Sort bindings are left out.
 //
 // A reference is any identifier in a binding's value that names a binding of
-// the group. Shadowing isn't taken into account, so a component may be larger
-// than strictly needed.
-func (se *SourceExpr) Components(binds []Node) [][]Node {
+// the group, unless cut returns true for that binding; cut may be nil.
+// Shadowing isn't taken into account, so a component may be larger than
+// strictly needed.
+func (se *SourceExpr) Components(binds []Node, cut func(Node) bool) [][]Node {
 	index := make(map[string]int, len(binds))
 	for i, b := range binds {
-		if !se.Sort(b) {
+		if !se.Sort(b) && (cut == nil || !cut(b)) {
 			index[se.TokenText(se.Mains[b])] = i
 		}
 	}

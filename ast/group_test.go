@@ -28,7 +28,7 @@ func TestComponents(t *testing.T) {
 		}
 		_, binds := se.Group(se.Expr)
 		var comps []string
-		for _, comp := range se.Components(binds) {
+		for _, comp := range se.Components(binds, nil) {
 			var names []string
 			for _, b := range comp {
 				names = append(names, se.TokenText(se.Main(b)))

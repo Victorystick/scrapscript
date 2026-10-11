@@ -130,10 +130,10 @@ func TestParseTypes(t *testing.T) {
 		sort   bool
 	}{
 		{`x ; x : int = 1`, false},
-		{`f ; f : int -> list int -> () = _ -> _ -> ()`, false},
-		{`f ; f : [#a, #b int, #c (list int), ..r] -> { a : int, ..r } = _ -> {}`, false},
+		{`ignore ; ignore : int -> list int -> () = _ -> _ -> ()`, false},
+		{`empty ; empty : [#a, #b int, #c (list int), ..r] -> { a : int, ..r } = _ -> {}`, false},
 		{`id ; id : a => a -> a = x -> x`, false},
-		{`f ; f : $sha256~~ -> int = _ -> 1`, false},
+		{`ignore ; ignore : $sha256~~ -> int = _ -> 1`, false},
 		{`t ; t : type = int`, true},
 		{`t ; t : type = [#a { b : text }, #c]`, true},
 		{`t ; t : type = {}`, true},

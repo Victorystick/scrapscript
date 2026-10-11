@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Victorystick/scrapscript/ast"
@@ -11,11 +12,15 @@ import (
 // An alias is a sort binding: a type, or a type constructor whose parameters
 // are the variables of its leading =>s.
 type alias struct {
-	name   string
-	node   ast.Node // the binding, for errors
-	params []param
-	body   ast.Node // the type after the parameters
-	scope  *Scope[*alias]
+	name       string
+	node       ast.Node // the binding, for errors
+	annotation ast.Node // its kind, or None
+	params     []param
+	body       ast.Node // the type after the parameters
+	scope      *Scope[*alias]
+
+	// Whether the kinds of the parameters are known, or being found.
+	kinded, kinding bool
 
 	// The type of an alias without parameters, computed on first use.
 	ref     TypeRef
@@ -37,29 +42,64 @@ type tvar struct {
 }
 
 // sortBinding returns the alias that a sort binding of name to t defines,
-// checking its kind against the annotation, if any.
+// with the kind annotation, if any.
 func (c *context) sortBinding(b ast.Node, name string, annotation, t ast.Node) *alias {
-	a := &alias{name: name, node: b}
+	a := &alias{name: name, node: b, annotation: annotation}
+	a.params, a.body = c.params(t)
+	return a
+}
+
+// kinds finds the kinds of the alias's parameters, once the aliases it may
+// use are in its scope, and checks them against its annotation, if any.
+func (c *context) kinds(a *alias) {
+	if a.kinded || a.kinding {
+		// A recursive alias fails once expanded.
+		return
+	}
+	a.kinding = true
+	aliases := c.aliases
+	c.aliases = a.scope
+	c.markRows(a.params, a.body)
+	c.aliases = aliases
+	a.kinding, a.kinded = false, true
+
+	if a.annotation != ast.None {
+		if got, want := c.kind(a.annotation), a.kind(); got != want {
+			c.bail(a.annotation, fmt.Sprintf("%s has kind %s, not %s", a.name, want, got))
+		}
+	}
+}
+
+// params returns the type variables that t's leading =>s bind, and the type
+// after them. Their kinds are found by markRows.
+func (c *context) params(t ast.Node) ([]param, ast.Node) {
+	var params []param
 	for c.src.Kind(t) == ast.Forall {
 		tok, body := c.src.Forall(t)
 		p := c.src.TokenText(tok)
-		for _, q := range a.params {
+		for _, q := range params {
 			if q.name == p {
 				c.bail(t, fmt.Sprintf("cannot bind type variable %s twice", p))
 			}
 		}
-		a.params = append(a.params, param{name: p})
+		params = append(params, param{name: p})
 		t = body
 	}
-	a.body = t
-	c.markRows(a.params, t)
+	return params, t
+}
 
-	if annotation != ast.None {
-		if got, want := c.kind(annotation), a.kind(); got != want {
-			c.bail(annotation, fmt.Sprintf("%s has kind %s, not %s", name, want, got))
-		}
+// annotation returns the type that a value binding's annotation x declares,
+// with each of its type variables replaced by fresh(name).
+func (c *context) annotation(x ast.Node, fresh func(name string) TypeRef) TypeRef {
+	params, t := c.params(x)
+	c.markRows(params, t)
+	tvars := c.tvars
+	for _, p := range params {
+		c.tvars = c.tvars.Bind(p.name, tvar{fresh(p.name), p.row})
 	}
-	return a
+	ref := c.typ(t)
+	c.tvars = tvars
+	return ref
 }
 
 // kind returns the kind of the alias, such as `type -> type`.
@@ -100,31 +140,41 @@ func (c *context) kind(x ast.Node) string {
 	return b.String()
 }
 
-// markRows marks the params that t uses as row tails.
+// markRows marks the params that t uses as rows: as row tails, or as the
+// arguments of an alias's row parameters.
 func (c *context) markRows(params []param, t ast.Node) {
-	mark := func(tail ast.Node) {
-		if tail == ast.None {
-			return
+	index := func(x ast.Node) int {
+		if c.src.Kind(x) != ast.Ident {
+			return -1
 		}
-		name := c.src.TokenText(c.src.Main(tail))
-		for i := range params {
-			if params[i].name == name {
-				params[i].row = true
-			}
+		name := c.src.TokenText(c.src.Main(x))
+		return slices.IndexFunc(params, func(p param) bool { return p.name == name })
+	}
+	mark := func(x ast.Node) {
+		if i := index(x); i >= 0 {
+			params[i].row = true
 		}
 	}
 	switch c.src.Kind(t) {
 	case ast.Call:
-		fn, arg := c.src.Call(t)
-		c.markRows(params, fn)
-		c.markRows(params, arg)
+		fn, args := c.typeApp(t)
+		var a *alias
+		if c.src.Kind(fn) == ast.Ident && index(fn) < 0 {
+			a = c.aliases.Lookup(c.src.TokenText(c.src.Main(fn)))
+		}
+		if a != nil {
+			c.kinds(a)
+		}
+		for i, arg := range args {
+			if a != nil && i < len(a.params) && a.params[i].row {
+				mark(arg)
+			}
+			c.markRows(params, arg)
+		}
 	case ast.Func:
 		arg, result := c.src.Func(t)
 		c.markRows(params, arg)
 		c.markRows(params, result)
-	case ast.Forall:
-		_, body := c.src.Forall(t)
-		c.markRows(params, body)
 	case ast.RecordType:
 		tail, fields := c.src.Record(t)
 		mark(tail)
@@ -141,9 +191,10 @@ func (c *context) markRows(params []param, t ast.Node) {
 	}
 }
 
-// check checks that the alias denotes a valid type, applying a type
+// checkAlias checks that the alias denotes a valid type, applying a type
 // constructor to fresh variables.
-func (c *context) check(a *alias) {
+func (c *context) checkAlias(a *alias) {
+	c.kinds(a)
 	if len(a.params) == 0 {
 		c.alias(a.node, a)
 		return
@@ -226,7 +277,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 		}
 		return c.reg.add(node{kind: recordKind, a: c.reg.row(ref, c.rowTail(tail))})
 	case ast.Forall:
-		c.bail(x, "type variables are not supported yet")
+		c.bail(x, "type variables must be bound at the start of an annotation")
 	}
 
 	c.bail(x, fmt.Sprintf("%s is not a type", c.src.NodeText(x)))
@@ -249,18 +300,21 @@ func (c *context) rowTail(tail ast.Node) TypeRef {
 	return v.val.ref
 }
 
-// application returns the type that the type application x denotes.
-func (c *context) application(x ast.Node) TypeRef {
-	var args []ast.Node
-	fn := x
+// typeApp returns the type constructor and arguments of an application.
+func (c *context) typeApp(x ast.Node) (fn ast.Node, args []ast.Node) {
+	fn = x
 	for c.src.Kind(fn) == ast.Call {
 		f, arg := c.src.Call(fn)
 		args = append(args, arg)
 		fn = f
 	}
-	for i, j := 0, len(args)-1; i < j; i, j = i+1, j-1 {
-		args[i], args[j] = args[j], args[i]
-	}
+	slices.Reverse(args)
+	return fn, args
+}
+
+// application returns the type that the type application x denotes.
+func (c *context) application(x ast.Node) TypeRef {
+	fn, args := c.typeApp(x)
 
 	if c.src.Kind(fn) == ast.Ident {
 		name := c.src.TokenText(c.src.Main(fn))
