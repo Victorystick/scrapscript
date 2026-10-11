@@ -2,7 +2,8 @@
 
 Status: design draft. It specifies the language this implementation is moving
 towards, and does not describe it yet. It covers the surface grammar and its
-desugaring into a small core, types, scrap identity, linking and platforms, and
+desugaring into a small core, types, scrap identity, drafts and publishing,
+platforms, and
 replaces the precedence table of the reference interpreter with an explicit
 grammar. Section 13 relates it to the guide at scrapscript.org. Types (section 7)
 and platforms (section 12) are unfinished.
@@ -18,7 +19,7 @@ Principles:
 4. Whitespace-insensitive layout, except the operator-spacing rule (2.3).
 5. **Reliability first.** Meaning never depends on ambient state: a closed
    scrap evaluates the same everywhere. No implicit network, filesystem or
-   clock access. Failures are reported at parse, link or check time, not at
+   clock access. Failures are reported at parse, load or check time, not at
    runtime, wherever the type system can rule them out (section 10).
 
 ## 1. Notation
@@ -37,6 +38,7 @@ TEXT     = '"' { char | escape } '"'             # escapes: \" \\ \n \t \u{HEX}
 BYTE     = "~" hex hex                           # one byte: ~FF
 BYTES    = "~~" { base64 }                       # padded base64: ~~aGVsbG8=
 HASH     = "$" scheme "~~" { hex }               # scheme names how the target is hashed, e.g. $src-sha256~~e4ca…
+PATH     = "$" TEXT                              # a draft's reference to a file: $"./terminal/program.scrap"
 NAME     = ident-start { ident-char }            # kebab-case and slashes allowed, see 2.3
 TAG      = "#" ( letter | digit ) { ident-char }  # #true  #2d
 COMMENT  = "--" ( " " | "-" | EOL ) { any } EOL  # line comment
@@ -146,7 +148,7 @@ app      = variant                               # tag head: takes at most one p
 variant  = TAG [ postfix ]                       # payload only if next token starts an atom
 postfix  = atom { "." NAME }                     # field access, no whitespace before "."
 
-atom     = INT | FLOAT | TEXT | BYTE | BYTES | HASH
+atom     = INT | FLOAT | TEXT | BYTE | BYTES | HASH | PATH
          | NAME
          | TAG                                   # nullary tag (argument position, list items)
          | "(" [ expr ] ")"                      # "()" is the hole
@@ -276,7 +278,7 @@ Desugaring:
   ```
   This is display only: aliases never affect unification. Open: which name to
   print when types written with different aliases unify, and whether the
-  where-clause should read back as a type scrap (section 10, rule 7).
+  where-clause should read back as a type scrap (section 10, rule 9).
 - Tag payload arity is positional (section 3, "Tag payloads").
 - Recursive aliases are allowed when every cycle passes through a tag payload,
   and are equi-recursive (7.5).
@@ -441,16 +443,13 @@ by dependency, so source order would not affect identity.
 For now a scrap is hashed from its source, which is heavier than hashing a
 canonical core but needs no canonicalisation pass.
 
-- A **scrap** is `(edition, source, names)`. `source` is the program text.
-  `names` is the output of the link step (section 10): a map from each free name
-  of the source to the hash it resolves to. It is empty for a scrap with no free
-  names.
+- A published **scrap** is `(edition, source)`. `source` is the program text,
+  which refers to other scraps by hash only (section 10).
 - **Source bytes** are valid UTF-8, with no BOM and LF line endings only. They are
   stored and hashed exactly as written; tools never normalise them. Anything else
   is rejected at publish time, so no two accidental encodings of one text exist.
 - `digest = sha256( preimage )`, where the preimage is the list of length-prefixed
-  byte strings: the scheme tag `src-sha256`, the edition, the source bytes, then
-  the `names` entries sorted by name as (name, hash) pairs.
+  byte strings: the scheme tag `src-sha256`, the edition, then the source bytes.
 - The **edition** (spec version covering both grammar and typing rules) is part of
   the digest, because the same bytes can parse or type-check differently in a
   different edition. An edition upgrade therefore produces new identities, which
@@ -470,37 +469,49 @@ Keeps: integrity, immutability, closure verification (section 10), and the Merkl
 cascade (a changed dependency changes every dependent's hash). A scrap cannot
 contain its own hash, and scraps cannot depend on each other cyclically.
 
-Identity depends on the source and the `names` map, not on the parser's output,
-so a scrap can be verified without parsing it. It must still be parsed before it
+Identity depends on the edition and the source, not on the parser's output, so a
+scrap can be verified without parsing it. It must still be parsed before it
 is run.
 
-## 10. Scraps, free variables and linking
+## 10. Scraps, drafts and publishing
 
-Reliability is a top-level requirement. The rules:
+Reliability is a top-level requirement. Scraps come in two flavors: **drafts**,
+which are files being developed, and **published** scraps, which are immutable
+and identified by hash. Only drafts ever touch the filesystem. The rules:
 
 1. Evaluation and type checking are defined only on **closed** terms. A free
-   variable is an error ("unbound name"), reported before anything runs. There is
-   no ambient lookup, no auto-resolution, and no network or filesystem access
-   during parsing, checking or evaluation.
-2. Names become hashes only in an explicit **link** step: `link(source, names)`,
-   where `names` maps name to hash. It is a pure function of its inputs, fails on
-   any free name missing from `names`, and does not rewrite the source: its result
-   is the scrap `(edition, source, names)` of section 9.
-3. A hash reference is valid only if its target is present in the local store and
-   re-hashing it under the reference's scheme gives the digest. Verification happens on every read, so a
-   corrupted or substituted scrap is rejected.
-4. A scrap's **closure** is itself plus every scrap reachable through hash
-   literals and `names` entries.
-   Fetching is a separate, explicit step that completes the closure ahead of time.
-   Checking and evaluating require the whole closure locally.
-5. A hash reference's type, or for a type scrap (7.6) the type it denotes, is
-   inferred from the target's source (present by rule 4), parsed and checked
-   under the target's edition. The digest includes the edition (section 9), so
-   any type cache is keyed by the digest alone. The cache is an optimisation
-   only; deleting it never changes a result.
-6. Name maps (versions, "latest", signing, scrapyard policy) are tooling. They
-   produce the `names` input and are never consulted by the language itself.
-7. **Results are scraps.** A value prints as a closed scrap that evaluates to
+   variable is an error ("unbound name"), reported before anything runs. There
+   are no free names to resolve: a scrap refers to another only by a hash or, in
+   a draft, a path. There is no ambient lookup, no auto-resolution, and no
+   network access during parsing, checking or evaluation.
+2. A **draft** may contain path references, `$"./terminal/program.scrap"`. A path
+   is resolved relative to the draft's own file, and must stay within the
+   workspace; an absolute path is an error. Paths may form cycles, which are an
+   error. A draft has no identity: it cannot be hashed, pushed, or referred to by
+   hash.
+3. A **published** scrap contains hash references only; a path reference in one
+   is an error. Nothing that handles published scraps reads the filesystem.
+4. **Publishing** turns a draft and its closure of drafts into published scraps,
+   bottom-up: each draft it refers to is published first, then each path token is
+   replaced by `$src-sha256~~…` of its target's published form. Nothing else in
+   the source changes, comments and layout included, so publishing the same
+   drafts always gives the same hashes.
+5. A hash reference is valid only if its target is present in the local store and
+   re-hashing it under the reference's scheme gives the digest. Verification
+   happens on every read, so a corrupted or substituted scrap is rejected.
+6. A scrap's **closure** is itself plus every scrap reachable through its hash and
+   path references. Loading is a separate, explicit step that completes the
+   closure ahead of time, fetching hashes from stores and, for drafts, reading
+   paths from the workspace. Checking and evaluating require the whole closure.
+7. A reference's type, or for a type scrap (7.6) the type it denotes, is inferred
+   from the target's source (present by rule 6), parsed and checked under the
+   target's edition. The digest includes the edition (section 9), so any type
+   cache for published scraps is keyed by the digest alone. The cache is an
+   optimisation only; deleting it never changes a result.
+8. Name maps (versions, "latest", signing, scrapyard policy) are tooling. They
+   produce hash or path references and are never consulted by the language
+   itself.
+9. **Results are scraps.** A value prints as a closed scrap that evaluates to
    the same value and prints identically. So `scrap eval` of the output of an
    earlier `scrap eval` always gives that same output again. This requires:
    - Functions print with the bindings they capture as a where-clause,
@@ -572,20 +583,20 @@ elsewhere, and leaves some of it open.
 - Exhaustive matches, checked by the type checker.
 - A scrap may be a type (7.6).
 - Any expression can be replaced by a hash reference to a scrap.
-- `scrap eval` and `scrap eval apply` pipelines, which rule 7 of section 10
+- `scrap eval` and `scrap eval apply` pipelines, which rule 9 of section 10
   makes reliable.
 
 **Departs, on purpose:**
 
 | Guide | Here | Why |
 |---|---|---|
-| Free names resolved through scrap maps, latest version by default | Free names are an error; names become hashes only by linking (section 10) | A closed scrap means the same thing everywhere |
+| Free names resolved through scrap maps, latest version by default | **Intentionally divergent.** Free names are always an error; scraps refer to each other by hash, or by path in drafts (section 10) | A closed scrap means the same thing everywhere |
 | Rocks: `$$add`, `$$int` | None | Builtins belong to the prelude, not to syntax |
 | `scoop::chocolate`, `(#radius int)::radius 4` | `#chocolate`; `::` removed | Tags are structural, so they need no type to build them |
 | `t : #a a #b int`, a type as tags side by side | `t : type = [#a a, #b int]` | The guide's form is clean, but ambiguous with tag values and payloads |
 | Variants printed with their type, `(result text e)::ok "hi"` | `#ok "hi"` | Values carry no types at runtime |
 | `<\|`, `<<`, `//`, `&&`, `\|\|`, `@` | Removed (section 6) | One spelling per thing; matching is the only branching |
-| Hash of the flat encoding, `$sha1~~…` | Hash of source, edition and names, `$src-sha256~~…` | No canonical encoding yet; others can be added as schemes (section 9) |
+| Hash of the flat encoding, `$sha1~~…` | Hash of edition and source, `$src-sha256~~…` | No canonical encoding yet; others can be added as schemes (section 9) |
 
 **Open:**
 
