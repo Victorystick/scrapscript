@@ -320,6 +320,12 @@ is-some   : a => r => [#some a, ..r] -> [#true, #false]
 annotations, and `type : type` is not a thing. `type` is the kind of types and
 `type -> type` the kind of a type constructor; builtins are `int : type` and
 `list : type -> type`. In a kind, `->` is an ordinary arrow in the type grammar.
+`row` is the kind of a row (7.3): a parameter used as a row tail has kind `row`,
+and its argument must be a row variable.
+
+```
+has-a : type -> row -> type = a => r => { a : a, ..r }
+```
 
 A binding whose annotation's final result is `type` is a **sort binding**. Its
 right-hand side is parsed with the type grammar. A type constructor is a
@@ -338,7 +344,7 @@ because `=>` occurs only in type syntax:
 option = a => [#some a, #none]          # kind inferred: type -> type
 ```
 
-Kind inference is first-order unification over `type` and `k -> k`; an
+Kind inference is first-order unification over `type`, `row` and `k -> k`; an
 unconstrained kind defaults to `type`. Applications are kind-checked: `turn int`
 is fine, `turn int int` and `list list` are errors.
 

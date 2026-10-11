@@ -39,15 +39,6 @@ func (s *Scope[T]) Bind(name string, val T) *Scope[T] {
 // TypeScope maps names of values to their types, which may be schemes.
 type TypeScope = *Scope[TypeRef]
 
-// An alias is a type-only binding, whose type is computed on first use.
-type alias struct {
-	typ     ast.Node
-	scope   *Scope[*alias]
-	ref     TypeRef
-	done    bool
-	pending bool
-}
-
 type InferImport func(algo string, hash []byte) (TypeRef, error)
 
 type context struct {
@@ -55,6 +46,7 @@ type context struct {
 	reg         *Registry
 	scope       TypeScope
 	aliases     *Scope[*alias]
+	tvars       *Scope[tvar]
 	inferImport InferImport
 }
 
@@ -178,7 +170,10 @@ func (c *context) scrap(x ast.Node) TypeRef {
 		name := c.src.TokenText(c.src.Main(x))
 		if c.scope.Get(name) == nil {
 			if a := c.aliases.Lookup(name); a != nil {
-				return c.reg.Type(c.alias(x, name, a))
+				if len(a.params) > 0 {
+					c.bail(x, "exporting type constructors is not supported yet")
+				}
+				return c.reg.Type(c.alias(x, a))
 			}
 		}
 	case ast.Import:
@@ -301,17 +296,17 @@ func (c *context) where(x ast.Node, inferBody func(ast.Node) TypeRef) TypeRef {
 		seen[name] = true
 
 		if c.src.Sort(b) {
-			if typ != ast.None && c.src.NodeText(typ) != "type" || c.src.Kind(val) == ast.Forall {
-				c.bail(b, "type constructors are not supported yet")
-			}
-			a := &alias{typ: val}
+			a := c.sortBinding(b, name, typ, val)
 			group = append(group, a)
 			c.aliases = c.aliases.Bind(name, a)
 		}
 	}
-	// Aliases see each other.
+	// Aliases see each other. Check them all, even those that aren't used.
 	for _, a := range group {
 		a.scope = c.aliases
+	}
+	for _, a := range group {
+		c.check(a)
 	}
 
 	for _, comp := range c.src.Components(binds) {
@@ -337,104 +332,6 @@ func (c *context) where(x ast.Node, inferBody func(ast.Node) TypeRef) TypeRef {
 	}
 
 	return inferBody(body)
-}
-
-var primitiveTypes = map[string]TypeRef{
-	"int":   IntRef,
-	"float": FloatRef,
-	"text":  TextRef,
-	"byte":  ByteRef,
-	"bytes": BytesRef,
-}
-
-// typ returns the type that the type expression x denotes.
-func (c *context) typ(x ast.Node) TypeRef {
-	switch c.src.Kind(x) {
-	case ast.Ident:
-		name := c.src.TokenText(c.src.Main(x))
-		if ref, ok := primitiveTypes[name]; ok {
-			return ref
-		}
-		if a := c.aliases.Lookup(name); a != nil {
-			return c.alias(x, name, a)
-		}
-		c.bail(x, fmt.Sprintf("unknown type %s", name))
-	case ast.Import:
-		if ref, ok := c.reg.Denoted(c.imported(x)); ok {
-			return ref
-		}
-		c.bail(x, fmt.Sprintf("%s is a value, not a type", c.src.NodeText(x)))
-	case ast.Literal:
-		if c.src.LiteralKind(x) == token.HOLE {
-			return HoleRef
-		}
-	case ast.Call:
-		fn, arg := c.src.Call(x)
-		if c.src.Kind(fn) == ast.Ident && c.src.NodeText(fn) == "list" {
-			return c.reg.List(c.typ(arg))
-		}
-	case ast.Func:
-		arg, body := c.src.Func(x)
-		return c.reg.Func(c.typ(arg), c.typ(body))
-	case ast.Enum:
-		tail, variants := c.src.Enum(x)
-		c.closedRow(tail)
-		tags := make(map[string]TypeRef)
-		for _, v := range variants {
-			tagTok, payload := c.src.Variant(v)
-			tag := c.src.TokenText(tagTok)
-			if _, ok := tags[tag]; ok {
-				c.bail(v, fmt.Sprintf("cannot define tag #%s more than once", tag))
-			}
-			tags[tag] = HoleRef
-			if payload != ast.None {
-				tags[tag] = c.typ(payload)
-			}
-		}
-		return c.reg.Enum(tags)
-	case ast.RecordType:
-		tail, fields := c.src.Record(x)
-		c.closedRow(tail)
-		ref := make(map[string]TypeRef, fields.Len())
-		for i := range fields.Len() {
-			k := c.src.TokenText(fields.Key(i))
-			if _, ok := ref[k]; ok {
-				c.bail(fields.Value(i), fmt.Sprintf("cannot define field %s more than once", k))
-			}
-			ref[k] = c.typ(fields.Value(i))
-		}
-		return c.reg.Record(ref)
-	case ast.Forall:
-		c.bail(x, "type variables are not supported yet")
-	}
-
-	c.bail(x, fmt.Sprintf("%s is not a type", c.src.NodeText(x)))
-	return NoType
-}
-
-// closedRow fails at tail, unless it is None.
-func (c *context) closedRow(tail ast.Node) {
-	if tail != ast.None {
-		c.bail(tail, "row variables are not supported yet")
-	}
-}
-
-// alias returns the type of an alias, computing it on first use. Aliases
-// have no type variables, so their types can be shared.
-func (c *context) alias(x ast.Node, name string, a *alias) TypeRef {
-	if a.done {
-		return a.ref
-	}
-	if a.pending {
-		c.bail(x, fmt.Sprintf("recursive type %s is not supported yet", name))
-	}
-	a.pending = true
-	aliases := c.aliases
-	c.aliases = a.scope
-	a.ref = c.typ(a.typ)
-	c.aliases = aliases
-	a.pending, a.done = false, true
-	return a.ref
 }
 
 func (c *context) list(x ast.Node) TypeRef {

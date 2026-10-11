@@ -98,6 +98,22 @@ func TestInfer(t *testing.T) {
 ; a : type = [#x, #y, #z]`, `[ #a [ #x, #y, #z ], #b int, #c byte ] -> int`},
 		{`f ; f : { a : int, b : [#x] } -> int = r -> r.a`, `{ a : int, b : [ #x ] } -> int`},
 		{`f ; f : () -> {} -> [] -> int = _ -> _ -> _ -> 1`, `() -> {} -> [] -> int`},
+		// Type constructors.
+		{`f ; f : option int -> int = | #some n -> n | #none -> 0 ; option = a => [#some a, #none]`,
+			`[ #none, #some int ] -> int`},
+		{`f ; f : either int (option text) -> int = _ -> 1
+; option : type -> type = a => [#some a, #none]
+; either : type -> type -> type = a => b => [#left a, #right b]`,
+			`[ #left int, #right [ #none, #some text ] ] -> int`},
+		{`f ; f : turn int = { state = 1, out = "", next = #read-line }
+; turn = s => { state : s, out : text, next : next-action }
+; next-action : type = [#read-line, #exit int]`,
+			`{ next : [ #exit int, #read-line ], out : text, state : int }`},
+		// A type constructor's parameters may be rows.
+		{`1 ; t : type -> row -> type = a => r => { a : a, ..r } ; u = r => [#u (t int r), ..r]`, `int`},
+		// Type variables and aliases shadow the builtins.
+		{`f ; f : t text -> int = _ -> 1 ; t = int => [#a int]`, `[ #a text ] -> int`},
+		{`f ; f : int -> int = _ -> "" ; int : type = text`, `text -> text`},
 
 		{`| n >+ ns -> ns`, `list a -> list a`},
 		{`| ns +< n -> ns`, `list a -> list a`},
@@ -200,10 +216,32 @@ func TestInferFailure(t *testing.T) {
 		{`f ; f : { a : int, a : text } -> int = _ -> 1`, `cannot define field a more than once`},
 		{`f ; f : t -> int = _ -> 1 ; t : type = [#a t]`, `recursive type t is not supported yet`},
 		{`t + 1 ; t : type = int`, `cannot use type t as a value`},
-		{`f ; f : [#a, ..r] -> int = _ -> 1`, `row variables are not supported yet`},
+		{`f ; f : [#a, ..r] -> int = _ -> 1`, `unknown row variable r`},
 		{`f ; f : a => a -> a = x -> x`, `type variables are not supported yet`},
-		{`1 ; t : type -> type = s => [#a s]`, `type constructors are not supported yet`},
-		{`1 ; option = a => [#some a, #none]`, `type constructors are not supported yet`},
+		// Kinds.
+		{`1 ; t : type = a => [#a a]`, `t has kind type -> type, not type`},
+		{`1 ; t : type -> type = int`, `t has kind type, not type -> type`},
+		{`1 ; t : row -> type = a => [#a a]`, `t has kind type -> type, not row -> type`},
+		{`1 ; t : (type -> type) -> type = f => f int`, `higher kinds are not supported yet`},
+		{`1 ; t : int -> type = a => a`, `int is not a kind`},
+		{`1 ; t : type -> int = a => a`, `int is not a kind of types`},
+		{`1 ; t = a => a => [#a a]`, `cannot bind type variable a twice`},
+		// Type constructors.
+		{`f ; f : option -> int = _ -> 1 ; option = a => [#some a, #none]`, `option takes 1 type argument, not 0`},
+		{`f ; f : option int text -> int = _ -> 1 ; option = a => [#some a, #none]`, `option takes 1 type argument, not 2`},
+		{`f ; f : either int -> int = _ -> 1 ; either = a => b => [#left a, #right b]`, `either takes 2 type arguments, not 1`},
+		{`f ; f : int text -> int = _ -> 1`, `int is not a type constructor`},
+		{`f ; f : t int -> int = _ -> 1 ; t : type = int`, `t is not a type constructor`},
+		{`f ; f : list -> int = _ -> 1`, `list takes 1 type argument, not 0`},
+		{`f ; f : list int int -> int = _ -> 1`, `list takes 1 type argument, not 2`},
+		{`1 ; t = f => f int`, `f is not a type constructor`},
+		{`1 ; t = a => [#a b]`, `unknown type b`},
+		{`1 ; t = a => { a : a, ..a }`, `a is a row, not a type`},
+		{`f ; f : t int -> int = _ -> 1 ; t = r => { ..r }`, `int is not a row variable, as t's parameter r must be`},
+		{`1 ; t = a => [#a (t a)]`, `recursive type t is not supported yet`},
+		{`t ; t = a => [#a a]`, `exporting type constructors is not supported yet`},
+		// Sort bindings are checked even when unused.
+		{`1 ; t : type = [#a, #a]`, `cannot define tag #a more than once`},
 	}
 
 	for _, ex := range examples {
