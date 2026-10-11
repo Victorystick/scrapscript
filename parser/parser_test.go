@@ -186,6 +186,7 @@ func TestParses(t *testing.T) {
 		`[ "yo", 2 ]`,
 		`foo.a`,
 		`inc ; inc : int -> int = a -> a + 1`,
+		`$"./f.scrap" $"./x.scrap" $sha256~~`,
 		`#true #false`,
 	}
 

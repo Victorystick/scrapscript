@@ -228,7 +228,7 @@ func startsSimpleValue(tok token.Token) bool {
 	switch tok {
 	case token.IDENT,
 		token.INT, token.FLOAT, token.HOLE,
-		token.TEXT, token.BYTE, token.BYTES,
+		token.TEXT, token.BYTE, token.BYTES, token.IMPORT,
 		// Or a record, list or parens expression.
 		token.LBRACE, token.LBRACK, token.LPAREN:
 		return true
