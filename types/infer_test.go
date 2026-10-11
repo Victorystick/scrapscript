@@ -176,6 +176,8 @@ func TestInfer(t *testing.T) {
 		{`t ; t : type = int`, `type = int`},
 		{`t ; t : type = [#a a, #b] ; a : type = [#x, #y]`, `type = [ #a [ #x, #y ], #b ]`},
 		{`t ; t : type = int -> list text`, `type = int -> list text`},
+		{`option ; option = a => [#some a, #none]`, `type -> type = a => [ #none, #some a ]`},
+		{`has-a ; has-a : type -> row -> type = t => r => { a : t, ..r }`, `type -> row -> type = a => b => { a : a, ..b }`},
 		{`f ; f = | 0 -> 0 | n -> f (n - 1)`, `int -> int`},
 		{`even
 ; even = | 0 -> #true | n -> odd (n - 1)
@@ -265,9 +267,8 @@ func TestInferFailure(t *testing.T) {
 		{`1 ; t = f => f int`, `f is not a type constructor`},
 		{`1 ; t = a => [#a b]`, `unknown type b`},
 		{`1 ; t = a => { a : a, ..a }`, `a is a row, not a type`},
-		{`ignore ; ignore : t int -> int = _ -> 1 ; t = r => { ..r }`, `int is not a row variable, as t's parameter r must be`},
+		{`ignore ; ignore : t int -> int = _ -> 1 ; t = r => { ..r }`, `type argument 1 of t must be a row variable, not int`},
 		{`1 ; t = a => [#a (t a)]`, `recursive type t is not supported yet`},
-		{`t ; t = a => [#a a]`, `exporting type constructors is not supported yet`},
 		// Sort bindings are checked even when unused.
 		{`1 ; t : type = [#a, #a]`, `cannot define tag #a more than once`},
 	}
@@ -337,10 +338,21 @@ func TestInferImport(t *testing.T) {
 
 	a := reg.Gen()
 
+	// option = a => [#some a, #none]
+	optionVar := reg.Gen()
+	option := reg.Enum(map[string]TypeRef{"some": optionVar, "none": HoleRef})
+	optionParams := []Param{{Var: optionVar}}
+
+	// has-a = t => r => { a : t, ..r }
+	hasT, hasR := reg.Gen(), reg.Gen()
+	hasA := reg.add(node{kind: recordKind, a: reg.row(map[string]TypeRef{"a": hasT}, hasR)})
+	hasAParams := []Param{{Var: hasT}, {Var: hasR, Row: true}}
+
 	examples := []struct {
 		in     string  // The input.
 		imp    TypeRef // The imported type.
-		sort   bool    // Whether the import denotes imp.
+		sort   bool    // Whether the import denotes imp,
+		params []Param // as a type constructor with these parameters.
 		result string  // The stringified result type, or
 		err    string  // an error.
 	}{
@@ -358,6 +370,22 @@ func TestInferImport(t *testing.T) {
 		{in: `ignore ; ignore : $sha256~~ -> int = _ -> 1`, imp: TextRef, sort: true, result: `text -> int`},
 		{in: `1 + $sha256~~`, imp: IntRef, sort: true, err: `cannot use type $sha256~~ as a value`},
 		{in: `ignore ; ignore : $"./t.scrap" -> int = _ -> 1`, imp: TextRef, sort: true, result: `text -> int`},
+		// An imported type constructor is applied by substitution.
+		{in: `$sha256~~`, imp: option, sort: true, params: optionParams, result: `type -> type = a => [ #none, #some a ]`},
+		{in: `or-zero ; or-zero : $sha256~~ int -> int = | #some n -> n | #none -> 0`,
+			imp: option, sort: true, params: optionParams, result: `[ #none, #some int ] -> int`},
+		{in: `wrap ; wrap : a => a -> $sha256~~ a = x -> #some x`,
+			imp: option, sort: true, params: optionParams, result: `a -> [ #none, #some a ]`},
+		{in: `get-a ; get-a : r => $sha256~~ int r -> int = x -> x.a`,
+			imp: hasA, sort: true, params: hasAParams, result: `{ a : int, ..a } -> int`},
+		{in: `ignore ; ignore : $sha256~~ -> int = _ -> 1`, imp: option, sort: true, params: optionParams,
+			err: `$sha256~~ takes 1 type argument, not 0`},
+		{in: `ignore ; ignore : $sha256~~ int text -> int = _ -> 1`, imp: option, sort: true, params: optionParams,
+			err: `$sha256~~ takes 1 type argument, not 2`},
+		{in: `ignore ; ignore : $sha256~~ int -> int = _ -> 1`, imp: IntRef, sort: true,
+			err: `$sha256~~ is not a type constructor`},
+		{in: `ignore ; ignore : $sha256~~ int int -> int = _ -> 1`, imp: hasA, sort: true, params: hasAParams,
+			err: `type argument 2 of $sha256~~ must be a row variable, not int`},
 		{in: `one ; one : $sha256~~ = 1`, imp: IntRef, err: `$sha256~~ is a value, not a type`},
 	}
 
@@ -365,7 +393,7 @@ func TestInferImport(t *testing.T) {
 		se := must(parser.ParseExpr(ex.in))
 		imports := make(Imports)
 		for _, n := range se.Imports() {
-			imports[n] = Result{Type: ex.imp, Sort: ex.sort}
+			imports[n] = Result{Type: ex.imp, Sort: ex.sort, Params: ex.params}
 		}
 		res, err := Infer(&reg, nil, se, imports)
 		if err != nil {

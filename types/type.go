@@ -499,12 +499,38 @@ func (e *typeError) format(r *Registry) error {
 }
 
 // Describe returns a string representation of a scrap's result: its type,
-// or for a type scrap, the type it denotes, as `type = T`.
+// or for a type scrap, its kind and the type it denotes, as `type = T` or
+// `type -> type = a => T`.
 func (r *Registry) Describe(res Result) string {
-	if res.Sort {
-		return "type = " + r.String(res.Type)
+	if !res.Sort {
+		return r.String(res.Type)
 	}
-	return r.String(res.Type)
+	s := stringer{reg: r}
+	s.reserve(res.Type)
+	var b strings.Builder
+	for _, p := range res.Params {
+		if p.Row {
+			b.WriteString("row -> ")
+		} else {
+			b.WriteString("type -> ")
+		}
+	}
+	b.WriteString("type = ")
+	for _, p := range res.Params {
+		b.WriteString(s.string(p.Var))
+		b.WriteString(" => ")
+	}
+	b.WriteString(s.string(res.Type))
+	return b.String()
+}
+
+// apply returns body with each of vars replaced by the matching arg.
+func (r *Registry) apply(vars []TypeRef, body TypeRef, args []TypeRef) TypeRef {
+	fresh := make(map[TypeRef]TypeRef, len(vars))
+	for i, v := range vars {
+		fresh[r.Resolve(v)] = args[i]
+	}
+	return r.instantiate(body, &fresh)
 }
 
 // String returns a string representation of a type.

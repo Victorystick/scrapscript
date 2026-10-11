@@ -158,15 +158,25 @@ func (c *context) markRows(params []param, t ast.Node) {
 	switch c.src.Kind(t) {
 	case ast.Call:
 		fn, args := c.typeApp(t)
-		var a *alias
-		if c.src.Kind(fn) == ast.Ident && index(fn) < 0 {
-			a = c.aliases.Lookup(c.src.TokenText(c.src.Main(fn)))
-		}
-		if a != nil {
-			c.kinds(a)
+		// The kinds of the constructor's parameters, if it is known.
+		var rows []bool
+		switch c.src.Kind(fn) {
+		case ast.Ident:
+			if index(fn) < 0 {
+				if a := c.aliases.Lookup(c.src.TokenText(c.src.Main(fn))); a != nil {
+					c.kinds(a)
+					for _, p := range a.params {
+						rows = append(rows, p.row)
+					}
+				}
+			}
+		case ast.Import:
+			for _, p := range c.imported(fn).Params {
+				rows = append(rows, p.Row)
+			}
 		}
 		for i, arg := range args {
-			if a != nil && i < len(a.params) && a.params[i].row {
+			if i < len(rows) && rows[i] {
 				mark(arg)
 			}
 			c.markRows(params, arg)
@@ -237,10 +247,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 		}
 		c.bail(x, fmt.Sprintf("unknown type %s", name))
 	case ast.Import:
-		if res := c.imported(x); res.Sort {
-			return res.Type
-		}
-		c.bail(x, fmt.Sprintf("%s is a value, not a type", c.src.NodeText(x)))
+		return c.applyImport(x, x, nil)
 	case ast.Literal:
 		if c.src.LiteralKind(x) == token.HOLE {
 			return HoleRef
@@ -316,6 +323,9 @@ func (c *context) typeApp(x ast.Node) (fn ast.Node, args []ast.Node) {
 func (c *context) application(x ast.Node) TypeRef {
 	fn, args := c.typeApp(x)
 
+	if c.src.Kind(fn) == ast.Import {
+		return c.applyImport(x, fn, args)
+	}
 	if c.src.Kind(fn) == ast.Ident {
 		name := c.src.TokenText(c.src.Main(fn))
 		if c.tvars.Get(name) == nil {
@@ -345,23 +355,74 @@ func (c *context) apply(x ast.Node, a *alias, args []ast.Node) TypeRef {
 	if len(args) == 0 {
 		return c.alias(x, a)
 	}
-	refs := make([]TypeRef, len(args))
+	rows := make([]bool, len(a.params))
 	for i, p := range a.params {
-		if !p.row {
-			refs[i] = c.typ(args[i])
+		rows[i] = p.row
+	}
+	return c.expand(x, a, c.typeArgs(a.name, rows, args))
+}
+
+// typeArgs returns the types of the arguments to the constructor name,
+// whose parameters are rows where rows says so. A row argument must be a
+// row variable.
+func (c *context) typeArgs(name string, rows []bool, args []ast.Node) []TypeRef {
+	refs := make([]TypeRef, len(args))
+	for i, arg := range args {
+		if !rows[i] {
+			refs[i] = c.typ(arg)
 			continue
 		}
-		arg := args[i]
 		if c.src.Kind(arg) == ast.Ident {
 			if v := c.tvars.Get(c.src.TokenText(c.src.Main(arg))); v != nil && v.val.row {
 				refs[i] = v.val.ref
 				continue
 			}
 		}
-		c.bail(arg, fmt.Sprintf("%s is not a row variable, as %s's parameter %s must be",
-			c.src.NodeText(arg), a.name, p.name))
+		c.bail(arg, fmt.Sprintf("type argument %d of %s must be a row variable, not %s",
+			i+1, name, c.src.NodeText(arg)))
 	}
-	return c.expand(x, a, refs)
+	return refs
+}
+
+// applyImport returns the type that the type scrap imported by imp denotes,
+// applied to args if it is a type constructor.
+func (c *context) applyImport(x, imp ast.Node, args []ast.Node) TypeRef {
+	name := c.src.NodeText(imp)
+	res := c.imported(imp)
+	if !res.Sort {
+		c.bail(imp, fmt.Sprintf("%s is a value, not a type", name))
+	}
+	if len(args) != len(res.Params) {
+		if len(res.Params) == 0 {
+			c.bail(x, fmt.Sprintf("%s is not a type constructor", name))
+		}
+		c.bail(x, fmt.Sprintf("%s takes %s, not %d", name, typeArguments(len(res.Params)), len(args)))
+	}
+	if len(args) == 0 {
+		return res.Type
+	}
+	vars := make([]TypeRef, len(res.Params))
+	rows := make([]bool, len(res.Params))
+	for i, p := range res.Params {
+		vars[i], rows[i] = p.Var, p.Row
+	}
+	return c.reg.apply(vars, res.Type, c.typeArgs(name, rows, args))
+}
+
+// export returns the result of a scrap whose body names the alias a: the
+// type it denotes, or for a type constructor, its body with generalized
+// variables for its parameters.
+func (c *context) export(x ast.Node, a *alias) Result {
+	if len(a.params) == 0 {
+		return Result{Type: c.alias(x, a), Sort: true}
+	}
+	params := make([]Param, len(a.params))
+	refs := make([]TypeRef, len(a.params))
+	for i, p := range a.params {
+		refs[i] = c.reg.Gen()
+		params[i] = Param{Var: refs[i], Row: p.row}
+	}
+	return Result{Type: c.expand(x, a, refs), Sort: true, Params: params}
 }
 
 func typeArguments(n int) string {

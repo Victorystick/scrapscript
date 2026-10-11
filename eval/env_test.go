@@ -93,6 +93,7 @@ func pathEnv(t *testing.T, files map[string]string) *Environment {
 var pathFiles = map[string]string{
 	"inc.scrap":     `x -> x + 1`,
 	"choice.scrap":  `choice ; choice : type = [#a int, #b]`,
+	"option.scrap":  `option ; option = a => [#some a, #none]`,
 	"sub/two.scrap": `$"./inc.scrap" 1`,
 	"a.scrap":       `$"./b.scrap"`,
 	"b.scrap":       `$"./a.scrap"`,
@@ -104,6 +105,8 @@ func TestPathImports(t *testing.T) {
 		{`or-zero (#a 3) ; or-zero : $"./choice.scrap" -> int = | #a n -> n | #b -> 0`, `3`},
 		// Paths are resolved from the directory, also in drafts reached by path.
 		{`$"./sub/two.scrap"`, `2`},
+		// An imported type constructor.
+		{`or-zero (#some 3) ; or-zero : $"./option.scrap" int -> int = | #some n -> n | #none -> 0`, `3`},
 		{`$"sub/../inc.scrap" 2`, `3`},
 	}
 

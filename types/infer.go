@@ -43,6 +43,15 @@ type TypeScope = *Scope[TypeRef]
 type Result struct {
 	Type TypeRef
 	Sort bool // whether the scrap denotes Type, rather than having a value of it
+	// For a type constructor, its parameters, which are generalized variables
+	// in Type.
+	Params []Param
+}
+
+// A Param is a parameter of an exported type constructor.
+type Param struct {
+	Var TypeRef
+	Row bool
 }
 
 // Imports gives the results of the scraps that a scrap's Import nodes refer
@@ -179,10 +188,7 @@ func (c *context) scrap(x ast.Node) Result {
 		name := c.src.TokenText(c.src.Main(x))
 		if c.scope.Get(name) == nil {
 			if a := c.aliases.Lookup(name); a != nil {
-				if len(a.params) > 0 {
-					c.bail(x, "exporting type constructors is not supported yet")
-				}
-				return Result{Type: c.alias(x, a), Sort: true}
+				return c.export(x, a)
 			}
 		}
 	case ast.Import:
