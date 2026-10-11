@@ -50,7 +50,7 @@ func BenchmarkEval(b *testing.B) {
 	e, scrap := readBench(b, fibSource)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Eval(scrap.expr, e.vars, e.evalImport); err != nil {
+		if _, err := Eval(scrap.expr, e.vars, nil); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -64,7 +64,7 @@ func BenchmarkInfer(b *testing.B) {
 		b.StopTimer()
 		e, scrap := readBench(b, inferSource)
 		b.StartTimer()
-		if _, err := types.Infer(&e.reg, e.typeScope, scrap.expr, e.inferImport); err != nil {
+		if _, err := types.Infer(&e.reg, e.typeScope, scrap.expr, nil); err != nil {
 			b.Fatal(err)
 		}
 	}

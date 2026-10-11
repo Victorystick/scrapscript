@@ -1,6 +1,11 @@
 package eval
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestInferBuiltin(t *testing.T) {
 	examples := []struct {
@@ -65,5 +70,103 @@ func TestInferFailure(t *testing.T) {
 	}
 	if _, err := env.Infer(scrap); err == nil {
 		t.Error("Expected a type error")
+	}
+}
+
+// pathEnv returns an environment whose directory holds the given files.
+func pathEnv(t *testing.T, files map[string]string) *Environment {
+	dir := t.TempDir()
+	for name, source := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := NewEnvironment()
+	env.UseDirectory(dir)
+	return env
+}
+
+var pathFiles = map[string]string{
+	"inc.scrap":     `x -> x + 1`,
+	"choice.scrap":  `choice ; choice : type = [#a int, #b]`,
+	"sub/two.scrap": `$"./inc.scrap" 1`,
+	"a.scrap":       `$"./b.scrap"`,
+	"b.scrap":       `$"./a.scrap"`,
+}
+
+func TestPathImports(t *testing.T) {
+	examples := []struct{ source, result string }{
+		{`$"./inc.scrap" 1`, `2`},
+		{`or-zero (#a 3) ; or-zero : $"./choice.scrap" -> int = | #a n -> n | #b -> 0`, `3`},
+		// Paths are resolved from the directory, also in drafts reached by path.
+		{`$"./sub/two.scrap"`, `2`},
+		{`$"sub/../inc.scrap" 2`, `3`},
+	}
+
+	for _, ex := range examples {
+		env := pathEnv(t, pathFiles)
+		val, err := eval(env, ex.source)
+		if err != nil {
+			t.Errorf("%s: %v", ex.source, err)
+		} else if val.String() != ex.result {
+			t.Errorf("%s: expected %s, got %s", ex.source, ex.result, val)
+		}
+	}
+}
+
+func TestPathImportFailures(t *testing.T) {
+	examples := []struct{ source, error string }{
+		{`$"./a.scrap"`, `$"./a.scrap" refers back to this scrap`},
+		{`$"../inc.scrap"`, `cannot refer to a path outside the current directory`},
+		{`$"/inc.scrap"`, `cannot refer to an absolute path`},
+		{`$"./missing.scrap"`, `no such file or directory`},
+		{`$"./choice.scrap" + 1`, `cannot use type $"./choice.scrap" as a value`},
+	}
+
+	for _, ex := range examples {
+		env := pathEnv(t, pathFiles)
+		if val, err := eval(env, ex.source); err == nil {
+			t.Errorf("%s: expected an error, got %s", ex.source, val)
+		} else if !strings.Contains(err.Error(), ex.error) {
+			t.Errorf("%s: expected '%s' in error:\n%s", ex.source, ex.error, err)
+		}
+	}
+}
+
+func TestPathsNeedADirectory(t *testing.T) {
+	_, err := eval(NewEnvironment(), `$"./inc.scrap"`)
+	if err == nil || !strings.Contains(err.Error(), "cannot refer to a path here") {
+		t.Errorf("Expected 'cannot refer to a path here', got %v", err)
+	}
+}
+
+func TestPublishedScrapsCannotReferToPaths(t *testing.T) {
+	env := pathEnv(t, pathFiles)
+	hash := "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445"
+	env.UseFetcher(MapFetcher{hash: `$"./inc.scrap"`})
+
+	_, err := eval(env, `$sha256~~`+hash)
+	if err == nil || !strings.Contains(err.Error(), "a published scrap cannot refer to a path") {
+		t.Errorf("Expected 'a published scrap cannot refer to a path', got %v", err)
+	}
+}
+
+type nopPusher struct{}
+
+func (nopPusher) PushScrap(data []byte) (string, error) { return "", nil }
+
+func TestDraftsWithPathsCannotBePushed(t *testing.T) {
+	env := NewEnvironment()
+	env.UsePusher(nopPusher{})
+	scrap, err := env.Read([]byte(`$"./inc.scrap" 1`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Push(scrap); err == nil || !strings.Contains(err.Error(), "cannot push a draft that refers to a path") {
+		t.Errorf("Expected 'cannot push a draft that refers to a path', got %v", err)
 	}
 }

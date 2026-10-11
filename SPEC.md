@@ -484,11 +484,13 @@ and identified by hash. Only drafts ever touch the filesystem. The rules:
    are no free names to resolve: a scrap refers to another only by a hash or, in
    a draft, a path. There is no ambient lookup, no auto-resolution, and no
    network access during parsing, checking or evaluation.
-2. A **draft** may contain path references, `$"./terminal/program.scrap"`. A path
-   is resolved relative to the draft's own file, and must stay within the
-   workspace; an absolute path is an error. Paths may form cycles, which are an
-   error. A draft has no identity: it cannot be hashed, pushed, or referred to by
-   hash.
+2. A **draft** may contain path references, `$"./terminal/program.scrap"`. Every
+   path is resolved from the current directory, also in drafts that were
+   themselves reached by path, and must stay within it; an absolute path is an
+   error. Paths may form cycles, which are an error. A draft has no identity: it
+   cannot be hashed, pushed, or referred to by hash. For simplicity, the CLI
+   reads a draft from standard input only; running one by its path, as in
+   `scrap eval example.scrap`, could be added later.
 3. A **published** scrap contains hash references only; a path reference in one
    is an error. Nothing that handles published scraps reads the filesystem.
 4. **Publishing** turns a draft and its closure of drafts into published scraps,

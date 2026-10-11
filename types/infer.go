@@ -1,7 +1,6 @@
 package types
 
 import (
-	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -39,15 +38,24 @@ func (s *Scope[T]) Bind(name string, val T) *Scope[T] {
 // TypeScope maps names of values to their types, which may be schemes.
 type TypeScope = *Scope[TypeRef]
 
-type InferImport func(algo string, hash []byte) (TypeRef, error)
+// A Result is what checking a scrap gives: the type scheme of its value, or,
+// for a type scrap, the type it denotes.
+type Result struct {
+	Type TypeRef
+	Sort bool // whether the scrap denotes Type, rather than having a value of it
+}
+
+// Imports gives the results of the scraps that a scrap's Import nodes refer
+// to. They are checked before it, so it has a result for each of them.
+type Imports map[ast.Node]Result
 
 type context struct {
-	src         *ast.SourceExpr
-	reg         *Registry
-	scope       TypeScope
-	aliases     *Scope[*alias]
-	tvars       *Scope[tvar]
-	inferImport InferImport
+	src     *ast.SourceExpr
+	reg     *Registry
+	scope   TypeScope
+	aliases *Scope[*alias]
+	tvars   *Scope[tvar]
+	imports Imports
 }
 
 func (c *context) bail(n ast.Node, msg string) {
@@ -58,14 +66,15 @@ func (c *context) bind(name string, ref TypeRef) {
 	c.scope = c.scope.Bind(name, ref)
 }
 
-// Infer infers the type of se, given the types of the values in scope. The
-// result is generalized, so that it can be used as a type scheme.
-func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, inferImport InferImport) (ref TypeRef, err error) {
+// Infer infers the result of the scrap se, given the types of the values in
+// scope and the results of its imports. A value's type is generalized, so
+// that it can be used as a type scheme.
+func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, imports Imports) (res Result, err error) {
 	context := context{
-		src:         &se,
-		reg:         reg,
-		scope:       scope,
-		inferImport: inferImport,
+		src:     &se,
+		reg:     reg,
+		scope:   scope,
+		imports: imports,
 	}
 
 	level := reg.level
@@ -81,10 +90,10 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, inferImport InferI
 	}()
 
 	reg.enter()
-	ref = context.scrap(se.Expr)
+	res = context.scrap(se.Expr)
 	reg.exit()
-	reg.generalize(ref)
-	return ref, err
+	reg.generalize(res.Type)
+	return res, err
 }
 
 func (c *context) infer(x ast.Node) TypeRef {
@@ -102,7 +111,7 @@ func (c *context) infer(x ast.Node) TypeRef {
 		}
 		return c.reg.Instantiate(bound.val)
 	case ast.Where:
-		return c.where(x, c.infer)
+		return where(c, x, c.infer)
 	case ast.List:
 		return c.list(x)
 	case ast.Record:
@@ -149,23 +158,23 @@ func (c *context) infer(x ast.Node) TypeRef {
 		return c.binary(x)
 
 	case ast.Import:
-		ref := c.imported(x)
-		if _, ok := c.reg.Denoted(ref); ok {
+		res := c.imported(x)
+		if res.Sort {
 			c.bail(x, fmt.Sprintf("cannot use type %s as a value", c.src.NodeText(x)))
 		}
-		return c.reg.Instantiate(ref)
+		return c.reg.Instantiate(res.Type)
 	}
 
 	panic(fmt.Sprintf("can't infer node %s", c.src.Kind(x)))
 }
 
-// scrap infers the type of a scrap's expression x. Unlike other expressions,
-// a scrap may denote a type, so that other scraps can import it in type
-// position. Then its type is the sort of that type.
-func (c *context) scrap(x ast.Node) TypeRef {
+// scrap infers the result of a scrap's expression x. Unlike other
+// expressions, a scrap may denote a type, so that other scraps can import it
+// in type position.
+func (c *context) scrap(x ast.Node) Result {
 	switch c.src.Kind(x) {
 	case ast.Where:
-		return c.where(x, c.scrap)
+		return where(c, x, c.scrap)
 	case ast.Ident:
 		name := c.src.TokenText(c.src.Main(x))
 		if c.scope.Get(name) == nil {
@@ -173,35 +182,24 @@ func (c *context) scrap(x ast.Node) TypeRef {
 				if len(a.params) > 0 {
 					c.bail(x, "exporting type constructors is not supported yet")
 				}
-				return c.reg.Type(c.alias(x, a))
+				return Result{Type: c.alias(x, a), Sort: true}
 			}
 		}
 	case ast.Import:
-		ref := c.imported(x)
-		if _, ok := c.reg.Denoted(ref); ok {
-			return ref
+		if res := c.imported(x); res.Sort {
+			return res
 		}
-		return c.reg.Instantiate(ref)
 	}
-	return c.infer(x)
+	return Result{Type: c.infer(x)}
 }
 
-// imported returns the type of the scrap that the import x refers to, which
-// may be a type scheme or the sort of a type.
-func (c *context) imported(x ast.Node) TypeRef {
-	if c.inferImport == nil {
-		c.bail(x, "<internal error> missing infer import function")
+// imported returns the result of the scrap that the import x refers to.
+func (c *context) imported(x ast.Node) Result {
+	res, ok := c.imports[x]
+	if !ok {
+		c.bail(x, fmt.Sprintf("<internal error> %s was not loaded", c.src.NodeText(x)))
 	}
-	algo, hash := c.src.Import(x)
-	bs, err := hex.DecodeString(c.src.Source.GetString(c.src.TokenSpan(hash).TrimStart(2)))
-	if err != nil {
-		c.bail(x, fmt.Sprintf("bad import hash %s", c.src.NodeText(x)))
-	}
-	ref, err := c.inferImport(c.src.TokenText(algo), bs)
-	if err != nil {
-		c.bail(x, err.Error())
-	}
-	return ref
+	return res
 }
 
 // check checks that x has the type want. A function's parameter takes the
@@ -299,7 +297,7 @@ func (c *context) either(a, b, typ TypeRef) bool {
 // where infers the type of a where-group's body with inferBody. The group's
 // bindings are mutually recursive. Each strongly connected component of them
 // is inferred in turn, and generalized before the components that use it.
-func (c *context) where(x ast.Node, inferBody func(ast.Node) TypeRef) TypeRef {
+func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 	body, binds := c.src.Group(x)
 	scope, aliases := c.scope, c.aliases
 	defer func() { c.scope, c.aliases = scope, aliases }()

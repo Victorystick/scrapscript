@@ -626,6 +626,12 @@ func (p *parser) parseImport() ast.Node {
 	// Eat $.
 	p.next()
 
+	// A path.
+	if p.tok == token.TEXT {
+		p.next()
+		return p.add(ast.Import, start, 0, 0)
+	}
+
 	// Hash algo.
 	p.expect(token.IDENT)
 	p.next()

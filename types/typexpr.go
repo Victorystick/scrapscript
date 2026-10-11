@@ -237,8 +237,8 @@ func (c *context) typ(x ast.Node) TypeRef {
 		}
 		c.bail(x, fmt.Sprintf("unknown type %s", name))
 	case ast.Import:
-		if ref, ok := c.reg.Denoted(c.imported(x)); ok {
-			return ref
+		if res := c.imported(x); res.Sort {
+			return res.Type
 		}
 		c.bail(x, fmt.Sprintf("%s is a value, not a type", c.src.NodeText(x)))
 	case ast.Literal:

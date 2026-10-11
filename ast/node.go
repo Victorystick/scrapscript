@@ -32,7 +32,7 @@ const (
 	Access                // Main: the key. Lhs: the record.
 	List                  // Main: '['. Lhs..Rhs: the elements, then the ']' token.
 	Where                 // Main: the bound name. Lhs: the body. Rhs: see Where.
-	Import                // Main: '$', followed by the algorithm and hash tokens.
+	Import                // Main: '$', followed by the algorithm and hash tokens, or a path's TEXT token.
 
 	// Types. A type also uses Ident and Import for names, Literal for (),
 	// Call for type application and Func for function types.
@@ -183,9 +183,30 @@ func (se *SourceExpr) Sort(n Node) bool {
 	return se.Extra[se.Data[n].Rhs+2] != 0
 }
 
-// Import returns an Import node's algorithm and hash tokens.
+// Import returns a hash Import node's algorithm and hash tokens.
 func (se *SourceExpr) Import(n Node) (algo, hash Tok) {
 	return se.Mains[n] + 1, se.Mains[n] + 2
+}
+
+// Path returns the path of an Import node that refers to a file, and whether
+// it does.
+func (se *SourceExpr) Path(n Node) (string, bool) {
+	t := se.Mains[n] + 1
+	if se.Tokens.Kinds[t] != token.TEXT {
+		return "", false
+	}
+	text := se.TokenText(t)
+	return text[1 : len(text)-1], true
+}
+
+// Imports returns the Import nodes of the tree.
+func (se *SourceExpr) Imports() (imports []Node) {
+	for n, k := range se.Kinds {
+		if k == Import {
+			imports = append(imports, Node(n))
+		}
+	}
+	return imports
 }
 
 // First returns the index of n's first token.
@@ -226,6 +247,9 @@ func (se *SourceExpr) Last(n Node) Tok {
 		_, _, _, val := se.Where(n)
 		return se.Last(val)
 	case Import:
+		if _, ok := se.Path(n); ok {
+			return se.Mains[n] + 1
+		}
 		_, hash := se.Import(n)
 		return hash
 	}

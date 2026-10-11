@@ -185,11 +185,11 @@ func TestInfer(t *testing.T) {
 	for _, ex := range examples {
 		se := must(parser.ParseExpr(ex.source))
 		var reg Registry
-		typ, err := Infer(&reg, nil, se, nil)
+		res, err := Infer(&reg, nil, se, nil)
 		if err != nil {
 			t.Error(err)
 		} else {
-			typStr := reg.String(typ)
+			typStr := reg.Describe(res)
 			if typStr != ex.typ {
 				t.Errorf("Expected %s, got %s", ex.typ, typStr)
 			}
@@ -216,7 +216,7 @@ func TestInferFailure(t *testing.T) {
 		// Math
 		{`1 + 1.0`, `cannot unify 'int' with 'float'`},
 		// No imports.
-		{`$sha256~~`, `<internal error> missing infer import function`},
+		{`$sha256~~`, `<internal error> $sha256~~ was not loaded`},
 		// Different return types.
 		{`| [] -> #box 1 | _ -> #box "a"`, `cannot unify 'int' with 'text'`},
 		// Different input types.
@@ -310,11 +310,11 @@ func TestInferInScope(t *testing.T) {
 		a := reg.Gen()
 		scope = scope.Bind("id", reg.Func(a, a))
 
-		ref, err := Infer(&reg, scope, se, nil)
+		res, err := Infer(&reg, scope, se, nil)
 		if err != nil {
 			t.Error(err)
 		} else {
-			typ := reg.String(ref)
+			typ := reg.Describe(res)
 			if typ != ex.typ {
 				t.Errorf("Invalid type for '%s'\n  expected: %s\n       got: %s", ex.source, ex.typ, typ)
 			}
@@ -340,11 +340,11 @@ func TestInferImport(t *testing.T) {
 	examples := []struct {
 		in     string  // The input.
 		imp    TypeRef // The imported type.
+		sort   bool    // Whether the import denotes imp.
 		result string  // The stringified result type, or
 		err    string  // an error.
 	}{
-		// Since the `InferImport` function below doesn't check the hash length
-		// '$sha256~~' is sufficient to encode an import.
+		// Imports aren't loaded here, so '$sha256~~' is sufficient to encode one.
 		{in: `$sha256~~`, imp: IntRef, result: `int`},
 		{in: `$sha256~~`, imp: FloatRef, result: `float`},
 		{in: `1 + $sha256~~`, imp: FloatRef, err: `cannot unify 'int' with 'float'`},
@@ -354,17 +354,20 @@ func TestInferImport(t *testing.T) {
 		{in: `a ; a = $sha256~~`, imp: reg.Func(a, a), result: `a -> a`},
 		{in: `{ x = a 1, y = a "" } ; a = $sha256~~`, imp: reg.Func(a, a), result: `{ x : int, y : text }`},
 		// A scrap that denotes a type can only be used in type position.
-		{in: `$sha256~~`, imp: reg.Type(IntRef), result: `type = int`},
-		{in: `ignore ; ignore : $sha256~~ -> int = _ -> 1`, imp: reg.Type(TextRef), result: `text -> int`},
-		{in: `1 + $sha256~~`, imp: reg.Type(IntRef), err: `cannot use type $sha256~~ as a value`},
+		{in: `$sha256~~`, imp: IntRef, sort: true, result: `type = int`},
+		{in: `ignore ; ignore : $sha256~~ -> int = _ -> 1`, imp: TextRef, sort: true, result: `text -> int`},
+		{in: `1 + $sha256~~`, imp: IntRef, sort: true, err: `cannot use type $sha256~~ as a value`},
+		{in: `ignore ; ignore : $"./t.scrap" -> int = _ -> 1`, imp: TextRef, sort: true, result: `text -> int`},
 		{in: `one ; one : $sha256~~ = 1`, imp: IntRef, err: `$sha256~~ is a value, not a type`},
 	}
 
 	for _, ex := range examples {
 		se := must(parser.ParseExpr(ex.in))
-		typ, err := Infer(&reg, nil, se, func(algo string, hash []byte) (TypeRef, error) {
-			return ex.imp, nil
-		})
+		imports := make(Imports)
+		for _, n := range se.Imports() {
+			imports[n] = Result{Type: ex.imp, Sort: ex.sort}
+		}
+		res, err := Infer(&reg, nil, se, imports)
 		if err != nil {
 			if ex.err != "" {
 				str := err.Error()
@@ -375,7 +378,7 @@ func TestInferImport(t *testing.T) {
 				t.Error(err)
 			}
 		} else {
-			typStr := reg.String(typ)
+			typStr := reg.Describe(res)
 			if typStr != ex.result {
 				t.Errorf("Expected %s, got %s", ex.result, typStr)
 			}

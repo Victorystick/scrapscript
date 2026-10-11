@@ -2,7 +2,6 @@ package eval
 
 import (
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"maps"
 	"reflect"
@@ -12,7 +11,8 @@ import (
 	"github.com/Victorystick/scrapscript/token"
 )
 
-type EvalImport func(algo string, hash []byte) (Value, error)
+// EvalImport returns the value of the scrap that an Import node refers to.
+type EvalImport func(ref ast.Node) (Value, error)
 
 type context struct {
 	src        *ast.SourceExpr
@@ -106,12 +106,7 @@ func (c *context) eval(x ast.Node) (Value, error) {
 	case ast.Access:
 		return c.access(x)
 	case ast.Import:
-		algo, hash := c.src.Import(x)
-		bs, err := hex.DecodeString(c.src.Source.GetString(c.src.TokenSpan(hash).TrimStart(2)))
-		if err != nil {
-			return nil, c.error(x, fmt.Sprintf("bad import hash %s", c.src.NodeText(x)))
-		}
-		return c.evalImport(c.name(algo), bs)
+		return c.evalImport(x)
 	}
 
 	return nil, c.error(x, fmt.Sprintf("unhandled node %s", c.src.Kind(x)))
