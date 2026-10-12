@@ -76,7 +76,7 @@ func TestInfer(t *testing.T) {
 		{`a -> b -> [ a, b ]`, `a -> a -> list a`},
 		{`(a -> b -> [ a, b ]) 1`, `int -> list int`},
 
-		{`"to" |> a -> b -> a <| 2`, `text`},
+		{`"to" |> (a -> b -> a) <| 2`, `text`},
 		{`4 |> a -> b -> a`, `a -> int`},
 
 		{`#fun (x -> x * 2)`, `[ #fun (int -> int), ..a ]`},

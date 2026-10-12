@@ -154,12 +154,21 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	return
 }
 
+// trace records a parse function on the debug stack, and returns a function
+// that removes it.
+func trace(name string) func() {
+	stack = append(stack, name)
+	return func() { stack = stack[:len(stack)-1] }
+}
+
+// parseExpr parses an expression, the loosest form:
+//
+//	expr = body { ";" binding }
 func (p *parser) parseExpr() ast.Node {
 	if debug != nil {
-		stack = append(stack, "parseExpr")
-		defer func() { stack = stack[:len(stack)-1] }()
+		defer trace("parseExpr")()
 	}
-	expr := p.parsePlainExpr(token.BasePrec)
+	expr := p.parseBody()
 
 	for p.tok == token.WHERE {
 		p.next()
@@ -169,38 +178,136 @@ func (p *parser) parseExpr() ast.Node {
 	return expr
 }
 
-func (p *parser) parsePlainExpr(prec int) ast.Node {
-	if debug != nil {
-		stack = append(stack, "parsePlainExpr")
-		defer func() { stack = stack[:len(stack)-1] }()
-	}
-	left := p.parseBinaryExpr(ast.None, prec)
+// parseBody parses a function, a match function or a binary expression:
+//
+//	body = binder "->" body | arm { arm } | pipe
+func (p *parser) parseBody() ast.Node {
+	return p.parseBinary(1, false)
+}
 
+// parseBinary parses binary operators whose precedence is at least min, by
+// precedence climbing. A function or match function extends as far right as
+// it can, so it may only be the first operand or follow a pipe. Neither may
+// appear when arm is set: the patterns and bodies of match arms are binary
+// expressions only, and stop before pipes and composition.
+func (p *parser) parseBinary(min int, arm bool) ast.Node {
+	if debug != nil {
+		defer trace("parseBinary")()
+	}
+	left := p.parseOperand(!arm && min <= token.RCOMP.Precedence())
 	for {
-		if p.tok == token.LPAREN {
-			right := p.parseParenExpr()
-			left = p.add(ast.Call, 0, uint32(left), uint32(right))
-		} else if p.tok.IsOperator() && p.tok.Precedence() > prec {
-			op := p.tok
-			val := p.parseBinaryExpr(left, op.Precedence())
-			if left == val {
-				// Break if parse binary can't parse more.
-				break
-			}
-			left = val
-		} else if p.tok == token.OPTION && token.CallPrec > prec {
-			// A tag in argument position takes no payload.
-			right := p.parseTag()
-			left = p.add(ast.Call, 0, uint32(left), uint32(right))
-		} else if p.tok != token.EOF && (!p.tok.IsOperator() || startsSimpleValue(p.tok)) && token.CallPrec > prec {
-			right := p.parseBinaryExpr(ast.None, token.CallPrec-1)
-			left = p.add(ast.Call, 0, uint32(left), uint32(right))
-		} else {
-			break
+		op, at := p.tok, p.at()
+		prec := op.Precedence()
+		if prec == 0 || prec < min {
+			return left
+		}
+		p.next()
+		next := prec + 1
+		if op.RightAssoc() {
+			next = prec
+		}
+		right := p.parseBinary(next, arm)
+		left = p.add(ast.Binary, at, uint32(left), uint32(right))
+		if op.Comparison() && p.tok.Comparison() {
+			p.bail("Comparisons cannot be chained.")
 		}
 	}
+}
 
-	return left
+// parseOperand parses an application, or if open is set, a function or match
+// function.
+func (p *parser) parseOperand(open bool) ast.Node {
+	if open && p.tok == token.PIPE {
+		return p.parseMatchFuncExpr()
+	}
+	x := p.parseApp()
+	if open && p.tok == token.ARROW {
+		if p.kinds[x] != ast.Ident {
+			p.bail("function parameter must be an identifier")
+		}
+		arrow := p.at()
+		p.next()
+		return p.add(ast.Func, arrow, uint32(x), uint32(p.parseBody()))
+	}
+	return x
+}
+
+// parseApp parses a variant, or a function applied to arguments:
+//
+//	app = TAG [ postfix ] | postfix { postfix }
+//
+// A tag in argument position takes no payload.
+func (p *parser) parseApp() ast.Node {
+	if debug != nil {
+		defer trace("parseApp")()
+	}
+	if p.tok == token.OPTION {
+		return p.parseVariantExpr()
+	}
+	fn := p.parsePostfix()
+	for startsAtom(p.tok) {
+		var arg ast.Node
+		if p.tok == token.OPTION {
+			arg = p.parseTag()
+		} else {
+			arg = p.parsePostfix()
+		}
+		fn = p.add(ast.Call, 0, uint32(fn), uint32(arg))
+	}
+	return fn
+}
+
+// parsePostfix parses an atom and the fields accessed on it.
+func (p *parser) parsePostfix() ast.Node {
+	x := p.parseAtom()
+	for p.tok == token.ACCESS {
+		p.next()
+		x = p.add(ast.Access, p.identTok(), uint32(x), 0)
+	}
+	return x
+}
+
+// Returns true if tok is the start of an atom, or a tag.
+func startsAtom(tok token.Token) bool {
+	switch tok {
+	case token.IDENT,
+		token.INT, token.FLOAT, token.HOLE,
+		token.TEXT, token.BYTE, token.BYTES, token.IMPORT,
+		token.LBRACE, token.LBRACK, token.LPAREN,
+		token.OPTION:
+		return true
+	}
+	return false
+}
+
+func (p *parser) parseAtom() ast.Node {
+	if debug != nil {
+		defer trace("parseAtom")()
+	}
+	switch p.tok {
+	case token.IDENT:
+		return p.ident()
+	case token.INT, token.FLOAT, token.HOLE,
+		token.TEXT, token.BYTE, token.BYTES:
+		lit := p.add(ast.Literal, p.at(), 0, 0)
+		p.next()
+		return lit
+
+	case token.LBRACE:
+		return p.parseRecord()
+
+	case token.LBRACK:
+		return p.parseList()
+
+	case token.LPAREN:
+		return p.parseParenExpr()
+
+	case token.IMPORT:
+		return p.parseImport()
+	}
+
+	p.unexpected()
+	return ast.None
 }
 
 func (p *parser) parseParenExpr() ast.Node {
@@ -221,93 +328,6 @@ func (p *parser) identTok() ast.Tok {
 
 func (p *parser) ident() ast.Node {
 	return p.add(ast.Ident, p.identTok(), 0, 0)
-}
-
-// Returns true if `tok` is the start of a simple value.
-func startsSimpleValue(tok token.Token) bool {
-	switch tok {
-	case token.IDENT,
-		token.INT, token.FLOAT, token.HOLE,
-		token.TEXT, token.BYTE, token.BYTES, token.IMPORT,
-		// Or a record, list or parens expression.
-		token.LBRACE, token.LBRACK, token.LPAREN:
-		return true
-	}
-	return false
-}
-
-func (p *parser) parseUnaryExpr() ast.Node {
-	if debug != nil {
-		stack = append(stack, "parseUnaryExpr")
-		defer func() { stack = stack[:len(stack)-1] }()
-	}
-	switch p.tok {
-	case token.IDENT:
-		return p.ident()
-	case token.INT, token.FLOAT, token.HOLE,
-		token.TEXT, token.BYTE, token.BYTES:
-		lit := p.add(ast.Literal, p.at(), 0, 0)
-		p.next()
-		return lit
-
-	case token.LBRACE:
-		return p.parseRecord()
-
-	case token.LBRACK:
-		return p.parseList()
-
-	case token.LPAREN:
-		return p.parseParenExpr()
-
-	case token.PIPE:
-		return p.parseMatchFuncExpr()
-
-	case token.OPTION:
-		return p.parseVariantExpr()
-
-	case token.IMPORT:
-		return p.parseImport()
-	}
-
-	p.unexpected()
-	return ast.None
-}
-
-func (p *parser) parseBinaryExpr(x ast.Node, prec int) ast.Node {
-	if debug != nil {
-		stack = append(stack, "parseBinaryExpr")
-		defer func() { stack = stack[:len(stack)-1] }()
-	}
-	if x == ast.None {
-		x = p.parseUnaryExpr()
-	}
-
-	if p.tok.IsOperator() && p.tok.Precedence() < prec {
-		return x
-	}
-
-	switch p.tok {
-	case token.ADD, token.SUB, token.MUL,
-		token.LT, token.GT,
-		token.RPIPE, token.LPIPE,
-		token.RCOMP, token.LCOMP,
-		token.CONCAT, token.APPEND, token.PREPEND:
-		op, at := p.tok, p.at()
-		p.next()
-		right := p.parsePlainExpr(op.Precedence())
-		return p.add(ast.Binary, at, uint32(x), uint32(right))
-
-	case token.ACCESS:
-		p.next()
-		return p.add(ast.Access, p.identTok(), uint32(x), 0)
-
-	case token.ARROW:
-		at := p.at()
-		p.next()
-		return p.parseFuncExpr(x, at)
-	}
-
-	return x
 }
 
 func (p *parser) parseWhereExpr(x ast.Node) ast.Node {
@@ -332,7 +352,7 @@ func (p *parser) parseWhereExpr(x ast.Node) ast.Node {
 	if sort {
 		return p.add(ast.Where, id, uint32(x), p.addExtra(typ, p.parseType(), 1))
 	}
-	val := p.parsePlainExpr(token.BasePrec)
+	val := p.parseBody()
 	return p.add(ast.Where, id, uint32(x), p.addExtra(typ, val, 0))
 }
 
@@ -550,37 +570,39 @@ func (p *parser) parseList() ast.Node {
 	return p.add(ast.List, start, lhs, rhs)
 }
 
-// parseFuncExpr parses the body of a function whose parameter x and arrow
-// have been parsed.
-func (p *parser) parseFuncExpr(x ast.Node, arrow ast.Tok) ast.Node {
-	if debug != nil {
-		stack = append(stack, "parseFuncExpr")
-		defer func() { stack = stack[:len(stack)-1] }()
-	}
-	body := p.parsePlainExpr(token.ARROW.Precedence())
-	return p.add(ast.Func, arrow, uint32(x), uint32(body))
-}
+// armPrec is the lowest precedence of the operators in match arms. Looser
+// ones, pipes and composition, end the match function: `| … <| x` applies it.
+var armPrec = token.LT.Precedence()
 
+// parseMatchFuncExpr parses a match function's arms:
+//
+//	arm = "|" pattern { "->" pattern } "->" arm-body
 func (p *parser) parseMatchFuncExpr() ast.Node {
 	if debug != nil {
-		stack = append(stack, "parseMatchFuncExpr")
-		defer func() { stack = stack[:len(stack)-1] }()
+		defer trace("parseMatchFuncExpr")()
 	}
 	top := len(p.scratch)
 
 	for p.tok == token.PIPE {
 		p.next()
-
-		arg := p.parseBinaryExpr(ast.None, token.ARROW.Precedence()+1)
-		p.expect(token.ARROW)
-		arrow := p.at()
-		p.next()
-
-		p.scratch = append(p.scratch, p.parseFuncExpr(arg, arrow))
+		p.scratch = append(p.scratch, p.parseArm(p.parseBinary(armPrec, true)))
 	}
 
 	lhs, rhs := p.flush(top)
 	return p.add(ast.MatchFunc, 0, lhs, rhs)
+}
+
+// parseArm parses the rest of a match arm after its pattern x. What follows
+// an arrow is another pattern if an arrow follows it, or else the arm's body.
+func (p *parser) parseArm(x ast.Node) ast.Node {
+	p.expect(token.ARROW)
+	arrow := p.at()
+	p.next()
+	body := p.parseBinary(armPrec, true)
+	if p.tok == token.ARROW {
+		body = p.parseArm(body)
+	}
+	return p.add(ast.Func, arrow, uint32(x), uint32(body))
 }
 
 // tagTok consumes a '#' and the tag after it, and returns the tag's token.
@@ -613,8 +635,8 @@ func (p *parser) parseVariantExpr() ast.Node {
 
 	if p.tok == token.OPTION {
 		payload = p.parseTag()
-	} else if startsSimpleValue(p.tok) {
-		payload = p.parseBinaryExpr(ast.None, token.CallPrec-1)
+	} else if startsAtom(p.tok) {
+		payload = p.parsePostfix()
 	}
 
 	return p.add(ast.Variant, tag, uint32(payload), 0)

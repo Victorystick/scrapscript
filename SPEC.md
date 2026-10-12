@@ -130,10 +130,10 @@ body     = binder "->" body                      # function
          | pipe
 
 arm      = "|" pattern { "->" pattern } "->" arm-body    # one pattern per argument
-arm-body = pipe                                  # NOT a bare match or a bare lambda: parenthesise
+arm-body = cmp                                   # NOT a bare match or a bare lambda: parenthesise
 
 binder   = NAME | "_"                            # "_" ignores the argument
-pipe     = comp { "|>" comp }                    # left-assoc
+pipe     = comp { "|>" comp } [ "|>" body ]      # left-assoc; the last operand may be a function
 comp     = cmp { ">>" cmp }                      # left-assoc: f >> g is x -> g (f x)
 cmp      = listop [ cmp-op listop ]              # non-associative
 cmp-op   = "==" | "/=" | "<" | "<=" | ">" | ">="
@@ -171,6 +171,10 @@ Notes:
 - Commas are separators, not operators. Trailing commas are an error
   (revisit).
 - Comparisons are non-associative: `a < b < c` is a syntax error.
+- **Arms end at pipes.** An arm's body stops before `|>` and `>>`, so a pipe
+  after a match function applies the whole function, and the function can be
+  piped into: `x |> | 0 -> "zero" | _ -> "other"`. The last operand of a
+  pipe may be a function, which extends to the right: `3 |> a -> a + 1`.
 - `listop` mixing: `a >+ b +< c` parses as `a >+ (b +< c)`.
 - **Multi-pattern arms.** Each pattern after the first `->` matches the next
   argument, so a match function takes as many arguments as its arms have patterns:

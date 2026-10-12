@@ -105,7 +105,7 @@ func TestParseRecord(t *testing.T) {
 func TestParseEnum(t *testing.T) {
 	valid := []string{
 		`#true #false`,
-		`#1 #2 #4 #8 #16 #32`,
+		`[#1, #2, #4, #8, #16, #32]`,
 		`#tag (#a #b)`,
 		`#left ; my-type : type = [#left, #right]`,
 		`#horse "Lucy"
@@ -226,6 +226,9 @@ func TestParseError(t *testing.T) {
 		{`t ; t : type = [#a, #b,]`, `A type cannot end in a trailing comma.`},
 		{`t ; t : type = [#a, ..r, #b]`, `Expected RBRACK got COMMA`},
 		{`t ; t : type = { a = int }`, `Expected DEFINE got ASSIGN`},
+		{`a < b < c`, `Comparisons cannot be chained.`},
+		{`f x -> x`, `function parameter must be an identifier`},
+		{`#a 1 2`, `Expected EOF got INT`},
 	}
 
 	for _, example := range examples {

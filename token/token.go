@@ -199,30 +199,33 @@ func (tok Token) String() string {
 	return s
 }
 
-const (
-	WherePrec = 0
-	BasePrec  = 1
-	CallPrec  = 7
-)
+// Binary operator precedences, loosest first (SPEC.md section 3). Function
+// application binds tighter than any of them.
+var precedences = [end_operators]int8{
+	RPIPE: 1, LPIPE: 1,
+	RCOMP: 2, LCOMP: 2,
+	LT: 3, GT: 3,
+	PREPEND: 4, APPEND: 4,
+	CONCAT: 5,
+	ADD:    6, SUB: 6,
+	MUL: 7,
+}
 
-var precedences = func() (p [end_operators]int8) {
-	for i := range p {
-		p[i] = BasePrec
-	}
-	p[WHERE] = WherePrec
-	p[PIPE] = 1
-	p[LPIPE], p[RPIPE] = 2, 2
-	p[ARROW] = 3
-	p[LT], p[GT] = 4, 4
-	p[ADD], p[SUB], p[CONCAT], p[APPEND], p[PREPEND] = 5, 5, 5, 5, 5
-	p[MUL] = 6
-	p[ACCESS], p[SPREAD] = 8, 8
-	return
-}()
-
+// Precedence returns the precedence of a binary operator, or 0 for other
+// tokens.
 func (op Token) Precedence() int {
 	if op < end_operators {
 		return int(precedences[op])
 	}
-	return BasePrec
+	return 0
+}
+
+// RightAssoc returns true for the right-associative binary operators.
+func (op Token) RightAssoc() bool {
+	return op == PREPEND || op == LPIPE
+}
+
+// Comparison returns true for the comparison operators, which don't chain.
+func (op Token) Comparison() bool {
+	return op == LT || op == GT
 }
