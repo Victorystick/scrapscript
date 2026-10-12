@@ -28,6 +28,10 @@ type Pusher interface {
 type Scrap struct {
 	expr      ast.SourceExpr
 	published bool
+	// The path of a draft read from a file, which its own paths are relative
+	// to. A draft read otherwise, as from standard input, is an unnamed file
+	// at the root.
+	name string
 
 	// The scraps that its Import nodes refer to, once it is loaded.
 	deps            map[ast.Node]*Scrap
@@ -132,7 +136,7 @@ func (e *Environment) resolve(s *Scrap, n ast.Node) (*Scrap, error) {
 		if s.published {
 			return nil, s.expr.Error(n, "a published scrap cannot refer to a path")
 		}
-		dep, err := e.draft(path)
+		dep, err := e.draft(s, path)
 		if err != nil {
 			return nil, s.expr.Error(n, err.Error())
 		}
@@ -148,16 +152,16 @@ func (e *Environment) resolve(s *Scrap, n ast.Node) (*Scrap, error) {
 	return dep, nil
 }
 
-// draft returns the draft at the path p, resolved from the root of the
-// environment's files.
-func (e *Environment) draft(p string) (*Scrap, error) {
+// draft returns the draft at the path p, relative to the draft from that
+// refers to it. It must be within the root of the environment's files.
+func (e *Environment) draft(from *Scrap, p string) (*Scrap, error) {
 	if e.files == nil {
 		return nil, fmt.Errorf("cannot refer to a path here")
 	}
 	if path.IsAbs(p) {
 		return nil, fmt.Errorf("cannot refer to an absolute path")
 	}
-	name := path.Clean(p)
+	name := path.Join(path.Dir(from.name), p)
 	if !fs.ValidPath(name) {
 		return nil, fmt.Errorf("cannot refer to a path outside the current directory")
 	}
@@ -173,6 +177,7 @@ func (e *Environment) draft(p string) (*Scrap, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.name = name
 	e.drafts[name] = s
 	return s, nil
 }
