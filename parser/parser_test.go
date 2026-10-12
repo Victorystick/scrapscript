@@ -226,7 +226,7 @@ func TestParseError(t *testing.T) {
 		{`t ; t : type = { a = int }`, `Expected DEFINE got ASSIGN`},
 		{`[ 1, ]`, `A list cannot end in a trailing comma.`},
 		{`{ a = 1, }`, `A record cannot end in a trailing comma.`},
-		{`{ ..r }`, `A spread must be followed by fields.`},
+		{`{ ..r }`, `Expected COMMA got RBRACE`},
 		{`a < b < c`, `Comparisons cannot be chained.`},
 		{`f x -> x`, `function parameter must be an identifier`},
 		{`#a 1 2`, `Expected EOF got INT`},
