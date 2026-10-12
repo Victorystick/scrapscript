@@ -34,6 +34,8 @@ multi-pattern arms, where-groups and pattern operators separately.
 
 ## 4. Errors everywhere after type checking
 
+`(Value, error)` dates from before the checker existed.
+
 - [ ] Drop the runtime type checks (`c.int`, `c.list`, …) that the checker
       already guarantees.
 - [ ] Keep errors only for real runtime failures: unmatched TEXT, INT or
@@ -45,6 +47,9 @@ multi-pattern arms, where-groups and pattern operators separately.
 
 - [ ] Capture only the slots a closure uses, not the `*context` chain, while
       still printing with its captured bindings.
+- [ ] Explore lambda set inference (as in Roc): the checker tracks which
+      closures can reach each function type, so calls compile to a switch
+      over known closures instead of an indirect call. Likely a lot of work.
 
 ## 6. Values are maps and strings
 
@@ -54,8 +59,11 @@ multi-pattern arms, where-groups and pattern operators separately.
 
 ## 7. Smaller
 
-- [ ] Tail calls: platform run loops recurse once per event and grow the
-      stack without bound.
-- [ ] The type registry only grows; a long-running platform or REPL never
-      frees type nodes.
+- [ ] Tail calls, sorely missing: platform run loops recurse once per event
+      and grow the stack without bound.
 - [ ] Sources have no file name, so errors in drafts don't say which file.
+
+## Accepted
+
+- The type registry only grows. Most programs don't keep accumulating types,
+  so a long-running platform or REPL can live with it.
