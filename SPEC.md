@@ -507,6 +507,15 @@ Reliability is a top-level requirement. The rules:
    - Functions print with the bindings they capture as a where-clause,
      `b -> a ; a = 3`, recursive ones included. Builtins print by name, and
      captured hash references stay hash references.
+   - A function that a binding defines prints as that binding's name, so
+     recursive and mutually recursive groups print as groups:
+     `f ; f = | 0 -> 1 | n -> n * f (n - 1)`.
+   - The bindings that a value reaches, from whatever scopes, print as one
+     where-group after it. Two with the same name are told apart by primes,
+     `a'`, chosen so that no binder in the printed code shadows them.
+   - Bindings keep their annotations, and the sort bindings that those refer
+     to print too. Recursive functions over recursive types (7.5) need them
+     to check.
    - Printing adds the parentheses the grammar needs: `#fun (x -> x * 2)`,
      `list/fold 0 (a -> b -> a + b)`.
    - TEXT, BYTE and BYTES print with escapes that read back to the same bytes, and

@@ -63,12 +63,12 @@ var expressions = []struct {
 	// 	| _ -> "<empty>" <| "hello Oseg"`, Text("Oseg")},
 	{`#empty`, `#empty`},
 	{`#a |> | #a () -> 1`, `1`},
-	{`#fun (x -> x * 2)`, `#fun x -> x * 2`},
+	{`#fun (x -> x * 2)`, `#fun (x -> x * 2)`},
 
 	// Destructuring.
 	{`{ a = 1, b = 2 } |> | { a = c, b = d } -> c + d`, `3`},
 	{`{ a = 1 } |> | { a = 2 } -> 0 | { a = c } -> c`, `1`},
-	{`3 |> a -> b -> a`, `b -> a`},
+	{`3 |> a -> b -> a`, "b -> a\n; a = 3"},
 
 	{`#true #false`, `#true #false`},
 
@@ -117,7 +117,7 @@ var failures = []struct {
 }{
 	{`f 1 ; f = a -> b`, "unbound variable: b"},
 	{`{} |> | { b = a } -> a`, "cannot unify '{ b : a }' with '{}'"},
-	{`[ 1, ] |> | [] -> "four"`, `[] -> "four" had no alternative for [ 1 ]`},
+	{`[ 1, ] |> | [] -> "four"`, `no arm matches [ 1 ]`},
 	{`[] ++ ""`, `cannot unify 'list a' with 'text'`},
 	{`"" ++ []`, `cannot unify 'text' with 'list a'`},
 	{`1 -> x`, `function parameter must be an identifier`},
@@ -181,7 +181,7 @@ var exp2str = []struct{ source, result string }{
 	{`list/map text/length`, `list/map text/length`},
 
 	{`list/fold 0 (a -> b -> a + b) []`, `0`},
-	{`list/fold 0 (a -> b -> a + b)`, `list/fold 0 a -> b -> a + b`},
+	{`list/fold 0 (a -> b -> a + b)`, `list/fold 0 (a -> b -> a + b)`},
 	{`list/fold 0 (a -> b -> a + b) [1, 2]`, `3`},
 	{`list/fold 0 (a -> b -> a + text/length b) ["hey", "beautiful"]`, `12`},
 

@@ -260,7 +260,13 @@ func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
 	if s.value == nil {
 		value, err := Eval(s.expr, e.vars, func(n ast.Node) (Value, error) {
 			dep := s.deps[n]
-			return e.eval(dep, dep.result)
+			v, err := e.eval(dep, dep.result)
+			// A published function prints as the reference to it.
+			if sf, ok := v.(ScriptFunc); ok && dep.published {
+				sf.ref = s.expr.NodeText(n)
+				return sf, err
+			}
+			return v, err
 		})
 		if err != nil {
 			return nil, err

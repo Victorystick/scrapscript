@@ -15,11 +15,16 @@ import (
 // EvalImport returns the value of the scrap that an Import node refers to.
 type EvalImport func(ref ast.Node) (Value, error)
 
+// A context is a frame of variables, in a chain of frames that follows the
+// lexical scopes of a source.
 type context struct {
 	src        *ast.SourceExpr
 	vars       Vars
 	evalImport EvalImport
 	parent     *context
+	// The Where nodes of a where-group's frame, whose bindings are its vars.
+	// Functions print with them.
+	binds []ast.Node
 }
 
 type Vars interface {
@@ -53,7 +58,7 @@ func (c *context) name(t ast.Tok) string {
 }
 
 func (c *context) sub(vars Vars) *context {
-	return &context{c.src, vars, c.evalImport, c}
+	return &context{c.src, vars, c.evalImport, c, nil}
 }
 
 func (c *context) error(n ast.Node, msg string) error {
@@ -67,7 +72,7 @@ func (c *context) tokenError(t ast.Tok, msg string) error {
 // Eval evaluates a SourceExpr in the context of a set of variables. The
 // SourceExpr must have been type-checked.
 func Eval(se ast.SourceExpr, vars Vars, evalImport EvalImport) (Value, error) {
-	ctx := &context{&se, vars, evalImport, nil}
+	ctx := &context{&se, vars, evalImport, nil, nil}
 
 	return ctx.eval(se.Expr)
 }
@@ -276,9 +281,9 @@ func (c *context) binary(x ast.Node) (Value, error) {
 		return c.call(left, right)
 
 	case token.RCOMP: // a >> b
-		return c.compose(left, right)
+		return c.compose(x, left, right)
 	case token.LCOMP: // a << b
-		return c.compose(right, left)
+		return c.compose(x, right, left)
 	}
 
 	return nil, c.error(x, fmt.Sprintf("unhandled %s operator", op))
@@ -296,7 +301,8 @@ func (c *context) call(fnX, argX ast.Node) (Value, error) {
 	return fn(arg)
 }
 
-func (c *context) compose(first, second ast.Node) (Value, error) {
+// compose evaluates the composition x of two functions, first and second.
+func (c *context) compose(x, first, second ast.Node) (Value, error) {
 	a, err := c.fn(first)
 	if err != nil {
 		return nil, err
@@ -306,7 +312,8 @@ func (c *context) compose(first, second ast.Node) (Value, error) {
 		return nil, err
 	}
 	return ScriptFunc{
-		// source: + "<<" + ,
+		ctx:  c,
+		node: x,
 		fn: func(v Value) (Value, error) {
 			mid, err := a(v)
 			if err != nil {
@@ -378,7 +385,8 @@ func (c *context) createFunc(x ast.Node) (ScriptFunc, error) {
 	}
 	name := c.name(c.src.Main(arg))
 	return ScriptFunc{
-		source: c.src.NodeText(x),
+		ctx:  c,
+		node: x,
 		fn: func(value Value) (Value, error) {
 			return c.sub(Variables{name: value}).eval(body)
 		},
@@ -386,9 +394,9 @@ func (c *context) createFunc(x ast.Node) (ScriptFunc, error) {
 }
 
 func (c *context) createMatchFunc(x ast.Node) (ScriptFunc, error) {
-	source := c.src.NodeText(x)
 	return ScriptFunc{
-		source: source,
+		ctx:  c,
+		node: x,
 		fn: func(a Value) (Value, error) {
 			for _, alt := range c.src.Arms(x) {
 				arg, body := c.src.Func(alt)
@@ -401,7 +409,7 @@ func (c *context) createMatchFunc(x ast.Node) (ScriptFunc, error) {
 				}
 				return c.sub(matches).eval(body)
 			}
-			return nil, fmt.Errorf("%s had no alternative for %s", source, a)
+			return nil, c.error(x, fmt.Sprintf("no arm matches %s", a))
 		},
 	}, nil
 }
@@ -413,6 +421,7 @@ func (c *context) where(x ast.Node) (Value, error) {
 	body, binds := c.src.Group(x)
 	vars := make(Variables, len(binds))
 	sub := c.sub(vars)
+	sub.binds = binds
 	for _, comp := range c.src.Components(binds, nil) {
 		for _, b := range comp {
 			_, id, _, val := c.src.Where(b)

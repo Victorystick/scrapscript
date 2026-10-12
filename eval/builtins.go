@@ -39,8 +39,8 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 			// TODO: need more context to give better error messages.
 			return nil, fmt.Errorf("needed function, but got %T", val)
 		}
-		return ScriptFunc{
-			source: "list/map " + val.String(),
+		return Partial{
+			name: "list/map", args: []Value{val},
 			fn: func(val Value) (v Value, err error) {
 				ls, ok := val.(List)
 				if !ok {
@@ -61,17 +61,16 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	})
 	accum := reg.Func(a, reg.Func(b, a))
 	define("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), func(acc Value) (Value, error) {
-		source := "list/fold " + acc.String()
-		return ScriptFunc{
-			source: source,
+		return Partial{
+			name: "list/fold", args: []Value{acc},
 			fn: func(val Value) (Value, error) {
 				fn := Callable(val)
 				if fn == nil {
 					// TODO: need more context to give better error messages.
 					return nil, fmt.Errorf("needed function, but got %T", val)
 				}
-				return ScriptFunc{
-					source: source + " " + val.String(),
+				return Partial{
+					name: "list/fold", args: []Value{acc, val},
 					fn: func(val Value) (res Value, err error) {
 						ls, ok := val.(List)
 						if !ok {
@@ -104,8 +103,8 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 		if !ok {
 			return nil, fmt.Errorf("expected int, but got %T", val)
 		}
-		return ScriptFunc{
-			source: "list/repeat " + val.String(),
+		return Partial{
+			name: "list/repeat", args: []Value{val},
 			fn: func(val Value) (v Value, err error) {
 				elems := make([]Value, int(n))
 				for i := range elems {
@@ -129,8 +128,8 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 		if !ok {
 			return nil, fmt.Errorf("expected int, but got %T", val)
 		}
-		return ScriptFunc{
-			source: "text/repeat " + val.String(),
+		return Partial{
+			name: "text/repeat", args: []Value{val},
 			fn: func(val Value) (v Value, err error) {
 				text, ok := val.(Text)
 				if !ok {
@@ -145,8 +144,8 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 		if !ok {
 			return nil, fmt.Errorf("expected text, but got %T", val)
 		}
-		return ScriptFunc{
-			source: "text/join " + val.String(),
+		return Partial{
+			name: "text/join", args: []Value{val},
 			fn: func(val Value) (v Value, err error) {
 				ls, ok := val.(List)
 				if !ok {

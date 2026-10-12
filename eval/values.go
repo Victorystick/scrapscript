@@ -2,13 +2,10 @@ package eval
 
 import (
 	"bytes"
-	"encoding/base64"
 	"maps"
 	"slices"
-	"strconv"
-	"strings"
 
-	"github.com/Victorystick/scrapscript/scanner"
+	"github.com/Victorystick/scrapscript/ast"
 )
 
 // Values
@@ -47,10 +44,22 @@ type BuiltInFunc struct {
 	fn   Func
 }
 
-// A user-defined function.
+// A built-in function applied to some, but not all, of its arguments.
+type Partial struct {
+	name string
+	args []Value
+	fn   Func
+}
+
+// A user-defined function: a Func, MatchFunc or composition node, closed
+// over the context it was evaluated in.
 type ScriptFunc struct {
-	source string
-	fn     Func
+	ctx  *context
+	node ast.Node
+	// The hash reference that it was imported by, which it prints as, if it
+	// is the value of a published scrap.
+	ref string
+	fn  Func
 }
 
 func Equals(a, b Value) bool {
@@ -74,6 +83,8 @@ func Equals(a, b Value) bool {
 	case Variant:
 		return a.eq(b)
 	case BuiltInFunc:
+		return a.eq(b)
+	case Partial:
 		return a.eq(b)
 	case ScriptFunc:
 		return a.eq(b)
@@ -121,94 +132,41 @@ func (bf BuiltInFunc) eq(other Value) bool {
 	o, ok := other.(BuiltInFunc)
 	return ok && bf.name == o.name
 }
+
+// Functions are equal if they print the same.
+func (p Partial) eq(other Value) bool {
+	o, ok := other.(Partial)
+	return ok && p.String() == o.String()
+}
 func (sf ScriptFunc) eq(other Value) bool {
 	o, ok := other.(ScriptFunc)
-	// TODO: This is very incomplete.
-	return ok && sf.source == o.source
+	return ok && sf.String() == o.String()
 }
 
-// String
+// String returns a value as a scrap that evaluates to the same value; see
+// print.go.
 
-func (h Hole) String() string {
-	return "()"
-}
-func (i Int) String() string {
-	return strconv.FormatInt(int64(i), 10)
-}
-func (f Float) String() (res string) {
-	res = strconv.FormatFloat(float64(f), 'f', -1, 64)
-	// Ensure we always have a decimal.
-	if strings.IndexByte(res, '.') < 0 {
-		res += ".0"
-	}
-	return
-}
-func (t Text) String() string {
-	return scanner.Quote(string(t))
-}
-func (b Byte) String() string {
-	const chars = "0123456789ABCDEF"
-	return string([]byte{'~', chars[b>>4], chars[b&0xf]})
-}
-func (bs Bytes) String() string {
-	return "~~" + base64.StdEncoding.EncodeToString(bs)
-}
-func (r Record) String() string {
-	var b strings.Builder
-	b.WriteString("{ ")
-	comma := len(r.values) - 1
-	for _, key := range slices.Sorted(maps.Keys(r.values)) {
-		val := r.values[key]
-		b.WriteString(key)
-		b.WriteString(" = ")
-		b.WriteString(val.String())
-
-		if comma > 0 {
-			comma -= 1
-			b.WriteString(", ")
-		}
-	}
-	b.WriteString(" }")
-	return b.String()
-}
-func (l List) String() string {
-	if len(l.elements) == 0 {
-		return "[]"
-	}
-
-	var b strings.Builder
-	b.WriteString("[ ")
-	comma := len(l.elements) - 1
-	for _, val := range l.elements {
-		b.WriteString(val.String())
-
-		if comma > 0 {
-			comma -= 1
-			b.WriteString(", ")
-		}
-	}
-	b.WriteString(" ]")
-	return b.String()
-}
-func (v Variant) String() string {
-	value := ""
-	if v.value != nil {
-		value = " " + v.value.String()
-	}
-	return "#" + v.tag + value
-}
-func (bf BuiltInFunc) String() string {
-	return bf.name
-}
-func (sf ScriptFunc) String() string {
-	return sf.source
-}
+func (h Hole) String() string         { return Print(h) }
+func (i Int) String() string          { return Print(i) }
+func (f Float) String() string        { return Print(f) }
+func (t Text) String() string         { return Print(t) }
+func (b Byte) String() string         { return Print(b) }
+func (bs Bytes) String() string       { return Print(bs) }
+func (r Record) String() string       { return Print(r) }
+func (l List) String() string         { return Print(l) }
+func (v Variant) String() string      { return Print(v) }
+func (bf BuiltInFunc) String() string { return Print(bf) }
+func (p Partial) String() string      { return Print(p) }
+func (sf ScriptFunc) String() string  { return Print(sf) }
 
 func Callable(val Value) Func {
 	if f, ok := val.(ScriptFunc); ok {
 		return f.fn
 	}
 	if f, ok := val.(BuiltInFunc); ok {
+		return f.fn
+	}
+	if f, ok := val.(Partial); ok {
 		return f.fn
 	}
 	return nil
