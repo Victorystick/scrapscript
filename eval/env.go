@@ -4,15 +4,25 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
+	"path"
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/parser"
 	"github.com/Victorystick/scrapscript/token"
 	"github.com/Victorystick/scrapscript/types"
-	"github.com/Victorystick/scrapscript/yards"
 )
+
+// A Fetcher fetches the source of a published scrap by its sha256 hash, in
+// hex. The yards package has implementations.
+type Fetcher interface {
+	FetchSha256(key string) ([]byte, error)
+}
+
+// A Pusher stores the source of a published scrap, returning its hash.
+type Pusher interface {
+	PushScrap(data []byte) (key string, err error)
+}
 
 // A Scrap is a parsed scrap: a draft, or a published scrap fetched by hash.
 type Scrap struct {
@@ -37,13 +47,16 @@ type hashKey struct {
 	digest string
 }
 
+// An Environment loads, checks and evaluates scraps. It reaches outside
+// itself only through the Fetcher, Pusher and drafts it is given, so it runs
+// anywhere, including where there is no filesystem or network.
 type Environment struct {
-	pusher  yards.Pusher
-	fetcher yards.Fetcher
-	// The directory that drafts' path references are resolved from, or "" if
-	// they aren't allowed.
-	dir string
-	reg types.Registry
+	pusher  Pusher
+	fetcher Fetcher
+	// The files that drafts' path references refer to, or nil if they
+	// aren't allowed.
+	files fs.FS
+	reg   types.Registry
 	// The TypeScope and Variables match each other's contents.
 	// One is used for type inference, the other for evaluation.
 	typeScope types.TypeScope
@@ -62,17 +75,18 @@ func NewEnvironment() *Environment {
 	return env
 }
 
-func (e *Environment) UsePusher(pusher yards.Pusher) {
+func (e *Environment) UsePusher(pusher Pusher) {
 	e.pusher = pusher
 }
 
-func (e *Environment) UseFetcher(fetcher yards.Fetcher) {
+func (e *Environment) UseFetcher(fetcher Fetcher) {
 	e.fetcher = fetcher
 }
 
-// UseDirectory lets drafts refer to files in dir by path, resolved from it.
-func (e *Environment) UseDirectory(dir string) {
-	e.dir = dir
+// UseDrafts lets drafts refer to the files in files by path, such as
+// os.DirFS(".") for the current directory, or an in-memory fs.FS.
+func (e *Environment) UseDrafts(files fs.FS) {
+	e.files = files
 }
 
 // Read parses a draft.
@@ -134,23 +148,24 @@ func (e *Environment) resolve(s *Scrap, n ast.Node) (*Scrap, error) {
 	return dep, nil
 }
 
-// draft returns the draft at path, resolved from the environment's directory.
-func (e *Environment) draft(path string) (*Scrap, error) {
-	if e.dir == "" {
+// draft returns the draft at the path p, resolved from the root of the
+// environment's files.
+func (e *Environment) draft(p string) (*Scrap, error) {
+	if e.files == nil {
 		return nil, fmt.Errorf("cannot refer to a path here")
 	}
-	if filepath.IsAbs(path) {
+	if path.IsAbs(p) {
 		return nil, fmt.Errorf("cannot refer to an absolute path")
 	}
-	full := filepath.Join(e.dir, path)
-	if rel, err := filepath.Rel(e.dir, full); err != nil || !filepath.IsLocal(rel) {
+	name := path.Clean(p)
+	if !fs.ValidPath(name) {
 		return nil, fmt.Errorf("cannot refer to a path outside the current directory")
 	}
 
-	if s, ok := e.drafts[full]; ok {
+	if s, ok := e.drafts[name]; ok {
 		return s, nil
 	}
-	bytes, err := os.ReadFile(full)
+	bytes, err := fs.ReadFile(e.files, name)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +173,7 @@ func (e *Environment) draft(path string) (*Scrap, error) {
 	if err != nil {
 		return nil, err
 	}
-	e.drafts[full] = s
+	e.drafts[name] = s
 	return s, nil
 }
 

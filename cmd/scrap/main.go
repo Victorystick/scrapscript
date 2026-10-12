@@ -67,7 +67,7 @@ func makeEnv() *eval.Environment {
 
 	pusher := yards.ByHttp(*server)
 	env.UsePusher(pusher)
-	env.UseDirectory(must(os.Getwd()))
+	env.UseDrafts(os.DirFS("."))
 	env.UseFetcher(must(yards.NewDefaultCacheFetcher(
 		// Don't cache invalid scraps, but trust the local cache for now.
 		yards.Validate(pusher)),

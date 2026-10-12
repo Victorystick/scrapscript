@@ -1,10 +1,9 @@
 package eval
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestInferBuiltin(t *testing.T) {
@@ -73,20 +72,14 @@ func TestInferFailure(t *testing.T) {
 	}
 }
 
-// pathEnv returns an environment whose directory holds the given files.
-func pathEnv(t *testing.T, files map[string]string) *Environment {
-	dir := t.TempDir()
+// pathEnv returns an environment whose drafts are the given files, in memory.
+func pathEnv(files map[string]string) *Environment {
+	fsys := make(fstest.MapFS, len(files))
 	for name, source := range files {
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		fsys[name] = &fstest.MapFile{Data: []byte(source)}
 	}
 	env := NewEnvironment()
-	env.UseDirectory(dir)
+	env.UseDrafts(fsys)
 	return env
 }
 
@@ -111,7 +104,7 @@ func TestPathImports(t *testing.T) {
 	}
 
 	for _, ex := range examples {
-		env := pathEnv(t, pathFiles)
+		env := pathEnv(pathFiles)
 		val, err := eval(env, ex.source)
 		if err != nil {
 			t.Errorf("%s: %v", ex.source, err)
@@ -126,12 +119,13 @@ func TestPathImportFailures(t *testing.T) {
 		{`$"./a.scrap"`, `$"./a.scrap" refers back to this scrap`},
 		{`$"../inc.scrap"`, `cannot refer to a path outside the current directory`},
 		{`$"/inc.scrap"`, `cannot refer to an absolute path`},
-		{`$"./missing.scrap"`, `no such file or directory`},
+		{`$"./missing.scrap"`, `file does not exist`},
+		{`$"sub/../../inc.scrap"`, `cannot refer to a path outside the current directory`},
 		{`$"./choice.scrap" + 1`, `cannot use type $"./choice.scrap" as a value`},
 	}
 
 	for _, ex := range examples {
-		env := pathEnv(t, pathFiles)
+		env := pathEnv(pathFiles)
 		if val, err := eval(env, ex.source); err == nil {
 			t.Errorf("%s: expected an error, got %s", ex.source, val)
 		} else if !strings.Contains(err.Error(), ex.error) {
@@ -148,7 +142,7 @@ func TestPathsNeedADirectory(t *testing.T) {
 }
 
 func TestPublishedScrapsCannotReferToPaths(t *testing.T) {
-	env := pathEnv(t, pathFiles)
+	env := pathEnv(pathFiles)
 	hash := "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445"
 	env.UseFetcher(MapFetcher{hash: `$"./inc.scrap"`})
 
