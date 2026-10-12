@@ -650,6 +650,34 @@ always gives the same hashes.
   printing and type caching must handle. Open questions: whether members can be
   made abstract, and when two such records' types are equal. Type scraps (7.6)
   are the interim mechanism.
+- **Compact runtime values.** Names exist only in source, types and printing;
+  at runtime, values are words. Not started; the evaluator walks the tree with
+  string-keyed maps. The design:
+  - Variables resolve to frame slots (section 5's `Var(index)`), so a frame is
+    a buffer of words and binding a pattern writes into it.
+  - Tags and labels are interned to integers by a table that the runtime and
+    the type checker share. `#foo 5` is two words, `(tagOf("foo"), 5)`; a tag
+    without a payload needs only its id. A match switches on the id. Ids are
+    global rather than dense per enum, because rows let one value flow
+    through enums with different tag sets.
+  - A record is its field values in label order: `{ a = 2, b = 4 }` is
+    `(2, 4)`, and a field's index is its label's rank in the record's label
+    set. When the checker knows that set, indices are static.
+  - Row polymorphism is the hard part: `{ a : int, ..r } -> int` doesn't know
+    where `a` is. Options: a shape word per record (its interned sorted label
+    set, which a field access searches, or caches per site), indices passed as
+    hidden arguments (evidence passing, as in Leijen's row calculi), or
+    specialising functions per shape. A shape word costs one word per record
+    and keeps types erased, which suits closures that print their source.
+  - Spreads `{ ..r, a = 1 }` build a new buffer, under the new shape when one
+    is added.
+  - Printing, equality and the flat encoding map ids back to names through the
+    table. Ids are per process and never part of a scrap's identity (section
+    9).
+  - Uniform words need boxing for TEXT, BYTES, lists, closures and arbitrary
+    precision INT: tagged immediates and a custom heap, which suits a
+    WebAssembly backend better than Go interfaces. So this is likely a
+    separate backend over the core, after the tree-walker has slots.
 
 ## 13. Platforms (sketch)
 
