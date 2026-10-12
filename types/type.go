@@ -17,16 +17,16 @@ type kind uint8
 
 const (
 	conKind    kind = iota // A primitive type, one of the fixed refs below.
-	varKind                // An unbound type variable. aux: its level.
+	varKind                // An unbound type variable. aux: its level. a: its lacks.
 	linkKind               // A bound type variable. a: what it is bound to.
-	genKind                // A generalized type variable of a type scheme.
+	genKind                // A generalized type variable of a type scheme. a: its lacks.
 	listKind               // a: the element type.
 	funcKind               // a: the argument type. b: the result type.
 	recordKind             // a: the row of fields.
 	enumKind               // a: the row of tags.
 	emptyKind              // The empty row, which closes a row.
 	extendKind             // aux: the label. a: its type. b: the rest of the row.
-	rigidKind              // A rigid type variable, equal only to itself. aux: its level. a: its name's label.
+	rigidKind              // A rigid type variable, equal only to itself. aux: its level. a: its name's label. b: its lacks.
 )
 
 // A node is a type in a Registry. Its kind says how it uses the other fields.
@@ -78,6 +78,12 @@ type Registry struct {
 	unifying bool
 	trail    []undo
 
+	// The sets of labels that row variables lack, which their nodes index,
+	// as spans of lackLabels. Index 0 is the empty set. Sets are never
+	// changed, only added.
+	lackSets   []span
+	lackLabels []uint32
+
 	// The names of recursive types, which print by name where they recur.
 	names map[TypeRef]typeName
 	// The enum nodes that a traversal is inside of. Every cycle of a
@@ -85,6 +91,8 @@ type Registry struct {
 	// it is already inside of has come full circle.
 	path []TypeRef
 }
+
+type span struct{ start, end uint32 }
 
 // A typeName is the alias that a recursive type was expanded from, and the
 // arguments it was applied to.
@@ -193,8 +201,93 @@ func (r *Registry) row(labels map[string]TypeRef, tail TypeRef) TypeRef {
 	return tail
 }
 
+// extend returns the row rest extended with label, which the variable that
+// ends rest then lacks: a row has each label at most once.
 func (r *Registry) extend(label uint32, typ, rest TypeRef) TypeRef {
+	r.lack(r.rowTail(rest), label)
 	return r.add(node{kind: extendKind, aux: label, a: typ, b: rest})
+}
+
+// lacks returns the labels that the row variable v lacks.
+func (r *Registry) lacks(v TypeRef) []uint32 {
+	n := r.at(v)
+	i := n.a
+	switch n.kind {
+	case varKind, genKind:
+	case rigidKind:
+		i = n.b
+	default:
+		return nil
+	}
+	if i == 0 {
+		return nil
+	}
+	sp := r.lackSets[i]
+	return r.lackLabels[sp.start:sp.end:sp.end]
+}
+
+// lack adds labels to those that the row variable v lacks. Other types are
+// left as they are.
+func (r *Registry) lack(v TypeRef, labels ...uint32) {
+	n := r.at(v)
+	if len(labels) == 0 || n.kind != varKind && n.kind != genKind && n.kind != rigidKind {
+		return
+	}
+	// The new set is what v lacks so far, and the labels it doesn't.
+	start := uint32(len(r.lackLabels))
+	r.lackLabels = append(r.lackLabels, r.lacks(v)...)
+	have := len(r.lackLabels)
+	for _, l := range labels {
+		if !slices.Contains(r.lackLabels[start:], l) {
+			r.lackLabels = append(r.lackLabels, l)
+		}
+	}
+	if len(r.lackLabels) == have {
+		r.lackLabels = r.lackLabels[:start]
+		return
+	}
+	if len(r.lackSets) == 0 {
+		r.lackSets = append(r.lackSets, span{})
+	}
+	i := TypeRef(len(r.lackSets))
+	r.lackSets = append(r.lackSets, span{start, uint32(len(r.lackLabels))})
+	if n.kind == rigidKind {
+		n.b = i
+	} else {
+		n.a = i
+	}
+	r.set(v, n)
+}
+
+// A duplicate is the error of a row that would have its label twice.
+type duplicate uint32
+
+func (duplicate) Error() string { return "duplicate label" }
+
+// inherit makes the row t lack labels, as the variable bound to it does.
+func (r *Registry) inherit(labels []uint32, t TypeRef) error {
+	for {
+		t = r.Resolve(t)
+		n := r.at(t)
+		switch n.kind {
+		case extendKind:
+			if slices.Contains(labels, n.aux) {
+				return duplicate(n.aux)
+			}
+			t = n.b
+			continue
+		case rigidKind:
+			// A rigid row may have any label that it doesn't lack.
+			for _, l := range labels {
+				if !slices.Contains(r.lacks(t), l) {
+					return duplicate(l)
+				}
+			}
+		case varKind, genKind:
+			r.lack(t, labels...)
+		}
+		return nil
+	}
 }
 
 // Var returns a new unbound type variable.
@@ -299,6 +392,7 @@ func (in *instantiator) copy(ref TypeRef) TypeRef {
 			v = r.Var()
 			in.fresh[ref] = v
 		}
+		r.lack(r.Resolve(v), r.lacks(ref)...)
 		return v
 	case enumKind:
 		if in.enums == nil {
@@ -348,6 +442,9 @@ func (in *instantiator) copy(ref TypeRef) TypeRef {
 		if a == n.a && b == n.b {
 			return ref
 		}
+		if n.kind == extendKind {
+			return r.extend(n.aux, a, b)
+		}
 		n.a, n.b = a, b
 		return r.add(n)
 	}
@@ -393,6 +490,13 @@ func (r *Registry) rowError(a, b TypeRef, err error) error {
 		return r.mismatch(a, b)
 	case errInfiniteRow:
 		return r.errorf("cannot construct infinite type '%s' = '%s'", a, b)
+	}
+	if d, ok := err.(duplicate); ok {
+		label := r.labels[d]
+		if r.at(r.Resolve(a)).kind == enumKind {
+			label = "#" + label
+		}
+		return r.errorf("cannot unify '%s' with '%s', which would have "+label+" twice", a, b)
 	}
 	return err
 }
@@ -453,6 +557,11 @@ func (r *Registry) bind(v, t TypeRef) error {
 		return r.errorf("cannot construct infinite type '%s' = '%s'", v, t)
 	default:
 		return err
+	}
+	if labels := r.lacks(v); labels != nil {
+		if err := r.inherit(labels, t); err != nil {
+			return err
+		}
 	}
 	r.link(v, t)
 	return nil
@@ -546,11 +655,17 @@ func (r *Registry) rewrite(row TypeRef, label uint32) (typ, rest TypeRef, err er
 		}
 		return typ, r.extend(n.aux, n.a, rest), nil
 	case varKind:
-		// The new variables live as long as the row's.
+		lacks := r.lacks(row)
+		if slices.Contains(lacks, label) {
+			return 0, 0, duplicate(label)
+		}
+		// The new variables live as long as the row's, and the rest lacks
+		// what it does.
 		level := r.level
 		r.level = n.aux
 		typ, rest = r.Var(), r.Var()
 		r.level = level
+		r.lack(rest, lacks...)
 		r.link(row, r.extend(label, typ, rest))
 		return typ, rest, nil
 	}

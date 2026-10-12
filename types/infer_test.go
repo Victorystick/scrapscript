@@ -164,6 +164,8 @@ func TestInfer(t *testing.T) {
 		{`{ a = 1, b = "" }.b`, `text`},
 		{`| { a = 1 } -> 1 | { a = n } -> n`, `{ a : int } -> int`},
 		{`| { ..r, a = n } -> r`, `{ a : a, ..b } -> { ..b }`},
+		{`(rest { a = 1, b = 2 }).b ; rest = | { ..r, a = y } -> r`, `int`},
+		{`f ; f : r => { a : int, ..r } -> { ..r } = | { ..rest, a = y } -> rest`, `{ a : int, ..a } -> { ..a }`},
 
 		// Composition
 		{`f >> g ; f = x -> x + 1 ; g = x -> [x]`, `int -> list int`},
@@ -251,6 +253,10 @@ func TestInferFailure(t *testing.T) {
 		{`| { a = 1 } -> 1 | { a = 1, b = 2 } -> 2`, `cannot unify '{ a : int }' with '{ a : a, b : b }'`},
 		{`{ a = 1 }.b`, `cannot unify '{ a : int }' with '{ b : a, ..b }'`},
 		{`(| #a -> 1 | #b -> 2) #c`, `cannot unify '[ #a, #b ]' with '[ #c, ..a ]'`},
+		// A row has each label at most once; the rest of a record lacks the
+		// fields taken from it, also when generalized.
+		{`x -> ((| { ..rest, a = y } -> rest) x).a`, `cannot unify '{ ..a }' with '{ a : b, ..c }', which would have a twice`},
+		{`r -> (rest r).a ; rest = | { ..r, a = y } -> r`, `which would have a twice`},
 		// Function arguments aren't generalized.
 		{`f -> ({ a = g 1, b = g "" } ; g = x -> f x)`, `cannot unify 'int' with 'text'`},
 		{`x -> z -> { a = [z, [x]], b = [x, [z]] }`, `cannot construct infinite type`},

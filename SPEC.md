@@ -366,6 +366,14 @@ tags in the other; the unifier is the same. Unifying two rows unifies the types
 of shared labels and pushes labels present on only one side into the other's
 tail (fresh row variable). Duplicate labels in a row are an error.
 
+Rows compare by label, not position: `[#a int, #b text]` and
+`[#b text, #a int]` are the same type. To keep each label unique, a row variable
+lacks the labels written before it: in `{ a : t, ..r }`, `r` can never be bound
+to a row with `a`. The checker reports where a duplicate would arise, as when
+reading `.a` from the rest of a record that a pattern took `a` from. Lacks
+constraints are internal; they have no syntax, since a variable's position
+gives them.
+
 - `r.a` requires `{ a : t, ..r' }`.
 - A match requires `[ #a T, …, ..r' ]` (open if it has a wildcard arm, closed
   otherwise).
@@ -374,7 +382,7 @@ tail (fresh row variable). Duplicate labels in a row are an error.
   has the type of `r`. It cannot add a field or change a field's type, so
   `r : { a : t, ..ρ }` and `v : t` give `{ a : t, ..ρ }`. A literal has at most
   one spread, and it comes first. Extending a record is not expressible yet and
-  needs a separate construct later (lacks constraints or scoped labels).
+  needs a separate construct later, which lacks constraints make possible.
 
 ### 7.4 Open
 
