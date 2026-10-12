@@ -152,10 +152,10 @@ func (m *matcher) match(x ast.Node, val Value) {
 		}
 		if op == token.APPEND {
 			if list, ok := val.(List); ok && len(list.elements) > 0 {
-				// Match head.
+				// Match the init.
 				m.match(left, List{list.elements[:len(list.elements)-1]})
-				// Match tail.
-				m.match(right, list.elements[0])
+				// Match the last element.
+				m.match(right, list.elements[len(list.elements)-1])
 				return
 			}
 		}

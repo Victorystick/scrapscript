@@ -31,7 +31,7 @@ EBNF: `{ x }` zero or more, `[ x ]` optional, `a | b` alternative,
 ### 2.1 Tokens
 
 ```
-INT      = digit { digit }                       # arbitrary precision
+INT      = digit { digit }                       # 64-bit for now, wrapping on overflow
 FLOAT    = digit { digit } "." digit { digit }   # digits on both sides
 TEXT     = '"' { char | escape } '"'             # escapes: \" \\ \n \t \u{HEX}
 BYTE     = "~" hex hex                           # one byte: ~FF
@@ -674,8 +674,8 @@ always gives the same hashes.
   - Printing, equality and the flat encoding map ids back to names through the
     table. Ids are per process and never part of a scrap's identity (section
     9).
-  - Uniform words need boxing for TEXT, BYTES, lists, closures and arbitrary
-    precision INT: tagged immediates and a custom heap, which suits a
+  - Uniform words need boxing for TEXT, BYTES, lists and closures: tagged
+    immediates and a custom heap, which suits a
     WebAssembly backend better than Go interfaces. So this is likely a
     separate backend over the core, after the tree-walker has slots.
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"strconv"
 
 	"github.com/Victorystick/scrapscript/ast"
@@ -169,6 +170,9 @@ func binop[T ~int | ~float64](t token.Token, a, b T) (T, error) {
 	return 0, fmt.Errorf("unhandled binop %s", t)
 }
 
+// binary evaluates a binary operator. Values are immutable, so appending
+// clips the left operand first: append must copy rather than write into
+// spare capacity that other values share.
 func (c *context) binary(x ast.Node) (Value, error) {
 	op, left, right := c.src.Binary(x)
 	switch op {
@@ -204,7 +208,7 @@ func (c *context) binary(x ast.Node) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			return append(bs, byte(r)), nil
+			return append(slices.Clip(bs), byte(r)), nil
 		}
 
 		if ls, ok := l.(List); ok {
@@ -212,7 +216,7 @@ func (c *context) binary(x ast.Node) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			return List{append(ls.elements, r)}, nil
+			return List{append(slices.Clip(ls.elements), r)}, nil
 		}
 
 		return nil, fmt.Errorf("cannot append to non-list %s", reflect.TypeOf(l))
@@ -252,7 +256,7 @@ func (c *context) binary(x ast.Node) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			return append(bs, r...), nil
+			return append(slices.Clip(bs), r...), nil
 		}
 
 		if ls, ok := l.(List); ok {
@@ -261,7 +265,7 @@ func (c *context) binary(x ast.Node) (Value, error) {
 				return nil, err
 			}
 
-			return List{append(ls.elements, r.elements...)}, nil
+			return List{append(slices.Clip(ls.elements), r.elements...)}, nil
 		}
 
 		if tx, ok := l.(Text); ok {

@@ -94,6 +94,11 @@ var expressions = []struct {
 
 	{`| n >+ ns -> ns <| [1, 2, 3]`, `[ 2, 3 ]`},
 	{`| ns +< n -> ns <| [1, 2, 3]`, `[ 1, 2 ]`},
+	{`| ns +< n -> n <| [1, 2, 3]`, `3`},
+	// Values are immutable: appending to one list twice gives two lists.
+	{`{ a = xs +< 1, b = xs +< 2 } ; xs = [0, 0, 0] +< 9`, `{ a = [ 0, 0, 0, 9, 1 ], b = [ 0, 0, 0, 9, 2 ] }`},
+	{`{ a = xs ++ [1], b = xs ++ [2] } ; xs = [0, 0, 0] +< 9`, `{ a = [ 0, 0, 0, 9, 1 ], b = [ 0, 0, 0, 9, 2 ] }`},
+	{`{ a = bs +< ~01, b = bs +< ~02 } ; bs = ~~AAAA +< ~09`, `{ a = ~~AAAACQE=, b = ~~AAAACQI= }`},
 	{`| ns ++ [2, 3] -> ns <| [1, 2, 3]`, `[ 1 ]`},
 	{`| [1, 2] ++ ns -> ns <| [1, 2, 3]`, `[ 3 ]`},
 	{`| ns ++ [2, last] -> ns +< last <| [1, 2, 3]`, `[ 1, 3 ]`},
