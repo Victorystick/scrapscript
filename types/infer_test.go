@@ -186,27 +186,36 @@ func TestInfer(t *testing.T) {
 ; odd = | 0 -> #false | n -> even (n - 1)`, `int -> [ #false, #true, ..a ]`},
 
 		// Recursive types are cycles, which print by name where they recur.
-		{`t ; t : type = [#a t]`, `type = [ #a t ]`},
+		{`t ; t : type = [#a t]`, "type = t\n; t : type = [ #a t ]"},
 		{`tree ; tree = a => [#leaf, #node { value : a, left : tree a, right : tree a }]`,
-			`type -> type = a => [ #leaf, #node { left : tree a, right : tree a, value : a } ]`},
+			"type -> type = a => tree a\n; tree = a => [ #leaf, #node { left : tree a, right : tree a, value : a } ]"},
 		{`size ; size : tree -> int = | #leaf -> 0 | #node n -> 1 + size n.left + size n.right
 ; tree : type = [#leaf, #node { left : tree, right : tree }]`,
-			`[ #leaf, #node { left : tree, right : tree } ] -> int`},
+			"tree -> int\n; tree : type = [ #leaf, #node { left : tree, right : tree } ]"},
 		{`size (#node { left = #leaf, right = #node { left = #leaf, right = #leaf } })
 ; size : tree -> int = | #leaf -> 0 | #node n -> 1 + size n.left + size n.right
 ; tree : type = [#leaf, #node { left : tree, right : tree }]`, `int`},
 		{`sum ; sum : a => (a -> int) -> tree a -> int = f -> | #leaf -> 0 | #node n -> f n.value + sum f n.left + sum f n.right
 ; tree = a => [#leaf, #node { value : a, left : tree a, right : tree a }]`,
-			`(a -> int) -> [ #leaf, #node { left : tree a, right : tree a, value : a } ] -> int`},
+			"(a -> int) -> tree a -> int\n; tree = a => [ #leaf, #node { left : tree a, right : tree a, value : a } ]"},
 		{`xs ; xs : ints = #cons { head = 1, tail = #cons { head = 2, tail = #nil } }
-; ints : type = [#nil, #cons { head : int, tail : ints }]`, `[ #cons { head : int, tail : ints }, #nil ]`},
+; ints : type = [#nil, #cons { head : int, tail : ints }]`, "ints\n; ints : type = [ #cons { head : int, tail : ints }, #nil ]"},
 		// A recursive function may be under a where-clause.
 		{`f ; f = (n -> f (n - k) ; k = 1)`, `int -> a`},
+		// Mutually recursive types each get a binding.
+		{`count ; count : tree -> int = _ -> 0
+; tree : type = [#node { label : text, children : forest }]
+; forest : type = [#nil, #cons { head : tree, tail : forest }]`, `tree -> int
+; tree : type = [ #node { children : forest, label : text } ]
+; forest : type = [ #cons { head : tree, tail : forest }, #nil ]`},
+		// Different recursive types with one name get primes.
+		{`{ a = x, b = (y ; y : t = #end ; t : type = [#b t, #end]) } ; x : t = #end ; t : type = [#a t, #end]`,
+			"{ a : t, b : t' }\n; t : type = [ #a t, #end ]\n; t' : type = [ #b t', #end ]"},
 		// Mutually recursive types.
-		{`a ; a : type = [#a b, #end] ; b : type = [#b a]`, `type = [ #a [ #b a ], #end ]`},
+		{`a ; a : type = [#a b, #end] ; b : type = [#b a]`, "type = a\n; a : type = [ #a [ #b a ], #end ]"},
 		// Different unrollings of one type are the same type, and unify.
 		{`same ; same : t -> u = x -> x ; t : type = [#a t, #z] ; u : type = [#a [#a u, #z], #z]`,
-			`[ #a t, #z ] -> [ #a t, #z ]`},
+			"t -> t\n; t : type = [ #a t, #z ]"},
 	}
 
 	for _, ex := range examples {
@@ -269,7 +278,7 @@ func TestInferFailure(t *testing.T) {
 		{`1 ; t : type = { a : t }`, `recursive type t must recur within a tag's payload`},
 		{`1 ; t : type = u ; u : type = list t`, `recursive type t must recur within a tag's payload`},
 		{`1 ; t = a => [#a (t (list a))]`, `recursive type t must recur with the same type arguments`},
-		{`f #b ; f : t -> int = _ -> 1 ; t : type = [#a t]`, `cannot unify '[ #a t ]' with '[ #b, ..a ]'`},
+		{`f #b ; f : t -> int = _ -> 1 ; t : type = [#a t]`, "cannot unify 't' with '[ #b, ..a ]'\n; t : type = [ #a t ]"},
 		// Only functions may be recursive.
 		{`x ; x : t = #next x ; t : type = [#next t]`, `x is recursive, so it must be a function`},
 		{`x ; x = y ; y = f 1 ; f = _ -> x`, `x is recursive, so it must be a function`},

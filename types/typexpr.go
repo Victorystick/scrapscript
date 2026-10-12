@@ -33,6 +33,9 @@ type alias struct {
 	args    []TypeRef
 	depth   int
 	back    TypeRef
+
+	// If it is recursive, its definition, which its types print by.
+	def *typeDef
 }
 
 // A param is a type constructor's parameter. Its kind is row if it is used
@@ -474,12 +477,31 @@ func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 	}
 	ref := c.typ(a.body)
 	c.aliases, c.tvars = aliases, tvars
-	if a.back != NoType {
-		c.reg.link(a.back, ref)
-		c.reg.name(ref, typeName{a.name, refs})
-	}
+	back := a.back
 	a.pending, a.args = false, nil
+	if back != NoType {
+		c.reg.link(back, ref)
+		c.reg.name(ref, typeName{c.define(x, a, ref), refs})
+	}
 	return ref
+}
+
+// define returns the definition of the recursive alias a, whose type for
+// refs is ref.
+func (c *context) define(x ast.Node, a *alias, ref TypeRef) *typeDef {
+	if a.def != nil {
+		return a.def
+	}
+	a.def = &typeDef{name: a.name, body: ref}
+	if len(a.params) > 0 {
+		// The definition has generalized variables for its parameters.
+		a.def.params = make([]TypeRef, len(a.params))
+		for i := range a.params {
+			a.def.params[i] = c.reg.Gen()
+		}
+		a.def.body = c.expand(x, a, a.def.params)
+	}
+	return a.def
 }
 
 // recur returns the type that a recursive use x of the alias a, applied to

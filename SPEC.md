@@ -279,9 +279,12 @@ Desugaring:
   [ #first io, #second io ] -> io
   ; io = [ #err text, #ok ]
   ```
-  This is display only: aliases never affect unification. Open: which name to
-  print when types written with different aliases unify, and whether the
-  where-clause should read back as a type scrap (section 10, rule 6).
+  This is display only: aliases never affect unification. Recursive types
+  (7.5) print this way, each binding written as a sort binding,
+  `; io : type = …` or `; tree = a => …`, with primes for clashing names. Open:
+  printing non-recursive aliases this way too, which name to print when types
+  written with different aliases unify, and whether the where-clause should read
+  back as a type scrap (section 10, rule 6).
 - Tag payload arity is positional (section 3, "Tag payloads").
 - Recursive aliases are allowed when every cycle passes through a tag payload,
   and are equi-recursive (7.5).
@@ -418,9 +421,15 @@ refinement).
 
 The checker ties the knot instead: `mu . T` is a cycle in its type graph. Every
 cycle passes through an enum, so the unifier merges two enums before unifying
-their tags, and comes back to them merged, which is what terminates it. Where
-a recursive type recurs, tooling prints the alias it came from:
-`[ #leaf, #node { left : tree, right : tree } ]`.
+their tags, and comes back to them merged, which is what terminates it.
+
+A recursive type prints as the name of the alias it came from, which a
+trailing where-clause defines (7.1):
+
+```scrap
+tree -> int
+; tree : type = [ #leaf, #node { left : tree, right : tree } ]
+```
 
 Recursion is not inferred: an unannotated function that recurses on a
 recursive value still fails the occurs check. Annotate it with the alias.

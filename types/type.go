@@ -97,8 +97,16 @@ type span struct{ start, end uint32 }
 // A typeName is the alias that a recursive type was expanded from, and the
 // arguments it was applied to.
 type typeName struct {
-	name string
+	def  *typeDef
 	args []TypeRef
+}
+
+// A typeDef is a recursive alias, as types print it: its name, the
+// generalized variables of its parameters, and its type for them.
+type typeDef struct {
+	name   string
+	params []TypeRef
+	body   TypeRef
 }
 
 // name names the recursive type ref.
@@ -426,7 +434,7 @@ func (in *instantiator) copy(ref TypeRef) TypeRef {
 			for i, arg := range name.args {
 				args[i] = in.copy(arg)
 			}
-			r.name(c, typeName{name.name, args})
+			r.name(c, typeName{name.def, args})
 		}
 		in.enums[ref] = c
 		return c
@@ -720,7 +728,7 @@ func (e *typeError) format(r *Registry) error {
 	s.reserve(e.b)
 	msg := strings.Replace(e.msg, "%s", s.string(e.a), 1)
 	msg = strings.Replace(msg, "%s", s.string(e.b), 1)
-	return errors.New(msg)
+	return errors.New(msg + s.where())
 }
 
 // Describe returns a string representation of a scrap's result: its type,
@@ -746,6 +754,7 @@ func (r *Registry) Describe(res Result) string {
 		b.WriteString(" => ")
 	}
 	b.WriteString(s.string(res.Type))
+	b.WriteString(s.where())
 	return b.String()
 }
 
@@ -758,11 +767,12 @@ func (r *Registry) apply(vars []TypeRef, body TypeRef, args []TypeRef) TypeRef {
 	return r.instantiate(body, fresh)
 }
 
-// String returns a string representation of a type.
+// String returns a string representation of a type. Recursive types print
+// by name, and their definitions follow in a where-clause.
 func (r *Registry) String(ref TypeRef) string {
 	s := stringer{reg: r}
 	s.reserve(ref)
-	return s.string(ref)
+	return s.string(ref) + s.where()
 }
 
 const varNames = "abcdefghijklmnopqrstuvwxyz"
@@ -778,6 +788,55 @@ type stringer struct {
 	taken map[string]bool
 	// The enums being written, which recursive types refer back to.
 	path []TypeRef
+	// The printed names of the recursive types met, in the order met.
+	defs  map[*typeDef]string
+	order []*typeDef
+}
+
+// where returns the where-clause that defines the recursive types written.
+func (s *stringer) where() string {
+	s.Reset()
+	for _, d := range s.order {
+		s.WriteString("\n; ")
+		s.WriteString(s.defs[d])
+		// As a sort binding: one without parameters needs its kind.
+		if len(d.params) == 0 {
+			s.WriteString(" : type")
+		}
+		s.WriteString(" = ")
+		// The parameters are local to the binding.
+		names, next := s.names, s.next
+		s.names, s.next = nil, 0
+		for _, p := range d.params {
+			s.variable(s.reg.Resolve(p))
+			s.WriteString(" => ")
+		}
+		s.enum(s.reg.at(s.reg.Resolve(d.body)))
+		s.names, s.next = names, next
+	}
+	return s.String()
+}
+
+// define gives the recursive type d a name, unless it has one, and reserves
+// the names in its definition.
+func (s *stringer) define(d *typeDef) {
+	if _, ok := s.defs[d]; ok {
+		return
+	}
+	if s.defs == nil {
+		s.defs = make(map[*typeDef]string)
+		if s.taken == nil {
+			s.taken = make(map[string]bool)
+		}
+	}
+	name := d.name
+	for s.taken[name] {
+		name += "'"
+	}
+	s.taken[name] = true
+	s.defs[d] = name
+	s.order = append(s.order, d)
+	s.reserve(s.reg.at(s.reg.Resolve(d.body)).a)
 }
 
 func (s *stringer) string(ref TypeRef) string {
@@ -797,6 +856,13 @@ func (s *stringer) reserve(ref TypeRef) {
 		}
 		s.taken[s.reg.labels[n.a]] = true
 	case enumKind:
+		if name, ok := s.reg.names[ref]; ok {
+			s.define(name.def)
+			for _, arg := range name.args {
+				s.reserve(arg)
+			}
+			return
+		}
 		if slices.Contains(s.path, ref) {
 			return
 		}
@@ -805,9 +871,17 @@ func (s *stringer) reserve(ref TypeRef) {
 		s.path = s.path[:len(s.path)-1]
 	case listKind, recordKind:
 		s.reserve(n.a)
-	case funcKind, extendKind:
+	case funcKind:
 		s.reserve(n.a)
 		s.reserve(n.b)
+	case extendKind:
+		// In the order that they are written, which recursive types are
+		// named in.
+		entries, tail := s.entries(ref)
+		for _, e := range entries {
+			s.reserve(e.typ)
+		}
+		s.reserve(tail)
 	}
 }
 
@@ -872,40 +946,45 @@ func (s *stringer) write(ref TypeRef, nesting int) {
 			s.write(typ, topLevel)
 		})
 	case enumKind:
+		if name, ok := s.reg.names[ref]; ok {
+			s.named(name, nesting)
+			return
+		}
 		if slices.Contains(s.path, ref) {
-			s.backReference(ref, nesting)
+			// Unification merges recursive types into named ones, so
+			// this shouldn't happen.
+			s.WriteString("...")
 			return
 		}
 		s.path = append(s.path, ref)
-		defer func() { s.path = s.path[:len(s.path)-1] }()
-		s.row(n.a, '[', ']', func(label string, typ TypeRef) {
-			s.WriteByte('#')
-			s.WriteString(label)
-			if s.reg.Resolve(typ) != HoleRef {
-				s.WriteByte(' ')
-				s.write(typ, atomLevel)
-			}
-		})
+		s.enum(n)
+		s.path = s.path[:len(s.path)-1]
 	default:
 		panic("bad type-ref")
 	}
 }
 
-// backReference writes a recursive type where it recurs: as the name of the
-// alias it was expanded from, applied to its arguments.
-func (s *stringer) backReference(ref TypeRef, nesting int) {
-	name, ok := s.reg.names[ref]
-	if !ok {
-		// Unification merges recursive types into named ones, so this
-		// shouldn't happen.
-		s.WriteString("...")
-		return
-	}
+// enum writes the tags of an enum.
+func (s *stringer) enum(n node) {
+	s.row(n.a, '[', ']', func(label string, typ TypeRef) {
+		s.WriteByte('#')
+		s.WriteString(label)
+		if s.reg.Resolve(typ) != HoleRef {
+			s.WriteByte(' ')
+			s.write(typ, atomLevel)
+		}
+	})
+}
+
+// named writes a recursive type as its alias's name, applied to its
+// arguments.
+func (s *stringer) named(name typeName, nesting int) {
+	s.define(name.def)
 	paren := len(name.args) > 0 && nesting >= atomLevel
 	if paren {
 		s.WriteByte('(')
 	}
-	s.WriteString(name.name)
+	s.WriteString(s.defs[name.def])
 	for _, arg := range name.args {
 		s.WriteByte(' ')
 		s.write(arg, atomLevel)
@@ -915,24 +994,31 @@ func (s *stringer) backReference(ref TypeRef, nesting int) {
 	}
 }
 
-// row writes a row's labels in order, followed by its tail if it is open.
-func (s *stringer) row(row TypeRef, open, close byte, label func(string, TypeRef)) {
-	type entry struct {
-		label string
-		typ   TypeRef
-	}
-	var entries []entry
+// A rowEntry is a label of a row, and its type.
+type rowEntry struct {
+	label string
+	typ   TypeRef
+}
+
+// entries returns a row's labels in order, and its tail.
+func (s *stringer) entries(row TypeRef) ([]rowEntry, TypeRef) {
+	var entries []rowEntry
 	for {
 		row = s.reg.Resolve(row)
 		n := s.reg.at(row)
 		if n.kind != extendKind {
 			break
 		}
-		entries = append(entries, entry{s.reg.labels[n.aux], n.a})
+		entries = append(entries, rowEntry{s.reg.labels[n.aux], n.a})
 		row = n.b
 	}
-	slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.label, b.label) })
+	slices.SortFunc(entries, func(a, b rowEntry) int { return strings.Compare(a.label, b.label) })
+	return entries, row
+}
 
+// row writes a row's labels in order, followed by its tail if it is open.
+func (s *stringer) row(row TypeRef, open, close byte, label func(string, TypeRef)) {
+	entries, row := s.entries(row)
 	s.WriteByte(open)
 	for i, e := range entries {
 		if i > 0 {
