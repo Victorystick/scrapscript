@@ -152,8 +152,8 @@ atom     = INT | FLOAT | TEXT | BYTE | BYTES | HASH | PATH
          | TAG                                   # nullary tag (argument position, list items)
          | "(" [ expr ] ")"                      # "()" is the hole
          | "[" [ expr { "," expr } ] "]"
-         | "{" [ field { "," field } ] "}"
-field    = NAME [ "=" expr ] | ".." atom         # `{ x }` is `{ x = x }`; at most one spread, first; the other keys update it
+         | "{" [ [ ".." atom "," ] field { "," field } ] "}"   # the fields update the spread record
+field    = NAME [ "=" expr ]                     # `{ x }` is `{ x = x }`
 ```
 
 Notes:
@@ -208,7 +208,7 @@ pat-atom = INT | TEXT | BYTE | BYTES             # no FLOAT patterns
          | TAG [ pat-atom ]                      # #true   #some x   #pair (a)
          | "(" [ pattern ] ")"                   # "()" matches the hole
          | "[" [ pattern { "," pattern } [ "," ".." [ NAME ] ] ] "]"
-         | "{" [ prest | [ prest "," ] pfield { "," pfield } ] "}"
+         | "{" [ [ prest "," ] pfield { "," pfield } ] "}"
 prest    = ".." [ NAME ]                         # the other fields; first, as in a record literal
 pfield   = NAME [ "=" pattern ]                  # `{ x }` is `{ x = x }`, binding x
 ```

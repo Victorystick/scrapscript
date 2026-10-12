@@ -88,7 +88,6 @@ func TestParseExpr(t *testing.T) {
 func TestParseRecord(t *testing.T) {
 	valid := []string{
 		`{}`,
-		`{ ..other }`,
 		`{ a = 1, b = "x"}`,
 		`{ ..other, a = 1, b = "x"}`,
 		`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`,
@@ -228,6 +227,7 @@ func TestParseError(t *testing.T) {
 		{`[ 1, ]`, `A list cannot end in a trailing comma.`},
 		{`{ a = 1, }`, `A record cannot end in a trailing comma.`},
 		{`{ ..r, }`, `A record cannot end in a trailing comma.`},
+		{`{ ..r }`, `A spread must be followed by fields.`},
 		{`a < b < c`, `Comparisons cannot be chained.`},
 		{`f x -> x`, `function parameter must be an identifier`},
 		{`#a 1 2`, `Expected EOF got INT`},

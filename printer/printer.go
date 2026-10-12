@@ -279,9 +279,7 @@ func (p *Printer) expr(x ast.Node, ctx Context) {
 		if rest != ast.None {
 			p.WriteString("..")
 			p.Expr(rest, Expr)
-			if fields.Len() > 0 {
-				p.WriteString(", ")
-			}
+			p.WriteString(", ")
 		}
 		for i := range fields.Len() {
 			if i > 0 {

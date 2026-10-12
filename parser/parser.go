@@ -499,10 +499,13 @@ func (p *parser) parseRecord() ast.Node {
 	if p.tok == token.SPREAD {
 		p.next()
 		rest = p.parseExpr()
-		if p.tok == token.COMMA {
-			p.next()
-			p.noTrailingComma(token.RBRACE, "record")
+		// A spread alone would be the spread record itself.
+		if p.tok == token.RBRACE {
+			p.bail("A spread must be followed by fields.")
 		}
+		p.expect(token.COMMA)
+		p.next()
+		p.noTrailingComma(token.RBRACE, "record")
 	}
 
 	// Fields are collected as key token, value node pairs.
