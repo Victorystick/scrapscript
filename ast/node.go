@@ -195,10 +195,10 @@ func (se *SourceExpr) Hash(n Node) (scheme, digest string) {
 // Path returns the path of an Import node that refers to a file, $"path",
 // and whether it does.
 func (se *SourceExpr) Path(n Node) (string, bool) {
-	if se.Tokens.Kinds[se.Mains[n]] != token.IMPORT {
+	if se.Tokens.Kinds[se.Mains[n]] != token.PATH {
 		return "", false
 	}
-	return scanner.Unquote(se.TokenText(se.Mains[n] + 1)), true
+	return scanner.Unquote(se.TokenText(se.Mains[n])[1:]), true
 }
 
 // Imports returns the Import nodes of the tree.
@@ -248,10 +248,6 @@ func (se *SourceExpr) Last(n Node) Tok {
 	case Where:
 		_, _, _, val := se.Where(n)
 		return se.Last(val)
-	case Import:
-		if _, ok := se.Path(n); ok {
-			return se.Mains[n] + 1
-		}
 	}
 	return se.Mains[n]
 }

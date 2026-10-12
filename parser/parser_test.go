@@ -133,6 +133,7 @@ func TestParseTypes(t *testing.T) {
 		{`empty ; empty : [#a, #b int, #c (list int), ..r] -> { a : int, ..r } = _ -> {}`, false},
 		{`id ; id : a => a -> a = x -> x`, false},
 		{`ignore ; ignore : $source:0 -> int = _ -> 1`, false},
+		{`t ; t : type = [#a $source:0, #b $"./b.scrap"]`, true},
 		{`t ; t : type = int`, true},
 		{`t ; t : type = [#a { b : text }, #c]`, true},
 		{`t ; t : type = {}`, true},

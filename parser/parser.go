@@ -272,7 +272,7 @@ func startsAtom(tok token.Token) bool {
 	switch tok {
 	case token.IDENT,
 		token.INT, token.FLOAT, token.HOLE,
-		token.TEXT, token.BYTE, token.BYTES, token.IMPORT, token.HASH,
+		token.TEXT, token.BYTE, token.BYTES, token.HASH, token.PATH,
 		token.LBRACE, token.LBRACK, token.LPAREN,
 		token.OPTION:
 		return true
@@ -302,7 +302,7 @@ func (p *parser) parseAtom() ast.Node {
 	case token.LPAREN:
 		return p.parseParenExpr()
 
-	case token.IMPORT, token.HASH:
+	case token.HASH, token.PATH:
 		return p.parseImport()
 	}
 
@@ -406,7 +406,7 @@ func (p *parser) parseTypeApp() ast.Node {
 // Returns true if tok is the start of a type atom.
 func startsTypeAtom(tok token.Token) bool {
 	switch tok {
-	case token.IDENT, token.HOLE, token.LPAREN, token.LBRACE, token.LBRACK, token.IMPORT:
+	case token.IDENT, token.HOLE, token.LPAREN, token.LBRACE, token.LBRACK, token.HASH, token.PATH:
 		return true
 	}
 	return false
@@ -448,7 +448,7 @@ func (p *parser) parseTypeAtom() ast.Node {
 			p.scratch = append(p.scratch, p.add(ast.Variant, tag, uint32(payload), 0))
 		})
 		return p.add(ast.Enum, start, uint32(tail), info)
-	case token.IMPORT, token.HASH:
+	case token.HASH, token.PATH:
 		return p.parseImport()
 	}
 
@@ -647,15 +647,7 @@ func (p *parser) parseVariantExpr() ast.Node {
 
 // parseImport parses a hash, $scheme:hex, or a path, $"path".
 func (p *parser) parseImport() ast.Node {
-	start := p.at()
-	if p.tok == token.HASH {
-		p.next()
-		return p.add(ast.Import, start, 0, 0)
-	}
-
-	// Eat $.
+	imp := p.add(ast.Import, p.at(), 0, 0)
 	p.next()
-	p.expect(token.TEXT)
-	p.next()
-	return p.add(ast.Import, start, 0, 0)
+	return imp
 }

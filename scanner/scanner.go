@@ -130,10 +130,15 @@ func (s *scanner) token() token.Token {
 	s.pos = start + 1
 	switch c {
 	case '$':
-		if class[s.at(start+1)]&cLetter != 0 {
+		switch {
+		case class[s.at(start+1)]&cLetter != 0:
 			return s.hash(start)
+		case s.at(start+1) == '"':
+			s.text(start + 1)
+			return token.PATH
 		}
-		return token.IMPORT
+		s.fail(ErrBadReference, start, start+1)
+		return token.BAD
 	case '(':
 		return s.switch2(token.LPAREN, ')', token.HOLE)
 	case ')':

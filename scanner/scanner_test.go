@@ -34,7 +34,7 @@ var elements = []elt{
 	// Special tokens
 	{token.IDENT, "hello", literal},
 	{token.IDENT, "f", literal},
-	{token.IMPORT, "$", operator}, // Path
+	{token.PATH, `$"./a.scrap"`, literal},
 	{token.HASH, "$source:5c43f1b7", literal},
 	{token.IDENT, "bytes/to-utf8-text", literal},
 	{token.INT, "13", literal},
@@ -201,7 +201,9 @@ func TestScanErrors(t *testing.T) {
 		{`~zz`, []token.Token{token.BAD, token.IDENT}, []ErrCode{ErrExpectedHex}},
 		{`~~abc`, []token.Token{token.BAD}, []ErrCode{ErrBase64Padding}},
 		// A hash is one token, $scheme:hex, and a path is $ and a text.
-		{`$source:0a9f $"./a.scrap"`, []token.Token{token.HASH, token.IMPORT, token.TEXT}, nil},
+		{`$source:0a9f $"./a.scrap"`, []token.Token{token.HASH, token.PATH}, nil},
+		{`$ "./a.scrap"`, []token.Token{token.BAD, token.TEXT}, []ErrCode{ErrBadReference}},
+		{`$`, []token.Token{token.BAD}, []ErrCode{ErrBadReference}},
 		{`$source`, []token.Token{token.BAD}, []ErrCode{ErrBadHash}},
 		{`$source:`, []token.Token{token.BAD}, []ErrCode{ErrBadHash}},
 		{`$source:0A`, []token.Token{token.BAD}, []ErrCode{ErrBadHash}},

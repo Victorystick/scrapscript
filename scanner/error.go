@@ -21,6 +21,7 @@ const (
 	ErrBadComment
 	ErrBadEscape
 	ErrBadHash
+	ErrBadReference
 )
 
 var errMessages = [...]string{
@@ -34,6 +35,7 @@ var errMessages = [...]string{
 	ErrBadComment:       "-- must be followed by a space to start a comment",
 	ErrBadEscape:        `invalid escape: use \", \\, \n, \t or \u{HEX}`,
 	ErrBadHash:          `expected a hash, $scheme:hex, with lowercase hex digits`,
+	ErrBadReference:     `expected a path, $"path", or a hash, $scheme:hex`,
 }
 
 func (c ErrCode) String() string {

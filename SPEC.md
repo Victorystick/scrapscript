@@ -65,7 +65,8 @@ Comments:
   sequence of them: `bytes +< ~21` and `~00 >+ bytes` append and prepend one.
 - `~~` always means base64 bytes follow. A HASH is one token, with no
   whitespace inside: `$`, a scheme NAME, `:` and lowercase hex digits, whose
-  number the scheme fixes. Digests are hex because that is how `sha256sum`, git
+  number the scheme fixes. A PATH is one token too: `$` directly followed by a
+  TEXT. A `$` followed by anything else is a lexical error. Digests are hex because that is how `sha256sum`, git
   and most tools print them, so a hash literal can be compared with their output
   directly.
 - **Identifiers are ASCII.** `letter` is `A-Z` or `a-z` and `digit` is `0-9`.

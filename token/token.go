@@ -18,13 +18,11 @@ const (
 	BYTE
 	BYTES
 	HASH // $scheme:hex, a published scrap's hash
+	PATH // $"path", a draft's file
 	end_literals
 
 	begin_operators
 	HOLE // ()
-
-	// Import
-	IMPORT
 
 	// Where clauses.
 
@@ -92,12 +90,11 @@ var tokens = [...]string{
 	BYTE:  "BYTE",
 	BYTES: "BYTES",
 	HASH:  "HASH",
+	PATH:  "PATH",
 
 	ASSIGN: "ASSIGN",
 	WHERE:  "WHERE",
 	COMMA:  "COMMA",
-
-	IMPORT: "IMPORT",
 
 	DEFINE: "DEFINE",
 	OPTION: "OPTION",
@@ -138,8 +135,6 @@ var operators = [...]string{
 	ASSIGN: "=",
 	WHERE:  ";",
 	COMMA:  ",",
-
-	IMPORT: "$",
 
 	DEFINE: ":",
 	OPTION: "#",
