@@ -58,6 +58,6 @@ So far it supports
 
 ## Differences from https://scrapscript.org
 
-* Defines a `$sha256` function to import scraps instead of `$sha1` as the latter is cryptographically weak.
+* Refers to scraps as `$source:<hex>`, the sha256 of their source, instead of `$sha1~~…`, as SHA-1 is cryptographically weak and `~~` otherwise means base64. During development, `$"./path"` refers to a draft file.
 
 * No attempt to implement Scrap Maps, Scrap passes or Scrapbooks.

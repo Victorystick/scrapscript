@@ -1,6 +1,8 @@
 package ast
 
 import (
+	"strings"
+
 	"github.com/Victorystick/scrapscript/scanner"
 	"github.com/Victorystick/scrapscript/token"
 )
@@ -183,19 +185,20 @@ func (se *SourceExpr) Sort(n Node) bool {
 	return se.Extra[se.Data[n].Rhs+2] != 0
 }
 
-// Import returns a hash Import node's algorithm and hash tokens.
-func (se *SourceExpr) Import(n Node) (algo, hash Tok) {
-	return se.Mains[n] + 1, se.Mains[n] + 2
+// Hash returns the scheme and hex digest of an Import node that refers to a
+// published scrap by hash, $scheme:hex.
+func (se *SourceExpr) Hash(n Node) (scheme, digest string) {
+	scheme, digest, _ = strings.Cut(se.TokenText(se.Mains[n])[1:], ":")
+	return scheme, digest
 }
 
-// Path returns the path of an Import node that refers to a file, and whether
-// it does.
+// Path returns the path of an Import node that refers to a file, $"path",
+// and whether it does.
 func (se *SourceExpr) Path(n Node) (string, bool) {
-	t := se.Mains[n] + 1
-	if se.Tokens.Kinds[t] != token.TEXT {
+	if se.Tokens.Kinds[se.Mains[n]] != token.IMPORT {
 		return "", false
 	}
-	return scanner.Unquote(se.TokenText(t)), true
+	return scanner.Unquote(se.TokenText(se.Mains[n] + 1)), true
 }
 
 // Imports returns the Import nodes of the tree.
@@ -249,8 +252,6 @@ func (se *SourceExpr) Last(n Node) Tok {
 		if _, ok := se.Path(n); ok {
 			return se.Mains[n] + 1
 		}
-		_, hash := se.Import(n)
-		return hash
 	}
 	return se.Mains[n]
 }

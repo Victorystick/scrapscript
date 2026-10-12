@@ -17,6 +17,7 @@ const (
 	TEXT
 	BYTE
 	BYTES
+	HASH // $scheme:hex, a published scrap's hash
 	end_literals
 
 	begin_operators
@@ -90,6 +91,7 @@ var tokens = [...]string{
 	TEXT:  "TEXT",
 	BYTE:  "BYTE",
 	BYTES: "BYTES",
+	HASH:  "HASH",
 
 	ASSIGN: "ASSIGN",
 	WHERE:  "WHERE",

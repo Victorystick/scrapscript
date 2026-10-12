@@ -258,11 +258,11 @@ func evalFailure(t *testing.T, source string, expected string) {
 func TestEvalImport(t *testing.T) {
 	env := NewEnvironment()
 	env.UseFetcher(MapFetcher{
-		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447": `3 + $sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445`,
+		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447": `3 + $source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445`,
 		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445": `2`,
 	})
 
-	val, err := eval(env, `$sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447 - 1`)
+	val, err := eval(env, `$source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447 - 1`)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -278,7 +278,7 @@ func TestImportType(t *testing.T) {
 		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445": `t ; t : type = [#a int, #b]`,
 	})
 
-	scrap, err := env.Read([]byte(`or-zero (#a 1) ; or-zero : $sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445 -> int = | #a n -> n | #b -> 0`))
+	scrap, err := env.Read([]byte(`or-zero (#a 1) ; or-zero : $source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445 -> int = | #a n -> n | #b -> 0`))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -115,7 +115,7 @@ func roundTrip(source string) (first, second string, err error) {
 }
 
 func TestPrintedImports(t *testing.T) {
-	const add = "$sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445"
+	const add = "$source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445"
 	examples := []struct{ source, result string }{
 		// A published function prints as the reference to it.
 		{`{ f = ` + add + ` }`, `{ f = ` + add + ` }`},
@@ -126,7 +126,7 @@ func TestPrintedImports(t *testing.T) {
 	}
 	for _, ex := range examples {
 		env := NewEnvironment()
-		env.UseFetcher(MapFetcher{add[9:]: `a -> b -> a + b`})
+		env.UseFetcher(MapFetcher{add[len("$source:"):]: `a -> b -> a + b`})
 		val, err := eval(env, ex.source)
 		if err != nil {
 			t.Errorf("%s: %v", ex.source, err)

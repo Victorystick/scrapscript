@@ -258,7 +258,7 @@ func TestInferFailure(t *testing.T) {
 		// Math
 		{`1 + 1.0`, `cannot unify 'int' with 'float'`},
 		// No imports.
-		{`$sha256~~`, `<internal error> $sha256~~ was not loaded`},
+		{`$source:0`, `<internal error> $source:0 was not loaded`},
 		// Different return types.
 		{`| [] -> #box 1 | _ -> #box "a"`, `cannot unify 'int' with 'text'`},
 		// Different input types.
@@ -410,37 +410,37 @@ func TestInferImport(t *testing.T) {
 		result string  // The stringified result type, or
 		err    string  // an error.
 	}{
-		// Imports aren't loaded here, so '$sha256~~' is sufficient to encode one.
-		{in: `$sha256~~`, imp: IntRef, result: `int`},
-		{in: `$sha256~~`, imp: FloatRef, result: `float`},
-		{in: `1 + $sha256~~`, imp: FloatRef, err: `cannot unify 'int' with 'float'`},
-		{in: `$sha256~~`, imp: a, result: `a`},
-		{in: `a ; a = $sha256~~`, imp: a, result: `a`},
-		{in: `$sha256~~ [ 1, 2 ]`, imp: reg.Func(a, a), result: `list int`},
-		{in: `a ; a = $sha256~~`, imp: reg.Func(a, a), result: `a -> a`},
-		{in: `{ x = a 1, y = a "" } ; a = $sha256~~`, imp: reg.Func(a, a), result: `{ x : int, y : text }`},
+		// Imports aren't loaded here, so '$source:0' is sufficient to encode one.
+		{in: `$source:0`, imp: IntRef, result: `int`},
+		{in: `$source:0`, imp: FloatRef, result: `float`},
+		{in: `1 + $source:0`, imp: FloatRef, err: `cannot unify 'int' with 'float'`},
+		{in: `$source:0`, imp: a, result: `a`},
+		{in: `a ; a = $source:0`, imp: a, result: `a`},
+		{in: `$source:0 [ 1, 2 ]`, imp: reg.Func(a, a), result: `list int`},
+		{in: `a ; a = $source:0`, imp: reg.Func(a, a), result: `a -> a`},
+		{in: `{ x = a 1, y = a "" } ; a = $source:0`, imp: reg.Func(a, a), result: `{ x : int, y : text }`},
 		// A scrap that denotes a type can only be used in type position.
-		{in: `$sha256~~`, imp: IntRef, sort: true, result: `type = int`},
-		{in: `ignore ; ignore : $sha256~~ -> int = _ -> 1`, imp: TextRef, sort: true, result: `text -> int`},
-		{in: `1 + $sha256~~`, imp: IntRef, sort: true, err: `cannot use type $sha256~~ as a value`},
+		{in: `$source:0`, imp: IntRef, sort: true, result: `type = int`},
+		{in: `ignore ; ignore : $source:0 -> int = _ -> 1`, imp: TextRef, sort: true, result: `text -> int`},
+		{in: `1 + $source:0`, imp: IntRef, sort: true, err: `cannot use type $source:0 as a value`},
 		{in: `ignore ; ignore : $"./t.scrap" -> int = _ -> 1`, imp: TextRef, sort: true, result: `text -> int`},
 		// An imported type constructor is applied by substitution.
-		{in: `$sha256~~`, imp: option, sort: true, params: optionParams, result: `type -> type = a => [ #none, #some a ]`},
-		{in: `or-zero ; or-zero : $sha256~~ int -> int = | #some n -> n | #none -> 0`,
-			imp: option, sort: true, params: optionParams, result: `$sha256~~ int -> int`},
-		{in: `wrap ; wrap : a => a -> $sha256~~ a = x -> #some x`,
-			imp: option, sort: true, params: optionParams, result: `a -> $sha256~~ a`},
-		{in: `get-a ; get-a : r => $sha256~~ int r -> int = x -> x.a`,
-			imp: hasA, sort: true, params: hasAParams, result: `$sha256~~ int a -> int`},
-		{in: `ignore ; ignore : $sha256~~ -> int = _ -> 1`, imp: option, sort: true, params: optionParams,
-			err: `$sha256~~ takes 1 type argument, not 0`},
-		{in: `ignore ; ignore : $sha256~~ int text -> int = _ -> 1`, imp: option, sort: true, params: optionParams,
-			err: `$sha256~~ takes 1 type argument, not 2`},
-		{in: `ignore ; ignore : $sha256~~ int -> int = _ -> 1`, imp: IntRef, sort: true,
-			err: `$sha256~~ is not a type constructor`},
-		{in: `ignore ; ignore : $sha256~~ int int -> int = _ -> 1`, imp: hasA, sort: true, params: hasAParams,
-			err: `type argument 2 of $sha256~~ must be a row variable, not int`},
-		{in: `one ; one : $sha256~~ = 1`, imp: IntRef, err: `$sha256~~ is a value, not a type`},
+		{in: `$source:0`, imp: option, sort: true, params: optionParams, result: `type -> type = a => [ #none, #some a ]`},
+		{in: `or-zero ; or-zero : $source:0 int -> int = | #some n -> n | #none -> 0`,
+			imp: option, sort: true, params: optionParams, result: `$source:0 int -> int`},
+		{in: `wrap ; wrap : a => a -> $source:0 a = x -> #some x`,
+			imp: option, sort: true, params: optionParams, result: `a -> $source:0 a`},
+		{in: `get-a ; get-a : r => $source:0 int r -> int = x -> x.a`,
+			imp: hasA, sort: true, params: hasAParams, result: `$source:0 int a -> int`},
+		{in: `ignore ; ignore : $source:0 -> int = _ -> 1`, imp: option, sort: true, params: optionParams,
+			err: `$source:0 takes 1 type argument, not 0`},
+		{in: `ignore ; ignore : $source:0 int text -> int = _ -> 1`, imp: option, sort: true, params: optionParams,
+			err: `$source:0 takes 1 type argument, not 2`},
+		{in: `ignore ; ignore : $source:0 int -> int = _ -> 1`, imp: IntRef, sort: true,
+			err: `$source:0 is not a type constructor`},
+		{in: `ignore ; ignore : $source:0 int int -> int = _ -> 1`, imp: hasA, sort: true, params: hasAParams,
+			err: `type argument 2 of $source:0 must be a row variable, not int`},
+		{in: `one ; one : $source:0 = 1`, imp: IntRef, err: `$source:0 is a value, not a type`},
 	}
 
 	for _, ex := range examples {

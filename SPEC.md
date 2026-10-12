@@ -36,8 +36,8 @@ FLOAT    = digit { digit } "." digit { digit }   # digits on both sides
 TEXT     = '"' { char | escape } '"'             # escapes: \" \\ \n \t \u{HEX}
 BYTE     = "~" hex hex                           # one byte: ~FF
 BYTES    = "~~" { base64 }                       # padded base64: ~~aGVsbG8=
-HASH     = "$" scheme "~~" { hex }               # scheme names how the target is hashed, e.g. $src-sha256~~e4ca…
-PATH     = "$" TEXT                              # a draft's reference to a file (11.2): $"./terminal/program.scrap"
+HASH     = "$" scheme ":" hex { hex }            # a published scrap: $source:5c43…, lowercase hex (9)
+PATH     = "$" TEXT                              # a draft's reference to a file, development only (11.2): $"./a.scrap"
 NAME     = ident-start { ident-char }            # kebab-case and slashes allowed, see 2.3
 TAG      = "#" ( letter | digit ) { ident-char }  # #true  #2d
 COMMENT  = "--" ( " " | "-" | EOL ) { any } EOL  # line comment
@@ -63,10 +63,11 @@ Comments:
   be a multiple of four, padded with `=`. `~~` alone is the empty BYTES.
 - A BYTE is exactly two hex digits. A BYTE has type `byte`, and BYTES is a
   sequence of them: `bytes +< ~21` and `~00 >+ bytes` append and prepend one.
-- `~~` means "encoded bytes follow", and what precedes it picks the encoding:
-  base64 after a bare `~~` (BYTES), hex after `$scheme~~` (HASH). Digests are
-  hex because that is how `sha256sum`, git and most tools print them, so a hash
-  literal can be compared with their output directly.
+- `~~` always means base64 bytes follow. A HASH is one token, with no
+  whitespace inside: `$`, a scheme NAME, `:` and lowercase hex digits, whose
+  number the scheme fixes. Digests are hex because that is how `sha256sum`, git
+  and most tools print them, so a hash literal can be compared with their output
+  directly.
 - **Identifiers are ASCII.** `letter` is `A-Z` or `a-z` and `digit` is `0-9`.
   `ident-start` = letter | `_`; `ident-char` = letter | digit | `_` | `'` | `-` | `/`
   (`-` and `/` only when both neighbours are ident-chars, so `list/map` is one
@@ -449,7 +450,7 @@ t
 ```
 
 ```scrap
-f : $sha256~~… -> int = | #a _ -> 1 | #b n -> n | #c _ -> 0
+f : $source:… -> int = | #a _ -> 1 | #b n -> n | #c _ -> 0
 ```
 
 - The body denotes a type when it is a name bound by a sort binding, or a hash
@@ -491,25 +492,30 @@ itself, as parameters, patterns or where-clauses, shadow the group's.
 
 ## 9. Scrap identity
 
-### 9.1 Scheme `src-sha256` (current)
+### 9.1 Scheme `source` (current)
 
 For now a scrap is hashed from its source, which is heavier than hashing a
 canonical core but needs no canonicalisation pass.
 
-- A published **scrap** is `(edition, source)`. `source` is the program text,
-  which refers to other scraps by hash only (section 11).
+- A published **scrap** is its source: the program text, which refers to other
+  scraps by hash only (section 11).
 - **Source bytes** are valid UTF-8, with no BOM and LF line endings only. They are
   stored and hashed exactly as written; tools never normalise them. Anything else
   is rejected at publish time, so no two accidental encodings of one text exist.
-- `digest = sha256( preimage )`, where the preimage is the list of length-prefixed
-  byte strings: the scheme tag `src-sha256`, the edition, then the source bytes.
-- The **edition** (spec version covering both grammar and typing rules) is part of
-  the digest, because the same bytes can parse or type-check differently in a
-  different edition. An edition upgrade therefore produces new identities, which
-  cascade to dependents.
-- A **hash literal** is scheme-tagged: `$src-sha256~~…`. A later scheme (for
-  example `core-sha256`, canonical core) can coexist, and each scheme defines how
-  a target is re-hashed when verified.
+- `digest = sha256( source bytes )`, written as 64 lowercase hex digits:
+  `$source:5c43…`. It is what `sha256sum` prints for the file.
+- A **hash literal** is scheme-tagged, and the scheme names what is hashed. The
+  hash function is sha256 for every scheme; a different one would be a new
+  scheme. Each scheme defines how a target is re-hashed when verified. An
+  unknown scheme is an error.
+- Open: editions. The same bytes can parse or type-check differently in a later
+  edition (spec version), so the edition should take part in identity, either
+  in the `core` scheme or as a scheme of its own.
+
+### 9.1.1 Scheme `core` (reserved)
+
+`$core:…` will be the sha256 of a scrap's canonical compact representation,
+which is not yet defined. It is reserved: a `core` hash is an error for now.
 
 ### 9.2 What this costs and what it keeps
 
@@ -522,7 +528,7 @@ Keeps: integrity, immutability, closure verification (section 10), and the Merkl
 cascade (a changed dependency changes every dependent's hash). A scrap cannot
 contain its own hash, and scraps cannot depend on each other cyclically.
 
-Identity depends on the edition and the source, not on the parser's output, so a
+Identity depends on the source, not on the parser's output, so a
 scrap can be verified without parsing it. It must still be parsed before it
 is run.
 
@@ -544,9 +550,9 @@ Reliability is a top-level requirement. The rules:
    closure ahead of time, fetching hashes from stores and, for drafts, reading
    paths (11.2). Checking and evaluating require the whole closure.
 4. A reference's type, or for a type scrap (7.6) the type it denotes, is inferred
-   from the target's source (present by rule 3), parsed and checked under the
-   target's edition. The digest includes the edition (section 9), so any type
-   cache for published scraps is keyed by the digest alone. The cache is an
+   from the target's source (present by rule 3), parsed and checked. While
+   the digest leaves out the edition (9.1), a type cache for published scraps
+   must be keyed by the digest and the checker's edition. The cache is an
    optimisation only; deleting it never changes a result.
 5. Name maps (versions, "latest", signing, scrapyard policy) are tooling. They
    produce hash or path references and are never consulted by the language
@@ -620,7 +626,7 @@ its path, as in `scrap eval example.scrap`, could be added later.
 
 Publishing turns a draft and its closure of drafts into published scraps,
 bottom-up: each draft it refers to is published first, then each path token is
-replaced by `$src-sha256~~…` of its target's published form. Nothing else in the
+replaced by `$source:…` of its target's published form. Nothing else in the
 source changes, comments and layout included, so publishing the same drafts
 always gives the same hashes.
 
@@ -677,7 +683,7 @@ elsewhere, and leaves some of it open.
 - Match functions as the only control flow, with multi-pattern arms
   (`| 1 -> 2 -> 3`); no FLOAT patterns.
 - `()` as the hole; INT, FLOAT, TEXT, BYTE and BYTES literals: `~FF` is one
-  byte, `~~aGk=` is base64 bytes, and hashes are `$scheme~~…`.
+  byte, `~~aGk=` is base64 bytes, and hashes are `$scheme:hex`.
 - Names with `-` and `/`: `bytes/to-utf8-text`.
 - Records with `..r` spread first, which can update fields but not change their
   types; record patterns with the rest first, `{ ..x, a = 1 }`.
@@ -698,7 +704,7 @@ elsewhere, and leaves some of it open.
 | `t : #a a #b int`, a type as tags side by side | `t : type = [#a a, #b int]` | The guide's form is clean, but ambiguous with tag values and payloads |
 | Variants printed with their type, `(result text e)::ok "hi"` | `#ok "hi"` | Values carry no types at runtime |
 | `<\|`, `<<`, `//`, `&&`, `\|\|`, `@` | Removed (section 6) | One spelling per thing; matching is the only branching |
-| Hash of the flat encoding, `$sha1~~…` | Hash of edition and source, `$src-sha256~~…` | No canonical encoding yet; others can be added as schemes (section 9) |
+| Hash of the flat encoding, `$sha1~~…` | Hash of the source, `$source:…` | No canonical encoding yet; others can be added as schemes (section 9) |
 
 **Open:**
 

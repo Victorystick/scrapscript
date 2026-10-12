@@ -2,7 +2,6 @@ package eval
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"path"
@@ -143,9 +142,7 @@ func (e *Environment) resolve(s *Scrap, n ast.Node) (*Scrap, error) {
 		return dep, nil
 	}
 
-	algo, hash := s.expr.Import(n)
-	digest := s.expr.TokenText(hash)[2:]
-	dep, err := e.fetch(s.expr.TokenText(algo), digest)
+	dep, err := e.fetch(s.expr.Hash(n))
 	if err != nil {
 		return nil, s.expr.Error(n, err.Error())
 	}
@@ -182,20 +179,22 @@ func (e *Environment) draft(from *Scrap, p string) (*Scrap, error) {
 	return s, nil
 }
 
-// fetch returns the published scrap with the given hash.
-func (e *Environment) fetch(algo, digest string) (*Scrap, error) {
-	if algo != "sha256" {
-		return nil, fmt.Errorf("only sha256 imports are supported")
+// fetch returns the published scrap with the given hash. The source scheme
+// is the sha256 of its source bytes; the core scheme, of its canonical
+// compact form, is reserved.
+func (e *Environment) fetch(scheme, digest string) (*Scrap, error) {
+	switch scheme {
+	case "source":
+	case "core":
+		return nil, fmt.Errorf("core hashes are not supported yet")
+	default:
+		return nil, fmt.Errorf("unknown hash scheme %s", scheme)
 	}
-	hash, err := hex.DecodeString(digest)
-	if err != nil {
-		return nil, fmt.Errorf("bad hash %s", digest)
-	}
-	if len(hash) != sha256.Size {
-		return nil, fmt.Errorf("cannot import sha256 bytes of length %d, must be %d", len(hash), sha256.Size)
+	if len(digest) != 2*sha256.Size {
+		return nil, fmt.Errorf("a %s hash has %d hex digits, not %d", scheme, 2*sha256.Size, len(digest))
 	}
 
-	key := hashKey{algo, hex.EncodeToString(hash)}
+	key := hashKey{scheme, digest}
 	if s, ok := e.scraps[key]; ok {
 		return s, nil
 	}

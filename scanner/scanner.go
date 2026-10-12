@@ -130,6 +130,9 @@ func (s *scanner) token() token.Token {
 	s.pos = start + 1
 	switch c {
 	case '$':
+		if class[s.at(start+1)]&cLetter != 0 {
+			return s.hash(start)
+		}
 		return token.IMPORT
 	case '(':
 		return s.switch2(token.LPAREN, ')', token.HOLE)
@@ -307,6 +310,33 @@ func (s *scanner) byte(start int) token.Token {
 	}
 	s.pos = start + 3
 	return token.BYTE
+}
+
+// hash scans a hash: '$', a scheme name, ':' and lowercase hex digits. The
+// scheme decides how many, so the digits run to the end of the word.
+func (s *scanner) hash(start int) token.Token {
+	i := s.identEnd(start + 2)
+	if s.at(i) != ':' {
+		s.fail(ErrBadHash, start, i)
+		s.pos = i
+		return token.BAD
+	}
+	b := i + 1
+	i = s.identEnd(b)
+	if i == b {
+		s.fail(ErrBadHash, start, i)
+		s.pos = i
+		return token.BAD
+	}
+	for j := b; j < i; j++ {
+		if c := s.src[j]; class[c]&cHex == 0 || 'A' <= c && c <= 'F' {
+			s.fail(ErrBadHash, j, j+1)
+			s.pos = i
+			return token.BAD
+		}
+	}
+	s.pos = i
+	return token.HASH
 }
 
 // bytes scans a bytes literal: '~~' and padded base64. A bare '~~' is empty.

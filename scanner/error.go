@@ -20,6 +20,7 @@ const (
 	ErrTooLarge
 	ErrBadComment
 	ErrBadEscape
+	ErrBadHash
 )
 
 var errMessages = [...]string{
@@ -32,6 +33,7 @@ var errMessages = [...]string{
 	ErrTooLarge:         "source is larger than 4 GiB",
 	ErrBadComment:       "-- must be followed by a space to start a comment",
 	ErrBadEscape:        `invalid escape: use \", \\, \n, \t or \u{HEX}`,
+	ErrBadHash:          `expected a hash, $scheme:hex, with lowercase hex digits`,
 }
 
 func (c ErrCode) String() string {

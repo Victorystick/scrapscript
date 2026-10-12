@@ -132,7 +132,7 @@ func TestParseTypes(t *testing.T) {
 		{`ignore ; ignore : int -> list int -> () = _ -> _ -> ()`, false},
 		{`empty ; empty : [#a, #b int, #c (list int), ..r] -> { a : int, ..r } = _ -> {}`, false},
 		{`id ; id : a => a -> a = x -> x`, false},
-		{`ignore ; ignore : $sha256~~ -> int = _ -> 1`, false},
+		{`ignore ; ignore : $source:0 -> int = _ -> 1`, false},
 		{`t ; t : type = int`, true},
 		{`t ; t : type = [#a { b : text }, #c]`, true},
 		{`t ; t : type = {}`, true},
@@ -184,7 +184,7 @@ func TestParses(t *testing.T) {
 		`[ "yo", 2 ]`,
 		`foo.a`,
 		`inc ; inc : int -> int = a -> a + 1`,
-		`$"./f.scrap" $"./x.scrap" $sha256~~`,
+		`$"./f.scrap" $"./x.scrap" $source:0`,
 		`#true #false`,
 	}
 
@@ -198,7 +198,7 @@ func TestParses(t *testing.T) {
 
 func TestImports(t *testing.T) {
 	valid := []string{
-		`$sha256~~a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447`,
+		`$source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447`,
 	}
 
 	for _, src := range valid {

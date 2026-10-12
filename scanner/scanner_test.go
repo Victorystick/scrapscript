@@ -34,8 +34,8 @@ var elements = []elt{
 	// Special tokens
 	{token.IDENT, "hello", literal},
 	{token.IDENT, "f", literal},
-	{token.IMPORT, "$", operator},    // Import
-	{token.IDENT, "sha256", literal}, // Hash algo
+	{token.IMPORT, "$", operator}, // Path
+	{token.HASH, "$source:5c43f1b7", literal},
 	{token.IDENT, "bytes/to-utf8-text", literal},
 	{token.INT, "13", literal},
 	{token.INT, "-13", literal},
@@ -200,6 +200,13 @@ func TestScanErrors(t *testing.T) {
 		{"\"\\\n", []token.Token{token.TEXT}, []ErrCode{ErrBadEscape, ErrUnterminatedText}},
 		{`~zz`, []token.Token{token.BAD, token.IDENT}, []ErrCode{ErrExpectedHex}},
 		{`~~abc`, []token.Token{token.BAD}, []ErrCode{ErrBase64Padding}},
+		// A hash is one token, $scheme:hex, and a path is $ and a text.
+		{`$source:0a9f $"./a.scrap"`, []token.Token{token.HASH, token.IMPORT, token.TEXT}, nil},
+		{`$source`, []token.Token{token.BAD}, []ErrCode{ErrBadHash}},
+		{`$source:`, []token.Token{token.BAD}, []ErrCode{ErrBadHash}},
+		{`$source:0A`, []token.Token{token.BAD}, []ErrCode{ErrBadHash}},
+		{`$source:0g)`, []token.Token{token.BAD, token.RPAREN}, []ErrCode{ErrBadHash}},
+		{`$sha256~~aGk=`, []token.Token{token.BAD, token.BYTES}, []ErrCode{ErrBadHash}},
 		// Comments are skipped, up to the end of their line.
 		{"a -- b\nc", []token.Token{token.IDENT, token.IDENT}, nil},
 		{"-- a\n--- doc\n----\n--\n\"--\" --", []token.Token{token.TEXT}, nil},
@@ -267,7 +274,7 @@ const benchSource = `f "b" ; f = | "a" -> 1 | "b" -> 2 | _ -> 0
 ; xs = [1, 2, 3] ++ [4] +< 5
 ; opt : #some int #none = #some 3
 ; r = { ..rec, a = rec.a * 2 }
-; imp = $sha256~~aGVsbG8gd29ybGQ=
+; imp = $source:5c43f1b782bba6188a7320b07da869ce5d4f52be8bb80f473b85232ce6937bd9
 `
 
 func BenchmarkScan(b *testing.B) {

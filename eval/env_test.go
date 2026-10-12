@@ -152,9 +152,23 @@ func TestPublishedScrapsCannotReferToPaths(t *testing.T) {
 	hash := "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445"
 	env.UseFetcher(MapFetcher{hash: `$"./inc.scrap"`})
 
-	_, err := eval(env, `$sha256~~`+hash)
+	_, err := eval(env, `$source:`+hash)
 	if err == nil || !strings.Contains(err.Error(), "a published scrap cannot refer to a path") {
 		t.Errorf("Expected 'a published scrap cannot refer to a path', got %v", err)
+	}
+}
+
+func TestHashSchemes(t *testing.T) {
+	examples := []struct{ source, message string }{
+		{`$core:0a`, "core hashes are not supported yet"},
+		{`$sha256:0a`, "unknown hash scheme sha256"},
+		{`$source:0a`, "a source hash has 64 hex digits, not 2"},
+	}
+	for _, ex := range examples {
+		_, err := eval(NewEnvironment(), ex.source)
+		if err == nil || !strings.Contains(err.Error(), ex.message) {
+			t.Errorf("%s: expected '%s', got %v", ex.source, ex.message, err)
+		}
 	}
 }
 
