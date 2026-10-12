@@ -2,11 +2,10 @@
 
 Status: design draft. It specifies the language this implementation is moving
 towards, and does not describe it yet. It covers the surface grammar and its
-desugaring into a small core, types, scrap identity, drafts and publishing,
-platforms, and
-replaces the precedence table of the reference interpreter with an explicit
-grammar. Section 13 relates it to the guide at scrapscript.org. Types (section 7)
-and platforms (section 12) are unfinished.
+desugaring into a small core, types, scrap identity, drafts and publishing, and
+platforms, and replaces the precedence table of the reference interpreter with an
+explicit grammar. Section 14 relates it to the guide at scrapscript.org. Types
+(section 7) and platforms (section 13) are unfinished.
 
 Principles:
 
@@ -38,7 +37,7 @@ TEXT     = '"' { char | escape } '"'             # escapes: \" \\ \n \t \u{HEX}
 BYTE     = "~" hex hex                           # one byte: ~FF
 BYTES    = "~~" { base64 }                       # padded base64: ~~aGVsbG8=
 HASH     = "$" scheme "~~" { hex }               # scheme names how the target is hashed, e.g. $src-sha256~~e4ca…
-PATH     = "$" TEXT                              # a draft's reference to a file: $"./terminal/program.scrap"
+PATH     = "$" TEXT                              # a draft's reference to a file (11.2): $"./terminal/program.scrap"
 NAME     = ident-start { ident-char }            # kebab-case and slashes allowed, see 2.3
 TAG      = "#" ( letter | digit ) { ident-char }  # #true  #2d
 COMMENT  = "--" ( " " | "-" | EOL ) { any } EOL  # line comment
@@ -278,7 +277,7 @@ Desugaring:
   ```
   This is display only: aliases never affect unification. Open: which name to
   print when types written with different aliases unify, and whether the
-  where-clause should read back as a type scrap (section 10, rule 9).
+  where-clause should read back as a type scrap (section 10, rule 6).
 - Tag payload arity is positional (section 3, "Tag payloads").
 - Recursive aliases are allowed when every cycle passes through a tag payload,
   and are equi-recursive (7.5).
@@ -427,7 +426,7 @@ f : $sha256~~… -> int = | #a _ -> 1 | #b n -> n | #c _ -> 0
   nominal. Two type scraps that denote the same type are interchangeable.
 
 This exports one type per scrap. Bundling a library's types and values into one
-scrap needs types as record members, which is planned work (section 11).
+scrap needs types as record members, which is planned work (section 12).
 
 ## 8. Binding groups
 
@@ -444,7 +443,7 @@ For now a scrap is hashed from its source, which is heavier than hashing a
 canonical core but needs no canonicalisation pass.
 
 - A published **scrap** is `(edition, source)`. `source` is the program text,
-  which refers to other scraps by hash only (section 10).
+  which refers to other scraps by hash only (section 11).
 - **Source bytes** are valid UTF-8, with no BOM and LF line endings only. They are
   stored and hashed exactly as written; tools never normalise them. Anything else
   is rejected at publish time, so no two accidental encodings of one text exist.
@@ -473,47 +472,32 @@ Identity depends on the edition and the source, not on the parser's output, so a
 scrap can be verified without parsing it. It must still be parsed before it
 is run.
 
-## 10. Scraps, drafts and publishing
+## 10. References and loading
 
-Reliability is a top-level requirement. Scraps come in two flavors: **drafts**,
-which are files being developed, and **published** scraps, which are immutable
-and identified by hash. Only drafts ever touch the filesystem. The rules:
+Reliability is a top-level requirement. The rules:
 
 1. Evaluation and type checking are defined only on **closed** terms. A free
    variable is an error ("unbound name"), reported before anything runs. There
    are no free names to resolve: a scrap refers to another only by a hash or, in
-   a draft, a path. There is no ambient lookup, no auto-resolution, and no
-   network access during parsing, checking or evaluation.
-2. A **draft** may contain path references, `$"./terminal/program.scrap"`. A path
-   is resolved relative to the draft that contains it, and a draft read from
-   standard input is an unnamed file in the current directory. Every path must
-   stay within the current directory; an absolute path is an error. Paths may form cycles, which are an error. A draft has no identity: it
-   cannot be hashed, pushed, or referred to by hash. For simplicity, the CLI
-   reads a draft from standard input only; running one by its path, as in
-   `scrap eval example.scrap`, could be added later.
-3. A **published** scrap contains hash references only; a path reference in one
-   is an error. Nothing that handles published scraps reads the filesystem.
-4. **Publishing** turns a draft and its closure of drafts into published scraps,
-   bottom-up: each draft it refers to is published first, then each path token is
-   replaced by `$src-sha256~~…` of its target's published form. Nothing else in
-   the source changes, comments and layout included, so publishing the same
-   drafts always gives the same hashes.
-5. A hash reference is valid only if its target is present in the local store and
+   a draft, a path (section 11). There is no ambient lookup, no
+   auto-resolution, and no network access during parsing, checking or
+   evaluation.
+2. A hash reference is valid only if its target is present in the local store and
    re-hashing it under the reference's scheme gives the digest. Verification
    happens on every read, so a corrupted or substituted scrap is rejected.
-6. A scrap's **closure** is itself plus every scrap reachable through its hash and
+3. A scrap's **closure** is itself plus every scrap reachable through its hash and
    path references. Loading is a separate, explicit step that completes the
    closure ahead of time, fetching hashes from stores and, for drafts, reading
-   paths from the workspace. Checking and evaluating require the whole closure.
-7. A reference's type, or for a type scrap (7.6) the type it denotes, is inferred
-   from the target's source (present by rule 6), parsed and checked under the
+   paths (11.2). Checking and evaluating require the whole closure.
+4. A reference's type, or for a type scrap (7.6) the type it denotes, is inferred
+   from the target's source (present by rule 3), parsed and checked under the
    target's edition. The digest includes the edition (section 9), so any type
    cache for published scraps is keyed by the digest alone. The cache is an
    optimisation only; deleting it never changes a result.
-8. Name maps (versions, "latest", signing, scrapyard policy) are tooling. They
+5. Name maps (versions, "latest", signing, scrapyard policy) are tooling. They
    produce hash or path references and are never consulted by the language
    itself.
-9. **Results are scraps.** A value prints as a closed scrap that evaluates to
+6. **Results are scraps.** A value prints as a closed scrap that evaluates to
    the same value and prints identically. So `scrap eval` of the output of an
    earlier `scrap eval` always gives that same output again. This requires:
    - Functions print with the bindings they capture as a where-clause,
@@ -524,7 +508,60 @@ and identified by hash. Only drafts ever touch the filesystem. The rules:
    - TEXT, BYTE and BYTES print with escapes that read back to the same bytes, and
      FLOAT prints exactly, in the shortest form that reads back to the same float.
 
-## 11. Planned work
+## 11. Drafts and published scraps
+
+### 11.1 Two flavors
+
+Scraps come in two flavors:
+
+- A **draft** is a scrap being developed, typically a file. It may refer to
+  other drafts by path (11.2) and to published scraps by hash. A draft has no
+  identity: it cannot be hashed, pushed, or referred to by hash.
+- A **published** scrap is immutable and identified by its hash (section 9). It
+  refers to other scraps by hash only; a path reference in one is an error.
+  Nothing that handles published scraps reads the filesystem.
+
+Only drafts ever touch the filesystem, so production use, which runs published
+scraps only, never does.
+
+### 11.2 Path references
+
+A path reference is `$` followed by a TEXT literal: `$"./terminal/program.scrap"`.
+
+- **A path is relative to the draft that has it.** A draft read from standard
+  input is an unnamed draft in the current directory, so its paths are relative
+  to that directory.
+- **The root is the current directory.** Every path must resolve to a file
+  within it, also after `..` steps; an absolute path is an error.
+- **Paths may not form cycles.** A draft that refers back to itself, directly or
+  through others, is an error. (Hashes cannot form cycles at all.)
+- Paths use `/` on every system.
+
+For example, with the current directory holding these drafts:
+
+```
+a.scrap            $"./subdir/b.scrap"
+subdir/b.scrap     $"../other/c.scrap"
+other/c.scrap      42
+```
+
+`a.scrap` refers to `subdir/b.scrap`, whose `../other/c.scrap` is relative to
+`subdir/`, so it refers to `other/c.scrap`, and all three evaluate to `42`. Piped
+in on standard input, `$"./a.scrap"` does too, while `$"../a.scrap"` is an error,
+as it leaves the current directory.
+
+For simplicity, the CLI reads a draft from standard input only; running one by
+its path, as in `scrap eval example.scrap`, could be added later.
+
+### 11.3 Publishing
+
+Publishing turns a draft and its closure of drafts into published scraps,
+bottom-up: each draft it refers to is published first, then each path token is
+replaced by `$src-sha256~~…` of its target's published form. Nothing else in the
+source changes, comments and layout included, so publishing the same drafts
+always gives the same hashes.
+
+## 12. Planned work
 
 - **Specify the core evaluation semantics in Coq (now Rocq).** Not started. Scope,
   following the claims this document already makes:
@@ -544,7 +581,7 @@ and identified by hash. Only drafts ever touch the filesystem. The rules:
   made abstract, and when two such records' types are equal. Type scraps (7.6)
   are the interim mechanism.
 
-## 12. Platforms (sketch)
+## 13. Platforms (sketch)
 
 A platform is what lets a scrap affect the world. Platforms are defined by their
 implementations, so the language only fixes how a script meets one. A platform
@@ -565,7 +602,7 @@ whether a platform can provide a pure reference semantics (like
 `platforms/terminal.scrap`'s `simulate`) that hosts must agree with; and how
 hosts are found from an interface's hash without breaking rule 1 of section 10.
 
-## 13. Relation to the guide
+## 14. Relation to the guide
 
 [scrapscript.org/guide](https://scrapscript.org/guide) describes the reference
 design. This grammar follows it where listed below, departs from it on purpose
@@ -585,14 +622,14 @@ elsewhere, and leaves some of it open.
 - Exhaustive matches, checked by the type checker.
 - A scrap may be a type (7.6).
 - Any expression can be replaced by a hash reference to a scrap.
-- `scrap eval` and `scrap eval apply` pipelines, which rule 9 of section 10
+- `scrap eval` and `scrap eval apply` pipelines, which rule 6 of section 10
   makes reliable.
 
 **Departs, on purpose:**
 
 | Guide | Here | Why |
 |---|---|---|
-| Free names resolved through scrap maps, latest version by default | **Intentionally divergent.** Free names are always an error; scraps refer to each other by hash, or by path in drafts (section 10) | A closed scrap means the same thing everywhere |
+| Free names resolved through scrap maps, latest version by default | **Intentionally divergent.** Free names are always an error; scraps refer to each other by hash, or by path in drafts (section 11) | A closed scrap means the same thing everywhere |
 | Rocks: `$$add`, `$$int` | None | Builtins belong to the prelude, not to syntax |
 | `scoop::chocolate`, `(#radius int)::radius 4` | `#chocolate`; `::` removed | Tags are structural, so they need no type to build them |
 | `t : #a a #b int`, a type as tags side by side | `t : type = [#a a, #b int]` | The guide's form is clean, but ambiguous with tag values and payloads |

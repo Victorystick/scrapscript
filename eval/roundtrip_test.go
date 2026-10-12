@@ -2,7 +2,7 @@ package eval
 
 import "testing"
 
-// Sources whose results are known to break SPEC.md section 10, rule 9: a
+// Sources whose results are known to break SPEC.md section 10, rule 6: a
 // printed value must evaluate to the same value, which prints identically.
 // TestRoundTrip checks that each still breaks, so a fix must remove it here.
 var brokenRoundTrips = map[string]string{
