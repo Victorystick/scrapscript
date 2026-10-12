@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/Victorystick/scrapscript/scanner"
 )
 
 // Values
@@ -142,7 +144,7 @@ func (f Float) String() (res string) {
 	return
 }
 func (t Text) String() string {
-	return strconv.QuoteToGraphic(string(t))
+	return scanner.Quote(string(t))
 }
 func (b Byte) String() string {
 	const chars = "0123456789ABCDEF"

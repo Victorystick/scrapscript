@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Victorystick/scrapscript/types"
 )
@@ -181,6 +182,9 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	// bytes <-> text
 	define("bytes/to-utf8-text", reg.Func(types.BytesRef, types.TextRef), func(val Value) (Value, error) {
 		if bytes, ok := val.(Bytes); ok {
+			if !utf8.Valid(bytes) {
+				return nil, fmt.Errorf("bytes/to-utf8-text: %s is not valid UTF-8", bytes)
+			}
 			return Text(string([]byte(bytes))), nil
 		}
 		return nil, fmt.Errorf("cannot bytes/to-utf8-text on %T", val)

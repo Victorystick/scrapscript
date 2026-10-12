@@ -252,16 +252,27 @@ func (s *scanner) number(start int) token.Token {
 
 func (s *scanner) text(start int) token.Token {
 	i := start + 1
-	end := len(s.src)
-	if j := bytes.IndexAny(s.src[i:], "\"\n"); j >= 0 {
-		end = i + j
+	for i < len(s.src) && s.src[i] != '"' && s.src[i] != '\n' {
+		if s.src[i] == '\\' {
+			n := escapeLen(s.src[i:])
+			if n == 0 {
+				n = 1
+				if i+1 < len(s.src) && s.src[i+1] != '\n' {
+					n = 2
+				}
+				s.fail(ErrBadEscape, i, i+n)
+			}
+			i += n
+			continue
+		}
+		i++
 	}
-	s.checkText(i, end)
-	if end < len(s.src) && s.src[end] == '"' {
-		s.pos = end + 1
+	s.checkText(start+1, i)
+	if i < len(s.src) && s.src[i] == '"' {
+		s.pos = i + 1
 	} else {
-		s.fail(ErrUnterminatedText, start, end)
-		s.pos = end
+		s.fail(ErrUnterminatedText, start, i)
+		s.pos = i
 	}
 	return token.TEXT
 }

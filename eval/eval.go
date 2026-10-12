@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/Victorystick/scrapscript/ast"
+	"github.com/Victorystick/scrapscript/scanner"
 	"github.com/Victorystick/scrapscript/token"
 )
 
@@ -130,7 +131,7 @@ func Literal(src *ast.SourceExpr, x ast.Node) (Value, error) {
 		}
 		return Float(f), nil
 	case token.TEXT:
-		return Text(src.Source.GetString(src.TokenSpan(t).TrimBoth())), nil
+		return Text(scanner.Unquote(src.TokenText(t))), nil
 	case token.BYTES:
 		str := src.Source.GetString(src.TokenSpan(t).TrimStart(2))
 		dst := make([]byte, base64.StdEncoding.DecodedLen(len(str)))

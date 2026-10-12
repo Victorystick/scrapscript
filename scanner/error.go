@@ -19,6 +19,7 @@ const (
 	ErrBase64Padding
 	ErrTooLarge
 	ErrBadComment
+	ErrBadEscape
 )
 
 var errMessages = [...]string{
@@ -30,6 +31,7 @@ var errMessages = [...]string{
 	ErrBase64Padding:    "missing base64 padding",
 	ErrTooLarge:         "source is larger than 4 GiB",
 	ErrBadComment:       "-- must be followed by a space to start a comment",
+	ErrBadEscape:        `invalid escape: use \", \\, \n, \t or \u{HEX}`,
 }
 
 func (c ErrCode) String() string {

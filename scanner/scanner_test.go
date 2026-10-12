@@ -193,6 +193,10 @@ func TestScanErrors(t *testing.T) {
 		{"\"a\x00b\"", []token.Token{token.TEXT}, []ErrCode{ErrIllegalChar}},
 		{"\"a\xffb\"", []token.Token{token.TEXT}, []ErrCode{ErrInvalidUTF8}},
 		{"\"abc\nd", []token.Token{token.TEXT, token.IDENT}, []ErrCode{ErrUnterminatedText}},
+		{`"a\"b\\\n\t\u{1F600}"`, []token.Token{token.TEXT}, nil},
+		{`"\q" a`, []token.Token{token.TEXT, token.IDENT}, []ErrCode{ErrBadEscape}},
+		{`"\u{110000}\u{D800}\u{}\u{1234567}"`, []token.Token{token.TEXT}, []ErrCode{ErrBadEscape, ErrBadEscape, ErrBadEscape, ErrBadEscape}},
+		{"\"\\\n", []token.Token{token.TEXT}, []ErrCode{ErrBadEscape, ErrUnterminatedText}},
 		{`~zz`, []token.Token{token.BAD, token.IDENT}, []ErrCode{ErrExpectedHex}},
 		{`~~abc`, []token.Token{token.BAD}, []ErrCode{ErrBase64Padding}},
 		// Comments are skipped, up to the end of their line.
@@ -274,4 +278,28 @@ func BenchmarkScan(b *testing.B) {
 		n = len(toks.Kinds)
 	}
 	b.ReportMetric(float64(len(src))/float64(n), "bytes/token")
+}
+
+func TestQuote(t *testing.T) {
+	examples := []struct{ text, lit string }{
+		{"", `""`},
+		{"a\"b\\c", `"a\"b\\c"`},
+		{"line\n\ttab", `"line\n\ttab"`},
+		{"é😀", `"é😀"`},
+		{"\x00\r​", `"\u{0}\u{D}\u{200B}"`},
+	}
+	for _, ex := range examples {
+		if lit := Quote(ex.text); lit != ex.lit {
+			t.Errorf("Quote(%q) = %s, expected %s", ex.text, lit, ex.lit)
+		}
+		if _, errs := Scan([]byte(ex.lit)); len(errs) > 0 {
+			t.Errorf("%s doesn't scan: %v", ex.lit, errs)
+		}
+		if text := Unquote(ex.lit); text != ex.text {
+			t.Errorf("Unquote(%s) = %q, expected %q", ex.lit, text, ex.text)
+		}
+	}
+	if text := Unquote(`"\u{1F600}\u{e9}"`); text != "😀é" {
+		t.Errorf("got %q", text)
+	}
 }

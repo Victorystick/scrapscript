@@ -13,9 +13,6 @@ var brokenRoundTrips = map[string]string{
 	`3 |> a -> b -> a`: "prints b -> a, with a unbound",
 	`f ; f = | 0 -> 1 | n -> n * f (n - 1)`: "prints 0 -> 1 | n -> n * f (n - 1, " +
 		"without the leading | or closing ), and with f unbound",
-	// The scanner doesn't decode escapes, so each round trip adds backslashes.
-	`"a\nb"`: `prints "a\\nb", then "a\\\\nb"`,
-	`"q\"q"`: "doesn't scan",
 }
 
 // More sources to round-trip, beyond those of the other eval tests.
@@ -27,6 +24,7 @@ var roundTrips = []string{
 	`()`,
 	`x -> x`,
 	`text/join " "`,
+	`"a\nb\t\"q\" \\ \u{0}\u{e9}"`,
 }
 
 func TestRoundTrip(t *testing.T) {

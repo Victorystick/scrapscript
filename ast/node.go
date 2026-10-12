@@ -195,8 +195,7 @@ func (se *SourceExpr) Path(n Node) (string, bool) {
 	if se.Tokens.Kinds[t] != token.TEXT {
 		return "", false
 	}
-	text := se.TokenText(t)
-	return text[1 : len(text)-1], true
+	return scanner.Unquote(se.TokenText(t)), true
 }
 
 // Imports returns the Import nodes of the tree.
