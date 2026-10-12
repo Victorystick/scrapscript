@@ -178,7 +178,7 @@ Notes:
 - `listop` mixing: `a >+ b +< c` parses as `a >+ (b +< c)`.
 - **Multi-pattern arms.** Each pattern after the first `->` matches the next
   argument, so a match function takes as many arguments as its arms have patterns:
-  ```
+  ```scrap
   both = | #true  -> #true -> #true
          | _      -> _     -> #false
   ```
@@ -275,7 +275,7 @@ Desugaring:
   hashing they are still part of a scrap's source, so they affect its hash.)
 - Printed types keep the alias names they were written with, and bind them in a
   trailing where-clause, instead of inlining each alias wherever it occurs:
-  ```
+  ```scrap
   [ #first io, #second io ] -> io
   ; io = [ #err text, #ok ]
   ```
@@ -312,7 +312,7 @@ ttag     = TAG [ tatom ]
 
 A row tail may stand alone: `{ ..r }`, `[ ..r ]`. Examples:
 
-```
+```scrap
 id        : a => a -> a
 get-a     : t => r => { a : t, ..r } -> t
 area      : [#circle float, #rect { w : float, h : float }] -> float
@@ -328,7 +328,7 @@ annotations, and `type : type` is not a thing. `type` is the kind of types and
 `row` is the kind of a row (7.3): a parameter used as a row tail has kind `row`,
 and its argument must be a row variable.
 
-```
+```scrap
 has-a : type -> row -> type = a => r => { a : a, ..r }
 ```
 
@@ -336,7 +336,7 @@ A binding whose annotation's final result is `type` is a **sort binding**. Its
 right-hand side is parsed with the type grammar. A type constructor is a
 type-level lambda, `s => T`, one parameter per `=>`:
 
-```
+```scrap
 event  : type                  = [#line text, #eof]
 turn   : type -> type          = s => { state : s, print : list text, next : [#read-line, #exit int] }
 either : type -> type -> type  = a => b => [#left a, #right b]
@@ -345,8 +345,8 @@ either : type -> type -> type  = a => b => [#left a, #right b]
 The annotation is optional when the right-hand side starts with `NAME "=>"`,
 because `=>` occurs only in type syntax:
 
-```
-option = a => [#some a, #none]          # kind inferred: type -> type
+```scrap
+option = a => [#some a, #none]          -- kind inferred: type -> type
 ```
 
 Kind inference is first-order unification over `type`, `row` and `k -> k`; an
@@ -386,7 +386,7 @@ tail (fresh row variable). Duplicate labels in a row are an error.
 Surface: an alias may refer to itself, provided every cycle passes through a tag
 payload.
 
-```
+```scrap
 tree = a => [#leaf, #node { value : a, left : tree a, right : tree a }]
 ```
 
@@ -423,13 +423,13 @@ A scrap whose body denotes a type, rather than a value, is a **type scrap**. It
 exports that type: other scraps use a hash reference to it in type position, as
 they would a builtin or sort binding of the same kind.
 
-```
+```scrap
 t
 ; t : type = [#a a, #b int, #c byte]
 ; a : type = [#x, #y, #z]
 ```
 
-```
+```scrap
 f : $sha256~~… -> int = | #a _ -> 1 | #b n -> n | #c _ -> 0
 ```
 
@@ -459,7 +459,7 @@ binding's strongly connected component refers to itself, every binding in it
 must be a function or match function, possibly under where-clauses. Evaluation
 is strict, so any other value would be used before it exists:
 
-```
+```scrap
 x ; x : ex = #next x                    -- error: x is recursive
 r ; r = { f = _ -> r }                  -- error, though r is only used in a function
 ones
