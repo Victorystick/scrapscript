@@ -394,13 +394,28 @@ Records, lists and function arrows do not count as guards, so `t = list t` and
 `t = t` are rejected. Mutually recursive aliases are checked per strongly
 connected component.
 
+A recursive use applies the alias to its own parameters, so that the type is a
+finite graph: `t = a => [#a (t (list a))]` is rejected.
+
+A type need not have finite values. `ex = [#next ex]` is allowed, and is
+uninhabited, since recursive values are not (section 8).
+
 Core: aliases are erased, so a self-reference becomes a back-reference to an
 enclosing fixpoint binder `mu`. `mu` is internal; the surface language never
 spells it. `mu . T` denotes the type equal to `T` with itself substituted for the
 back-reference, and the unifier treats it as equal to its one-step unfolding
-(equi-recursive, with a visited-pairs set to terminate). Different `mu` terms can
-denote the same infinite tree, so hashing or comparing types needs a minimised
-canonical form (partition refinement).
+(equi-recursive). Different `mu` terms can denote the same infinite tree, so
+hashing or comparing types needs a minimised canonical form (partition
+refinement).
+
+The checker ties the knot instead: `mu . T` is a cycle in its type graph. Every
+cycle passes through an enum, so the unifier merges two enums before unifying
+their tags, and comes back to them merged, which is what terminates it. Where
+a recursive type recurs, tooling prints the alias it came from:
+`[ #leaf, #node { left : tree, right : tree } ]`.
+
+Recursion is not inferred: an unannotated function that recurses on a
+recursive value still fails the occurs check. Annotate it with the alias.
 
 ### 7.6 Type scraps
 
@@ -438,6 +453,22 @@ A `;`-group's bindings are mutually recursive. Under source hashing (section 9)
 the order of bindings is part of the source and so of the hash. A future
 canonical-core scheme would compute strongly connected components and order them
 by dependency, so source order would not affect identity.
+
+**Recursive values are forbidden.** Only functions may be recursive: if a
+binding's strongly connected component refers to itself, every binding in it
+must be a function or match function, possibly under where-clauses. Evaluation
+is strict, so any other value would be used before it exists:
+
+```
+x ; x : ex = #next x                    -- error: x is recursive
+r ; r = { f = _ -> r }                  -- error, though r is only used in a function
+ones
+; ones : () -> stream = _ -> #more { head = 1, tail = ones }   -- fine: a function
+; stream : type = [#more { head : int, tail : () -> stream }]
+```
+
+A reference is a free name of a binding's value; names that the value binds
+itself, as parameters, patterns or where-clauses, shadow the group's.
 
 ## 9. Scrap identity
 

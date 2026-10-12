@@ -23,9 +23,16 @@ type alias struct {
 	kinded, kinding bool
 
 	// The type of an alias without parameters, computed on first use.
-	ref     TypeRef
-	done    bool
+	ref  TypeRef
+	done bool
+
+	// While the alias is being expanded: the arguments it is expanded with,
+	// the payload depth it started at, and the node that a recursive use of
+	// it refers back to, once there is one.
 	pending bool
+	args    []TypeRef
+	depth   int
+	back    TypeRef
 }
 
 // A param is a type constructor's parameter. Its kind is row if it is used
@@ -53,7 +60,7 @@ func (c *context) sortBinding(b ast.Node, name string, annotation, t ast.Node) *
 // use are in its scope, and checks them against its annotation, if any.
 func (c *context) kinds(a *alias) {
 	if a.kinded || a.kinding {
-		// A recursive alias fails once expanded.
+		// A recursive alias: its parameters' kinds are being found.
 		return
 	}
 	a.kinding = true
@@ -268,7 +275,9 @@ func (c *context) typ(x ast.Node) TypeRef {
 			}
 			tags[tag] = HoleRef
 			if payload != ast.None {
+				c.payloads++
 				tags[tag] = c.typ(payload)
+				c.payloads--
 			}
 		}
 		return c.reg.add(node{kind: enumKind, a: c.reg.row(tags, c.rowTail(tail))})
@@ -435,20 +444,29 @@ func typeArguments(n int) string {
 // alias returns the type of an alias without parameters, computing it on
 // first use. It has no type variables, so its type can be shared.
 func (c *context) alias(x ast.Node, a *alias) TypeRef {
-	if !a.done {
-		a.ref = c.expand(x, a, nil)
-		a.done = true
+	if a.done {
+		return a.ref
 	}
-	return a.ref
+	ref := c.expand(x, a, nil)
+	// A recursive use only refers back to the type being expanded.
+	if !a.pending {
+		a.ref, a.done = ref, true
+	}
+	return ref
 }
 
 // expand returns the type of the alias's body, in the scope of its binding,
 // with its parameters bound to refs.
+//
+// A use of the alias within its own expansion makes it a recursive type: it
+// refers back to the type being expanded, so that the type is a cycle in the
+// registry (SPEC.md section 7.5). It must recur within a tag's payload, and
+// apply the alias to the same arguments, or the type would be infinite.
 func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 	if a.pending {
-		c.bail(x, fmt.Sprintf("recursive type %s is not supported yet", a.name))
+		return c.recur(x, a, refs)
 	}
-	a.pending = true
+	a.pending, a.args, a.depth, a.back = true, refs, c.payloads, NoType
 	aliases, tvars := c.aliases, c.tvars
 	c.aliases, c.tvars = a.scope, nil
 	for i, p := range a.params {
@@ -456,6 +474,27 @@ func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 	}
 	ref := c.typ(a.body)
 	c.aliases, c.tvars = aliases, tvars
-	a.pending = false
+	if a.back != NoType {
+		c.reg.link(a.back, ref)
+		c.reg.name(ref, typeName{a.name, refs})
+	}
+	a.pending, a.args = false, nil
 	return ref
+}
+
+// recur returns the type that a recursive use x of the alias a, applied to
+// refs, refers back to.
+func (c *context) recur(x ast.Node, a *alias, refs []TypeRef) TypeRef {
+	if c.payloads == a.depth {
+		c.bail(x, fmt.Sprintf("recursive type %s must recur within a tag's payload", a.name))
+	}
+	for i, ref := range refs {
+		if c.reg.Resolve(ref) != c.reg.Resolve(a.args[i]) {
+			c.bail(x, fmt.Sprintf("recursive type %s must recur with the same type arguments", a.name))
+		}
+	}
+	if a.back == NoType {
+		a.back = c.reg.Var()
+	}
+	return a.back
 }

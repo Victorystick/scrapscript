@@ -14,15 +14,21 @@ func (se *SourceExpr) Group(n Node) (body Node, binds []Node) {
 	return n, binds
 }
 
+// A Component is a strongly connected component of a group's bindings.
+type Component struct {
+	Binds []Node
+	// Whether it refers to itself: it has more than one binding, or its
+	// binding refers to its own name.
+	Recursive bool
+}
+
 // Components orders a group's value bindings by their references to each
 // other. It returns the strongly connected components of the reference graph,
 // each after the components it refers to. Sort bindings are left out.
 //
-// A reference is any identifier in a binding's value that names a binding of
-// the group, unless cut returns true for that binding; cut may be nil.
-// Shadowing isn't taken into account, so a component may be larger than
-// strictly needed.
-func (se *SourceExpr) Components(binds []Node, cut func(Node) bool) [][]Node {
+// A reference is a free identifier in a binding's value that names a binding
+// of the group, unless cut returns true for that binding; cut may be nil.
+func (se *SourceExpr) Components(binds []Node, cut func(Node) bool) []Component {
 	index := make(map[string]int, len(binds))
 	for i, b := range binds {
 		if !se.Sort(b) && (cut == nil || !cut(b)) {
@@ -39,7 +45,10 @@ func (se *SourceExpr) Components(binds []Node, cut func(Node) bool) [][]Node {
 		order:  make([]int, len(binds)),
 		low:    make([]int, len(binds)),
 		onPath: make([]bool, len(binds)),
+		self:   make([]bool, len(binds)),
+		free:   freeNames{se: se, bound: make(map[string]int)},
 	}
+	t.free.visit = t.ref
 	for i, b := range binds {
 		if !se.Sort(b) && t.order[i] == 0 {
 			t.visit(i)
@@ -57,7 +66,17 @@ type tarjan struct {
 	low        []int
 	onPath     []bool
 	path       []int
-	components [][]Node
+	self       []bool // whether each binding refers to itself
+	free       freeNames
+	refs       []int // the references of the bindings being visited
+	components []Component
+}
+
+// ref adds a reference to the name, if it is a binding's.
+func (t *tarjan) ref(name string) {
+	if j, ok := t.index[name]; ok {
+		t.refs = append(t.refs, j)
+	}
 }
 
 func (t *tarjan) visit(i int) {
@@ -67,10 +86,13 @@ func (t *tarjan) visit(i int) {
 	t.onPath[i] = true
 
 	_, _, _, val := t.se.Where(t.binds[i])
-	t.se.names(val, func(name string) {
-		j, ok := t.index[name]
-		if !ok {
-			return
+	start := len(t.refs)
+	t.free.expr(val)
+	end := len(t.refs)
+	for k := start; k < end; k++ {
+		j := t.refs[k]
+		if j == i {
+			t.self[i] = true
 		}
 		if t.order[j] == 0 {
 			t.visit(j)
@@ -78,7 +100,8 @@ func (t *tarjan) visit(i int) {
 		} else if t.onPath[j] {
 			t.low[i] = min(t.low[i], t.order[j])
 		}
-	})
+	}
+	t.refs = t.refs[:start]
 
 	if t.low[i] != t.order[i] {
 		return
@@ -94,37 +117,117 @@ func (t *tarjan) visit(i int) {
 		}
 	}
 	slices.Reverse(comp)
-	t.components = append(t.components, comp)
+	t.components = append(t.components, Component{comp, len(comp) > 1 || t.self[i]})
 }
 
-// names calls visit with the name of every identifier in n's values.
-func (se *SourceExpr) names(n Node, visit func(string)) {
+// freeNames walks a value, calling visit with each name that it refers to
+// but doesn't bind itself.
+type freeNames struct {
+	se *SourceExpr
+	// The names bound within the node being walked, by how many binders,
+	// and the binders' names, innermost last.
+	bound map[string]int
+	names []string
+	visit func(string)
+}
+
+// bind binds the names from start onwards, returning start.
+func (f *freeNames) bind(start int) int {
+	for _, name := range f.names[start:] {
+		f.bound[name]++
+	}
+	return start
+}
+
+// unbind unbinds the names from start onwards.
+func (f *freeNames) unbind(start int) {
+	for _, name := range f.names[start:] {
+		f.bound[name]--
+	}
+	f.names = f.names[:start]
+}
+
+func (f *freeNames) expr(n Node) {
+	se := f.se
 	switch se.Kinds[n] {
 	case Ident:
-		visit(se.TokenText(se.Mains[n]))
-	case Binary, Call, Func:
+		if name := se.TokenText(se.Mains[n]); f.bound[name] == 0 {
+			f.visit(name)
+		}
+	case Binary, Call:
 		d := se.Data[n]
-		se.names(Node(d.Lhs), visit)
-		se.names(Node(d.Rhs), visit)
+		f.expr(Node(d.Lhs))
+		f.expr(Node(d.Rhs))
+	case Func:
+		// A function's parameter, or a match arm's pattern, binds its names.
+		arg, body := se.Func(n)
+		start := len(f.names)
+		f.names = se.patternNames(arg, f.names)
+		f.bind(start)
+		f.expr(body)
+		f.unbind(start)
 	case MatchFunc:
 		for _, arm := range se.Arms(n) {
-			se.names(arm, visit)
+			f.expr(arm)
 		}
 	case Variant, Access:
-		se.names(Node(se.Data[n].Lhs), visit)
+		f.expr(Node(se.Data[n].Lhs))
 	case Record:
 		rest, fields := se.Record(n)
-		se.names(rest, visit)
+		f.expr(rest)
 		for i := range fields.Len() {
-			se.names(fields.Value(i), visit)
+			f.expr(fields.Value(i))
 		}
 	case List:
 		for _, x := range se.List(n) {
-			se.names(x, visit)
+			f.expr(x)
 		}
 	case Where:
-		body, _, _, val := se.Where(n)
-		se.names(body, visit)
-		se.names(val, visit)
+		body, binds := se.Group(n)
+		start := len(f.names)
+		for _, b := range binds {
+			if !se.Sort(b) {
+				f.names = append(f.names, se.TokenText(se.Mains[b]))
+			}
+		}
+		f.bind(start)
+		for _, b := range binds {
+			if _, _, _, val := se.Where(b); !se.Sort(b) {
+				f.expr(val)
+			}
+		}
+		f.expr(body)
+		f.unbind(start)
 	}
+}
+
+// patternNames appends the names that the pattern n binds to names.
+func (se *SourceExpr) patternNames(n Node, names []string) []string {
+	switch se.Kinds[n] {
+	case Ident:
+		if name := se.TokenText(se.Mains[n]); name != "_" {
+			names = append(names, name)
+		}
+	case Variant:
+		if _, payload := se.Variant(n); payload != None {
+			names = se.patternNames(payload, names)
+		}
+	case Record:
+		rest, fields := se.Record(n)
+		if rest != None {
+			names = se.patternNames(rest, names)
+		}
+		for i := range fields.Len() {
+			names = se.patternNames(fields.Value(i), names)
+		}
+	case List:
+		for _, x := range se.List(n) {
+			names = se.patternNames(x, names)
+		}
+	case Binary:
+		d := se.Data[n]
+		names = se.patternNames(Node(d.Lhs), names)
+		names = se.patternNames(Node(d.Rhs), names)
+	}
+	return names
 }

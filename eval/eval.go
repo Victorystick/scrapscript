@@ -423,7 +423,7 @@ func (c *context) where(x ast.Node) (Value, error) {
 	sub := c.sub(vars)
 	sub.binds = binds
 	for _, comp := range c.src.Components(binds, nil) {
-		for _, b := range comp {
+		for _, b := range comp.Binds {
 			_, id, _, val := c.src.Where(b)
 			v, err := sub.eval(val)
 			if err != nil {

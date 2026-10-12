@@ -77,6 +77,42 @@ type Registry struct {
 	// so that a failed unification can be undone.
 	unifying bool
 	trail    []undo
+
+	// The names of recursive types, which print by name where they recur.
+	names map[TypeRef]typeName
+	// The enum nodes that a traversal is inside of. Every cycle of a
+	// recursive type passes through an enum, so a traversal that meets one
+	// it is already inside of has come full circle.
+	path []TypeRef
+}
+
+// A typeName is the alias that a recursive type was expanded from, and the
+// arguments it was applied to.
+type typeName struct {
+	name string
+	args []TypeRef
+}
+
+// name names the recursive type ref.
+func (r *Registry) name(ref TypeRef, name typeName) {
+	if r.names == nil {
+		r.names = make(map[TypeRef]typeName)
+	}
+	r.names[ref] = name
+}
+
+// enter pushes the enum ref onto the path, returning false if it is already
+// on it.
+func (r *Registry) enterEnum(ref TypeRef) bool {
+	if slices.Contains(r.path, ref) {
+		return false
+	}
+	r.path = append(r.path, ref)
+	return true
+}
+
+func (r *Registry) exitEnum() {
+	r.path = r.path[:len(r.path)-1]
 }
 
 type undo struct {
@@ -212,7 +248,12 @@ func (r *Registry) generalize(ref TypeRef) {
 		if n.aux > r.level {
 			r.nodes[ref].kind = genKind
 		}
-	case listKind, recordKind, enumKind:
+	case enumKind:
+		if r.enterEnum(ref) {
+			r.generalize(n.a)
+			r.exitEnum()
+		}
+	case listKind, recordKind:
 		r.generalize(n.a)
 	case funcKind, extendKind:
 		r.generalize(n.a)
@@ -223,33 +264,87 @@ func (r *Registry) generalize(ref TypeRef) {
 // Instantiate returns a copy of a type scheme with fresh variables in place
 // of its generalized ones. Parts without generalized variables are shared.
 func (r *Registry) Instantiate(ref TypeRef) TypeRef {
-	var fresh map[TypeRef]TypeRef
-	return r.instantiate(ref, &fresh)
+	return r.instantiate(ref, nil)
 }
 
-func (r *Registry) instantiate(ref TypeRef, fresh *map[TypeRef]TypeRef) TypeRef {
+// instantiate copies ref, replacing generalized variables by fresh ones,
+// or by what fresh maps them to.
+func (r *Registry) instantiate(ref TypeRef, fresh map[TypeRef]TypeRef) TypeRef {
+	in := instantiator{r: r, fresh: fresh}
+	return in.copy(ref)
+}
+
+type instantiator struct {
+	r     *Registry
+	fresh map[TypeRef]TypeRef
+	// The copies of the enums copied so far, or NoType for those being
+	// copied, which recursive types refer back to.
+	enums map[TypeRef]TypeRef
+	// For the enums being copied that something refers back to, the node
+	// that their copy will be.
+	backs map[TypeRef]TypeRef
+}
+
+func (in *instantiator) copy(ref TypeRef) TypeRef {
+	r := in.r
 	ref = r.Resolve(ref)
 	n := r.at(ref)
 	switch n.kind {
 	case genKind:
-		if *fresh == nil {
-			*fresh = make(map[TypeRef]TypeRef)
+		if in.fresh == nil {
+			in.fresh = make(map[TypeRef]TypeRef)
 		}
-		v, ok := (*fresh)[ref]
+		v, ok := in.fresh[ref]
 		if !ok {
 			v = r.Var()
-			(*fresh)[ref] = v
+			in.fresh[ref] = v
 		}
 		return v
-	case listKind, recordKind, enumKind:
-		a := r.instantiate(n.a, fresh)
+	case enumKind:
+		if in.enums == nil {
+			in.enums, in.backs = make(map[TypeRef]TypeRef), make(map[TypeRef]TypeRef)
+		}
+		if c, ok := in.enums[ref]; ok {
+			if c != NoType {
+				return c
+			}
+			// A recursive type: refer to the copy being made.
+			back, ok := in.backs[ref]
+			if !ok {
+				back = r.add(node{})
+				in.backs[ref] = back
+			}
+			return back
+		}
+		in.enums[ref] = NoType
+		a := in.copy(n.a)
+		c := ref
+		if back, ok := in.backs[ref]; ok {
+			n.a = a
+			r.set(back, n)
+			c = back
+		} else if a != n.a {
+			n.a = a
+			c = r.add(n)
+		}
+		if name, ok := r.names[ref]; ok && c != ref {
+			args := make([]TypeRef, len(name.args))
+			for i, arg := range name.args {
+				args[i] = in.copy(arg)
+			}
+			r.name(c, typeName{name.name, args})
+		}
+		in.enums[ref] = c
+		return c
+	case listKind, recordKind:
+		a := in.copy(n.a)
 		if a == n.a {
 			return ref
 		}
 		n.a = a
 		return r.add(n)
 	case funcKind, extendKind:
-		a, b := r.instantiate(n.a, fresh), r.instantiate(n.b, fresh)
+		a, b := in.copy(n.a), in.copy(n.b)
 		if a == n.a && b == n.b {
 			return ref
 		}
@@ -330,7 +425,16 @@ func (r *Registry) unify(a, b TypeRef) error {
 			return err
 		}
 		return r.unify(na.b, nb.b)
-	case recordKind, enumKind:
+	case enumKind:
+		// Link them first, so that unifying recursive types ends when it
+		// comes back around. The named one stays, to print by its name.
+		if _, named := r.names[a]; named {
+			r.link(b, a)
+		} else {
+			r.link(a, b)
+		}
+		return r.rowError(a, b, r.unifyRows(na.a, nb.a))
+	case recordKind:
 		return r.rowError(a, b, r.unifyRows(na.a, nb.a))
 	case extendKind:
 		return r.unifyRows(a, b)
@@ -374,7 +478,13 @@ func (r *Registry) occurs(v TypeRef, level uint32, t TypeRef) error {
 		if n.aux > level {
 			return r.errorf("type variable '%s' would escape its annotation through '%s'", t, v)
 		}
-	case listKind, recordKind, enumKind:
+	case enumKind:
+		if !r.enterEnum(t) {
+			return nil
+		}
+		defer r.exitEnum()
+		return r.occurs(v, level, n.a)
+	case listKind, recordKind:
 		return r.occurs(v, level, n.a)
 	case funcKind, extendKind:
 		if err := r.occurs(v, level, n.a); err != nil {
@@ -530,7 +640,7 @@ func (r *Registry) apply(vars []TypeRef, body TypeRef, args []TypeRef) TypeRef {
 	for i, v := range vars {
 		fresh[r.Resolve(v)] = args[i]
 	}
-	return r.instantiate(body, &fresh)
+	return r.instantiate(body, fresh)
 }
 
 // String returns a string representation of a type.
@@ -551,6 +661,8 @@ type stringer struct {
 	next int
 	// The names of rigid variables, which other variables must not take.
 	taken map[string]bool
+	// The enums being written, which recursive types refer back to.
+	path []TypeRef
 }
 
 func (s *stringer) string(ref TypeRef) string {
@@ -569,7 +681,14 @@ func (s *stringer) reserve(ref TypeRef) {
 			s.taken = make(map[string]bool)
 		}
 		s.taken[s.reg.labels[n.a]] = true
-	case listKind, recordKind, enumKind:
+	case enumKind:
+		if slices.Contains(s.path, ref) {
+			return
+		}
+		s.path = append(s.path, ref)
+		s.reserve(n.a)
+		s.path = s.path[:len(s.path)-1]
+	case listKind, recordKind:
 		s.reserve(n.a)
 	case funcKind, extendKind:
 		s.reserve(n.a)
@@ -638,6 +757,12 @@ func (s *stringer) write(ref TypeRef, nesting int) {
 			s.write(typ, topLevel)
 		})
 	case enumKind:
+		if slices.Contains(s.path, ref) {
+			s.backReference(ref, nesting)
+			return
+		}
+		s.path = append(s.path, ref)
+		defer func() { s.path = s.path[:len(s.path)-1] }()
 		s.row(n.a, '[', ']', func(label string, typ TypeRef) {
 			s.WriteByte('#')
 			s.WriteString(label)
@@ -648,6 +773,30 @@ func (s *stringer) write(ref TypeRef, nesting int) {
 		})
 	default:
 		panic("bad type-ref")
+	}
+}
+
+// backReference writes a recursive type where it recurs: as the name of the
+// alias it was expanded from, applied to its arguments.
+func (s *stringer) backReference(ref TypeRef, nesting int) {
+	name, ok := s.reg.names[ref]
+	if !ok {
+		// Unification merges recursive types into named ones, so this
+		// shouldn't happen.
+		s.WriteString("...")
+		return
+	}
+	paren := len(name.args) > 0 && nesting >= atomLevel
+	if paren {
+		s.WriteByte('(')
+	}
+	s.WriteString(name.name)
+	for _, arg := range name.args {
+		s.WriteByte(' ')
+		s.write(arg, atomLevel)
+	}
+	if paren {
+		s.WriteByte(')')
 	}
 }
 

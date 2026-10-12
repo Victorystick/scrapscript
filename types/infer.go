@@ -65,6 +65,8 @@ type context struct {
 	aliases *Scope[*alias]
 	tvars   *Scope[tvar]
 	imports Imports
+	// How many tag payloads the type expression being read is inside of.
+	payloads int
 }
 
 func (c *context) bail(n ast.Node, msg string) {
@@ -342,8 +344,15 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 		}
 	}
 
-	for _, comp := range c.src.Components(binds, func(b ast.Node) bool { return annotated[b] }) {
-		if b := comp[0]; annotated[b] {
+	comps := c.src.Components(binds, func(b ast.Node) bool { return annotated[b] })
+	if len(annotated) == 0 {
+		c.functions(comps)
+	} else {
+		c.functions(c.src.Components(binds, nil))
+	}
+
+	for _, comp := range comps {
+		if b := comp.Binds[0]; annotated[b] {
 			// Check the value with the annotation's type variables rigid, so
 			// that it can't assume anything about them.
 			_, _, typ, val := c.src.Where(b)
@@ -354,12 +363,12 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 		}
 
 		c.reg.enter()
-		vars := make([]TypeRef, len(comp))
-		for i, b := range comp {
+		vars := make([]TypeRef, len(comp.Binds))
+		for i, b := range comp.Binds {
 			vars[i] = c.reg.Var()
 			c.bind(c.src.TokenText(c.src.Main(b)), vars[i])
 		}
-		for i, b := range comp {
+		for i, b := range comp.Binds {
 			_, _, _, val := c.src.Where(b)
 			c.ensure(val, vars[i], c.infer(val))
 		}
@@ -370,6 +379,23 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 	}
 
 	return inferBody(body)
+}
+
+// functions checks that the bindings of recursive components are
+// functions. Only functions may be recursive, since a value would be used
+// before it is evaluated (SPEC.md section 8).
+func (c *context) functions(comps []ast.Component) {
+	for _, comp := range comps {
+		if !comp.Recursive {
+			continue
+		}
+		for _, b := range comp.Binds {
+			_, id, _, val := c.src.Where(b)
+			if val, _ = c.src.Group(val); c.src.Kind(val) != ast.Func && c.src.Kind(val) != ast.MatchFunc {
+				c.bail(b, fmt.Sprintf("%s is recursive, so it must be a function", c.src.TokenText(id)))
+			}
+		}
+	}
 }
 
 func (c *context) list(x ast.Node) TypeRef {

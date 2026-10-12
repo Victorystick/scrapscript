@@ -182,6 +182,29 @@ func TestInfer(t *testing.T) {
 		{`even
 ; even = | 0 -> #true | n -> odd (n - 1)
 ; odd = | 0 -> #false | n -> even (n - 1)`, `int -> [ #false, #true, ..a ]`},
+
+		// Recursive types are cycles, which print by name where they recur.
+		{`t ; t : type = [#a t]`, `type = [ #a t ]`},
+		{`tree ; tree = a => [#leaf, #node { value : a, left : tree a, right : tree a }]`,
+			`type -> type = a => [ #leaf, #node { left : tree a, right : tree a, value : a } ]`},
+		{`size ; size : tree -> int = | #leaf -> 0 | #node n -> 1 + size n.left + size n.right
+; tree : type = [#leaf, #node { left : tree, right : tree }]`,
+			`[ #leaf, #node { left : tree, right : tree } ] -> int`},
+		{`size (#node { left = #leaf, right = #node { left = #leaf, right = #leaf } })
+; size : tree -> int = | #leaf -> 0 | #node n -> 1 + size n.left + size n.right
+; tree : type = [#leaf, #node { left : tree, right : tree }]`, `int`},
+		{`sum ; sum : a => (a -> int) -> tree a -> int = f -> | #leaf -> 0 | #node n -> f n.value + sum f n.left + sum f n.right
+; tree = a => [#leaf, #node { value : a, left : tree a, right : tree a }]`,
+			`(a -> int) -> [ #leaf, #node { left : tree a, right : tree a, value : a } ] -> int`},
+		{`xs ; xs : ints = #cons { head = 1, tail = #cons { head = 2, tail = #nil } }
+; ints : type = [#nil, #cons { head : int, tail : ints }]`, `[ #cons { head : int, tail : ints }, #nil ]`},
+		// A recursive function may be under a where-clause.
+		{`f ; f = (n -> f (n - k) ; k = 1)`, `int -> a`},
+		// Mutually recursive types.
+		{`a ; a : type = [#a b, #end] ; b : type = [#b a]`, `type = [ #a [ #b a ], #end ]`},
+		// Different unrollings of one type are the same type, and unify.
+		{`same ; same : t -> u = x -> x ; t : type = [#a t, #z] ; u : type = [#a [#a u, #z], #z]`,
+			`[ #a t, #z ] -> [ #a t, #z ]`},
 	}
 
 	for _, ex := range examples {
@@ -234,7 +257,18 @@ func TestInferFailure(t *testing.T) {
 		{`x ; x = 1 ; x = 2`, `cannot bind x twice`},
 		{`ignore ; ignore : c -> int = _ -> 1 ; c : type = [#a, #a]`, `cannot define tag #a more than once`},
 		{`ignore ; ignore : { a : int, a : text } -> int = _ -> 1`, `cannot define field a more than once`},
-		{`ignore ; ignore : t -> int = _ -> 1 ; t : type = [#a t]`, `recursive type t is not supported yet`},
+		// A recursive type recurs within a tag's payload, with the same arguments.
+		{`1 ; t : type = t`, `recursive type t must recur within a tag's payload`},
+		{`1 ; t : type = list t`, `recursive type t must recur within a tag's payload`},
+		{`1 ; t : type = { a : t }`, `recursive type t must recur within a tag's payload`},
+		{`1 ; t : type = u ; u : type = list t`, `recursive type t must recur within a tag's payload`},
+		{`1 ; t = a => [#a (t (list a))]`, `recursive type t must recur with the same type arguments`},
+		{`f #b ; f : t -> int = _ -> 1 ; t : type = [#a t]`, `cannot unify '[ #a t ]' with '[ #b, ..a ]'`},
+		// Only functions may be recursive.
+		{`x ; x : t = #next x ; t : type = [#next t]`, `x is recursive, so it must be a function`},
+		{`x ; x = y ; y = f 1 ; f = _ -> x`, `x is recursive, so it must be a function`},
+		{`s ; s : t = #more (_ -> s) ; t : type = [#more (() -> t)]`, `s is recursive, so it must be a function`},
+		{`r ; r = { f = x -> r }`, `r is recursive, so it must be a function`},
 		{`t + 1 ; t : type = int`, `cannot use type t as a value`},
 		{`ignore ; ignore : [#a, ..r] -> int = _ -> 1`, `unknown row variable r`},
 		// Annotations with type variables are checked with them rigid.
@@ -268,7 +302,6 @@ func TestInferFailure(t *testing.T) {
 		{`1 ; t = a => [#a b]`, `unknown type b`},
 		{`1 ; t = a => { a : a, ..a }`, `a is a row, not a type`},
 		{`ignore ; ignore : t int -> int = _ -> 1 ; t = r => { ..r }`, `type argument 1 of t must be a row variable, not int`},
-		{`1 ; t = a => [#a (t a)]`, `recursive type t is not supported yet`},
 		// Sort bindings are checked even when unused.
 		{`1 ; t : type = [#a, #a]`, `cannot define tag #a more than once`},
 	}

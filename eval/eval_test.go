@@ -28,6 +28,14 @@ var expressions = []struct {
 	{`3 - 2`, `1`},
 	{`3.0 - 2.0`, `1.0`},
 	{`10 - 3 - 2`, `5`},
+	// Recursive types.
+	{`size (#node { left = #leaf, right = #node { left = #leaf, right = #leaf } })
+; size : tree -> int = | #leaf -> 0 | #node n -> 1 + size n.left + size n.right
+; tree : type = [#leaf, #node { left : tree, right : tree }]`, `2`},
+	{`take 3 (ones ())
+; take : int -> stream -> list int = | 0 -> _ -> [] | n -> (| #more s -> s.head >+ take (n - 1) (s.tail ()))
+; ones : () -> stream = _ -> #more { head = 1, tail = ones }
+; stream : type = [#more { head : int, tail : () -> stream }]`, `[ 1, 1, 1 ]`},
 	{`f 2 * 3 ; f = x -> x + 1`, `9`},
 	{`1 >+ 2 >+ [3]`, `[ 1, 2, 3 ]`},
 	{`[1] +< 2 +< 3`, `[ 1, 2, 3 ]`},

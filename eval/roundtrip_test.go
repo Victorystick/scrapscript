@@ -5,12 +5,7 @@ import "testing"
 // Sources whose results are known to break SPEC.md section 10, rule 6: a
 // printed value must evaluate to the same value, which prints identically.
 // TestRoundTrip checks that each still breaks, so a fix must remove it here.
-var brokenRoundTrips = map[string]string{
-	// The printed function keeps its annotation and the sort binding that
-	// it refers to, but recursive types (SPEC.md section 7.5) don't check.
-	`size ; size : tree -> int = | #leaf -> 0 | #node n -> 1 + size n.left + size n.right ` +
-		`; tree : type = [#leaf, #node { left : tree, right : tree }]`: "recursive type tree is not supported yet",
-}
+var brokenRoundTrips = map[string]string{}
 
 // More sources to round-trip, beyond those of the other eval tests.
 var roundTrips = []string{
@@ -41,6 +36,10 @@ var roundTrips = []string{
 	`(a -> (x -> f x ; f = y -> a + y ; a = 1)) 2`,
 	`get ; get : pair -> int = p -> p.a ; pair : type = { a : int, b : int }`,
 	`{ a = m, b = list/map } ; m = (list/map ; list/map = x -> x)`,
+	// A recursive function over a recursive type needs its annotation, and
+	// the sort binding that it refers to.
+	`size ; size : tree -> int = | #leaf -> 0 | #node n -> 1 + size n.left + size n.right ` +
+		`; tree : type = [#leaf, #node { left : tree, right : tree }]`,
 }
 
 // Printed results, where their form matters.
