@@ -2,7 +2,7 @@ package parser
 
 import (
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/scanner"
@@ -30,7 +30,8 @@ type parser struct {
 	errors scanner.Errors
 }
 
-var debug = true
+// debug receives a parse failure's stack of parse functions, if set.
+var debug io.Writer
 var stack []string
 
 func (p *parser) next() {
@@ -90,8 +91,8 @@ func (p *parser) unexpected() {
 }
 
 func (p *parser) bail(msg string) {
-	if debug {
-		fmt.Fprintln(os.Stderr, stack)
+	if debug != nil {
+		fmt.Fprintln(debug, stack)
 	}
 	panic(p.source.Error(p.span(), msg))
 }
@@ -136,9 +137,8 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	p.add(ast.Invalid, 0, 0, 0) // ast.None
 
 	expr := p.parseExpr()
-	if debug && p.tok != token.EOF {
-		fmt.Fprintf(os.Stderr, "%#v\n", expr)
-		// printer.Fprint(os.Stderr, p.source, expr)
+	if debug != nil && p.tok != token.EOF {
+		fmt.Fprintf(debug, "%#v\n", expr)
 	}
 	p.expect(token.EOF)
 
@@ -155,7 +155,7 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 }
 
 func (p *parser) parseExpr() ast.Node {
-	if debug {
+	if debug != nil {
 		stack = append(stack, "parseExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
@@ -170,7 +170,7 @@ func (p *parser) parseExpr() ast.Node {
 }
 
 func (p *parser) parsePlainExpr(prec int) ast.Node {
-	if debug {
+	if debug != nil {
 		stack = append(stack, "parsePlainExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
@@ -237,7 +237,7 @@ func startsSimpleValue(tok token.Token) bool {
 }
 
 func (p *parser) parseUnaryExpr() ast.Node {
-	if debug {
+	if debug != nil {
 		stack = append(stack, "parseUnaryExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
@@ -274,7 +274,7 @@ func (p *parser) parseUnaryExpr() ast.Node {
 }
 
 func (p *parser) parseBinaryExpr(x ast.Node, prec int) ast.Node {
-	if debug {
+	if debug != nil {
 		stack = append(stack, "parseBinaryExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
@@ -311,7 +311,7 @@ func (p *parser) parseBinaryExpr(x ast.Node, prec int) ast.Node {
 }
 
 func (p *parser) parseWhereExpr(x ast.Node) ast.Node {
-	if debug {
+	if debug != nil {
 		stack = append(stack, "parseWhereExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
@@ -350,7 +350,7 @@ func (p *parser) isKind(t ast.Node) bool {
 //	type  = NAME "=>" type | arrow
 //	arrow = tapp [ "->" arrow ]
 func (p *parser) parseType() ast.Node {
-	if debug {
+	if debug != nil {
 		stack = append(stack, "parseType")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
@@ -521,7 +521,7 @@ func (p *parser) parseRecord() ast.Node {
 }
 
 func (p *parser) parseList() ast.Node {
-	if debug {
+	if debug != nil {
 		stack = append(stack, "parseList")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
@@ -553,7 +553,7 @@ func (p *parser) parseList() ast.Node {
 // parseFuncExpr parses the body of a function whose parameter x and arrow
 // have been parsed.
 func (p *parser) parseFuncExpr(x ast.Node, arrow ast.Tok) ast.Node {
-	if debug {
+	if debug != nil {
 		stack = append(stack, "parseFuncExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
@@ -562,7 +562,7 @@ func (p *parser) parseFuncExpr(x ast.Node, arrow ast.Tok) ast.Node {
 }
 
 func (p *parser) parseMatchFuncExpr() ast.Node {
-	if debug {
+	if debug != nil {
 		stack = append(stack, "parseMatchFuncExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
@@ -604,7 +604,7 @@ func (p *parser) parseTag() ast.Node {
 // parseVariantExpr parses a tag value, which takes the next atom as its
 // payload, if there is one. A tag payload is itself nullary.
 func (p *parser) parseVariantExpr() ast.Node {
-	if debug {
+	if debug != nil {
 		stack = append(stack, "parseVariantExpr")
 		defer func() { stack = stack[:len(stack)-1] }()
 	}
