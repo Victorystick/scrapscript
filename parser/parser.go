@@ -499,17 +499,15 @@ func (p *parser) parseRecord() ast.Node {
 	if p.tok == token.SPREAD {
 		p.next()
 		rest = p.parseExpr()
-		p.expect(token.COMMA)
-		p.next()
+		if p.tok == token.COMMA {
+			p.next()
+			p.noTrailingComma(token.RBRACE, "record")
+		}
 	}
 
 	// Fields are collected as key token, value node pairs.
 	top := len(p.scratch)
-	for {
-		if p.tok == token.RBRACE {
-			break
-		}
-
+	for p.tok != token.RBRACE {
 		// Is this a misplaced spread? Let's tell the user.
 		if p.tok == token.SPREAD {
 			p.bail("A spread must be first in a record.")
@@ -528,6 +526,7 @@ func (p *parser) parseRecord() ast.Node {
 			break
 		}
 		p.next()
+		p.noTrailingComma(token.RBRACE, "record")
 	}
 
 	p.expect(token.RBRACE)
@@ -540,6 +539,13 @@ func (p *parser) parseRecord() ast.Node {
 	return p.add(ast.Record, start, uint32(rest), info)
 }
 
+// noTrailingComma fails if close follows the comma just consumed.
+func (p *parser) noTrailingComma(close token.Token, what string) {
+	if p.tok == close {
+		p.bail("A " + what + " cannot end in a trailing comma.")
+	}
+}
+
 func (p *parser) parseList() ast.Node {
 	if debug != nil {
 		stack = append(stack, "parseList")
@@ -550,16 +556,14 @@ func (p *parser) parseList() ast.Node {
 	p.next()
 
 	top := len(p.scratch)
-	for {
-		if p.tok == token.RBRACK {
-			break
-		}
+	for p.tok != token.RBRACK {
 		p.scratch = append(p.scratch, p.parseExpr())
 
 		if p.tok != token.COMMA {
 			break
 		}
 		p.next()
+		p.noTrailingComma(token.RBRACK, "list")
 	}
 
 	p.expect(token.RBRACK)

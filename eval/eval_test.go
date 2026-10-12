@@ -117,7 +117,7 @@ var failures = []struct {
 }{
 	{`f 1 ; f = a -> b`, "unbound variable: b"},
 	{`{} |> | { b = a } -> a`, "cannot unify '{ b : a }' with '{}'"},
-	{`[ 1, ] |> | [] -> "four"`, `no arm matches [ 1 ]`},
+	{`[ 1 ] |> | [] -> "four"`, `no arm matches [ 1 ]`},
 	{`[] ++ ""`, `cannot unify 'list a' with 'text'`},
 	{`"" ++ []`, `cannot unify 'text' with 'list a'`},
 	{`1 -> x`, `function parameter must be an identifier`},
@@ -162,7 +162,7 @@ var exp2str = []struct{ source, result string }{
 	{`{ ..{ a = 2, c = 1 }, a = 1 }`, `{ a = 1, c = 1 }`},
 	{`{ a = 2, b = 3, c = 4 } |>
     | { ..x, a = 1, b = 2, c = 3 } -> 0
-    | { ..x, a = 1, b = b,       } -> b
+    | { ..x, a = 1, b = b        } -> b
     | { ..x,               c = c } -> c + x.a`, `6`},
 	{`~ff`, "~FF"},
 	{`~~abcd`, "~~abcd"},
@@ -185,7 +185,7 @@ var exp2str = []struct{ source, result string }{
 	{`list/fold 0 (a -> b -> a + b) [1, 2]`, `3`},
 	{`list/fold 0 (a -> b -> a + text/length b) ["hey", "beautiful"]`, `12`},
 
-	{`[ 4 + 2, 5 - 1, ]`, "[ 6, 4 ]"},
+	{`[ 4 + 2, 5 - 1 ]`, "[ 6, 4 ]"},
 	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four"`, `"four"`},
 
 	// Generates a list of numbers from 0 to n inclusive.

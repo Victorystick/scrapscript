@@ -89,7 +89,7 @@ var trees = []string{
 	`a ; a = b ; b = 1`,
 	`[ (x ; x = 1), y -> y, | 0 -> 1 ]`,
 	`{ ..r, a = 1, b = x -> x }`,
-	`{ ..r, }`,
+	`{ ..r }`,
 	`$sha256~~abcd $"./a b.scrap"`,
 	`"esc\"aped\n"`,
 	`f ; f : int -> (int -> int) -> int = a -> g -> g a`,

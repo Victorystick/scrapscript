@@ -88,7 +88,7 @@ func TestParseExpr(t *testing.T) {
 func TestParseRecord(t *testing.T) {
 	valid := []string{
 		`{}`,
-		`{ a = 1, }`,
+		`{ ..other }`,
 		`{ a = 1, b = "x"}`,
 		`{ ..other, a = 1, b = "x"}`,
 		`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`,
@@ -182,7 +182,6 @@ func TestParses(t *testing.T) {
   ; hand : type = [#l int, #r int]`,
 		`t ; t : type = [#a a, #b int, #c byte] ; a : type = [#x, #y, #z]`,
 		`[]`,
-		`[ "yo", 2, ]`,
 		`[ "yo", 2 ]`,
 		`foo.a`,
 		`inc ; inc : int -> int = a -> a + 1`,
@@ -226,6 +225,9 @@ func TestParseError(t *testing.T) {
 		{`t ; t : type = [#a, #b,]`, `A type cannot end in a trailing comma.`},
 		{`t ; t : type = [#a, ..r, #b]`, `Expected RBRACK got COMMA`},
 		{`t ; t : type = { a = int }`, `Expected DEFINE got ASSIGN`},
+		{`[ 1, ]`, `A list cannot end in a trailing comma.`},
+		{`{ a = 1, }`, `A record cannot end in a trailing comma.`},
+		{`{ ..r, }`, `A record cannot end in a trailing comma.`},
 		{`a < b < c`, `Comparisons cannot be chained.`},
 		{`f x -> x`, `function parameter must be an identifier`},
 		{`#a 1 2`, `Expected EOF got INT`},
