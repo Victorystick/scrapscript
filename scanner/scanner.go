@@ -331,7 +331,7 @@ func (s *scanner) bytes(start int) token.Token {
 const (
 	cSpace  uint8 = 1 << iota // ' ' '\t' '\n' '\r'
 	cLetter                   // starts an identifier: A-Z a-z _
-	cIdent                    // continues an identifier: A-Z a-z 0-9 _ - /
+	cIdent                    // continues an identifier: A-Z a-z 0-9 _ ' - /
 	cDigit                    // 0-9
 	cHex                      // 0-9 A-F a-f
 	cBase64                   // A-Z a-z 0-9 + /
@@ -352,6 +352,7 @@ var class = func() (t [256]uint8) {
 		t[c] |= cHex
 	}
 	t['_'] |= cLetter | cIdent
+	t['\''] |= cIdent
 	t['-'] |= cIdent
 	t['/'] |= cIdent | cBase64
 	t['+'] |= cBase64

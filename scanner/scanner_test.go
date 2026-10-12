@@ -190,6 +190,7 @@ func TestScanErrors(t *testing.T) {
 		{`@`, []token.Token{token.BAD}, []ErrCode{ErrIllegalChar}},
 		{`a @ b`, []token.Token{token.IDENT, token.BAD, token.IDENT}, []ErrCode{ErrIllegalChar}},
 		{`"é"`, []token.Token{token.TEXT}, nil},
+		{`a' a'' b'c`, []token.Token{token.IDENT, token.IDENT, token.IDENT}, nil},
 		{"\"a\x00b\"", []token.Token{token.TEXT}, []ErrCode{ErrIllegalChar}},
 		{"\"a\xffb\"", []token.Token{token.TEXT}, []ErrCode{ErrInvalidUTF8}},
 		{"\"abc\nd", []token.Token{token.TEXT, token.IDENT}, []ErrCode{ErrUnterminatedText}},
