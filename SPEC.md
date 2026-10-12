@@ -277,14 +277,16 @@ Desugaring:
   trailing where-clause, instead of inlining each alias wherever it occurs:
   ```scrap
   [ #first io, #second io ] -> io
-  ; io = [ #err text, #ok ]
+  ; io : type = [ #err text, #ok ]
   ```
-  This is display only: aliases never affect unification. Recursive types
-  (7.5) print this way, each binding written as a sort binding,
-  `; io : type = …` or `; tree = a => …`, with primes for clashing names. Open:
-  printing non-recursive aliases this way too, which name to print when types
-  written with different aliases unify, and whether the where-clause should read
-  back as a type scrap (section 10, rule 6).
+  This is display only: aliases never affect unification. Each binding is a
+  sort binding, `; io : type = …` or `; tree = a => …`, with primes for
+  clashing names. An alias of a primitive type prints as the primitive. A type
+  scrap prints its own alias unfolded, `type = [ #err text, #ok ]`, unless it is
+  recursive (7.5). A type from an imported type scrap prints as the reference,
+  `$"./io.scrap"`, with no binding. When types written with different aliases,
+  or an alias and none, unify, the first named one is kept. Open: whether the
+  where-clause should read back as a type scrap (section 10, rule 6).
 - Tag payload arity is positional (section 3, "Tag payloads").
 - Recursive aliases are allowed when every cycle passes through a tag payload,
   and are equi-recursive (7.5).

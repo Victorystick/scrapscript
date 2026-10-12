@@ -84,7 +84,7 @@ type Registry struct {
 	lackSets   []span
 	lackLabels []uint32
 
-	// The names of recursive types, which print by name where they recur.
+	// The names of the types that aliases denote, which they print by.
 	names map[TypeRef]typeName
 	// The enum nodes that a traversal is inside of. Every cycle of a
 	// recursive type passes through an enum, so a traversal that meets one
@@ -94,27 +94,51 @@ type Registry struct {
 
 type span struct{ start, end uint32 }
 
-// A typeName is the alias that a recursive type was expanded from, and the
-// arguments it was applied to.
+// A typeName is the alias that a type was expanded from, and the arguments
+// it was applied to.
 type typeName struct {
 	def  *typeDef
 	args []TypeRef
 }
 
-// A typeDef is a recursive alias, as types print it: its name, the
-// generalized variables of its parameters, and its type for them.
+// A typeDef is an alias, as types print it: its name, the generalized
+// variables of its parameters, and its type for them. An imported one is a
+// type scrap, which prints as the reference to it and has no definition.
 type typeDef struct {
-	name   string
-	params []TypeRef
-	body   TypeRef
+	name     string
+	params   []TypeRef
+	body     TypeRef
+	imported bool
 }
 
-// name names the recursive type ref.
+// name names the type ref.
 func (r *Registry) name(ref TypeRef, name typeName) {
 	if r.names == nil {
 		r.names = make(map[TypeRef]typeName)
 	}
 	r.names[ref] = name
+}
+
+// next returns the ref that the next node added will have.
+func (r *Registry) next() TypeRef {
+	return max(TypeRef(len(r.nodes)), numFixed)
+}
+
+// reference names ref, the type of the type scrap that ref refers to,
+// applied to args, as that reference. A type the scrap names itself is
+// copied, so that it keeps its own name.
+func (r *Registry) reference(ref string, typ TypeRef, args []TypeRef) TypeRef {
+	typ = r.Resolve(typ)
+	switch r.at(typ).kind {
+	case listKind, funcKind, recordKind, enumKind:
+	default:
+		return typ
+	}
+	if _, named := r.names[typ]; named {
+		typ = r.add(r.at(typ))
+	}
+	r.name(typ, typeName{&typeDef{name: ref, imported: true}, args})
+	return typ
 }
 
 // enter pushes the enum ref onto the path, returning false if it is already
@@ -429,12 +453,8 @@ func (in *instantiator) copy(ref TypeRef) TypeRef {
 			n.a = a
 			c = r.add(n)
 		}
-		if name, ok := r.names[ref]; ok && c != ref {
-			args := make([]TypeRef, len(name.args))
-			for i, arg := range name.args {
-				args[i] = in.copy(arg)
-			}
-			r.name(c, typeName{name.def, args})
+		if c != ref {
+			in.name(ref, c)
 		}
 		in.enums[ref] = c
 		return c
@@ -444,7 +464,9 @@ func (in *instantiator) copy(ref TypeRef) TypeRef {
 			return ref
 		}
 		n.a = a
-		return r.add(n)
+		c := r.add(n)
+		in.name(ref, c)
+		return c
 	case funcKind, extendKind:
 		a, b := in.copy(n.a), in.copy(n.b)
 		if a == n.a && b == n.b {
@@ -454,9 +476,25 @@ func (in *instantiator) copy(ref TypeRef) TypeRef {
 			return r.extend(n.aux, a, b)
 		}
 		n.a, n.b = a, b
-		return r.add(n)
+		c := r.add(n)
+		in.name(ref, c)
+		return c
 	}
 	return ref
+}
+
+// name gives the copy c of ref ref's name, if it has one, applied to copies
+// of its arguments.
+func (in *instantiator) name(ref, c TypeRef) {
+	name, ok := in.r.names[ref]
+	if !ok {
+		return
+	}
+	args := make([]TypeRef, len(name.args))
+	for i, arg := range name.args {
+		args[i] = in.copy(arg)
+	}
+	in.r.name(c, typeName{name.def, args})
 }
 
 // Errors from unifying rows, which the enclosing record or enum turns into
@@ -530,6 +568,17 @@ func (r *Registry) unify(a, b TypeRef) error {
 	}
 
 	switch na.kind {
+	case listKind, funcKind, recordKind, enumKind:
+		// Link them first, so that unifying recursive types ends when it
+		// comes back around. A named one stays, to print by its name.
+		if _, named := r.names[a]; named {
+			r.link(b, a)
+		} else {
+			r.link(a, b)
+		}
+	}
+
+	switch na.kind {
 	case listKind:
 		return r.unify(na.a, nb.a)
 	case funcKind:
@@ -537,16 +586,7 @@ func (r *Registry) unify(a, b TypeRef) error {
 			return err
 		}
 		return r.unify(na.b, nb.b)
-	case enumKind:
-		// Link them first, so that unifying recursive types ends when it
-		// comes back around. The named one stays, to print by its name.
-		if _, named := r.names[a]; named {
-			r.link(b, a)
-		} else {
-			r.link(a, b)
-		}
-		return r.rowError(a, b, r.unifyRows(na.a, nb.a))
-	case recordKind:
+	case enumKind, recordKind:
 		return r.rowError(a, b, r.unifyRows(na.a, nb.a))
 	case extendKind:
 		return r.unifyRows(a, b)
@@ -738,8 +778,19 @@ func (r *Registry) Describe(res Result) string {
 	if !res.Sort {
 		return r.String(res.Type)
 	}
+	// The type prints as the alias it names, unfolded, unless it recurs, so
+	// that it must be named anyway.
 	s := stringer{reg: r}
-	s.reserve(res.Type)
+	typ := r.Resolve(res.Type)
+	s.reserveBody(typ)
+	name, named := r.names[typ]
+	_, recurs := s.defs[name.def]
+	unfold := named && !recurs
+	if named && recurs {
+		// Its definition comes first.
+		i := slices.Index(s.order, name.def)
+		s.order = slices.Insert(slices.Delete(s.order, i, i+1), 0, name.def)
+	}
 	var b strings.Builder
 	for _, p := range res.Params {
 		if p.Row {
@@ -753,7 +804,13 @@ func (r *Registry) Describe(res Result) string {
 		b.WriteString(s.string(p.Var))
 		b.WriteString(" => ")
 	}
-	b.WriteString(s.string(res.Type))
+	s.Reset()
+	if unfold {
+		s.writeBody(typ, topLevel)
+	} else {
+		s.write(typ, topLevel)
+	}
+	b.WriteString(s.String())
 	b.WriteString(s.where())
 	return b.String()
 }
@@ -767,8 +824,8 @@ func (r *Registry) apply(vars []TypeRef, body TypeRef, args []TypeRef) TypeRef {
 	return r.instantiate(body, fresh)
 }
 
-// String returns a string representation of a type. Recursive types print
-// by name, and their definitions follow in a where-clause.
+// String returns a string representation of a type. The types of aliases
+// print by name, and their definitions follow in a where-clause.
 func (r *Registry) String(ref TypeRef) string {
 	s := stringer{reg: r}
 	s.reserve(ref)
@@ -788,15 +845,16 @@ type stringer struct {
 	taken map[string]bool
 	// The enums being written, which recursive types refer back to.
 	path []TypeRef
-	// The printed names of the recursive types met, in the order met.
+	// The printed names of the aliases met, in the order met.
 	defs  map[*typeDef]string
 	order []*typeDef
 }
 
-// where returns the where-clause that defines the recursive types written.
+// where returns the where-clause that defines the aliases written.
 func (s *stringer) where() string {
 	s.Reset()
-	for _, d := range s.order {
+	for i := 0; i < len(s.order); i++ {
+		d := s.order[i]
 		s.WriteString("\n; ")
 		s.WriteString(s.defs[d])
 		// As a sort binding: one without parameters needs its kind.
@@ -811,16 +869,16 @@ func (s *stringer) where() string {
 			s.variable(s.reg.Resolve(p))
 			s.WriteString(" => ")
 		}
-		s.enum(s.reg.at(s.reg.Resolve(d.body)))
+		s.writeBody(s.reg.Resolve(d.body), topLevel)
 		s.names, s.next = names, next
 	}
 	return s.String()
 }
 
-// define gives the recursive type d a name, unless it has one, and reserves
-// the names in its definition.
+// define gives the alias d a name, unless it has one, and reserves the names
+// in its definition. An imported one is not defined: it is its name.
 func (s *stringer) define(d *typeDef) {
-	if _, ok := s.defs[d]; ok {
+	if _, ok := s.defs[d]; ok || d.imported {
 		return
 	}
 	if s.defs == nil {
@@ -836,7 +894,7 @@ func (s *stringer) define(d *typeDef) {
 	s.taken[name] = true
 	s.defs[d] = name
 	s.order = append(s.order, d)
-	s.reserve(s.reg.at(s.reg.Resolve(d.body)).a)
+	s.reserveBody(s.reg.Resolve(d.body))
 }
 
 func (s *stringer) string(ref TypeRef) string {
@@ -845,9 +903,21 @@ func (s *stringer) string(ref TypeRef) string {
 	return s.String()
 }
 
-// reserve reserves the names of the rigid variables in ref.
+// reserve reserves the names of the rigid variables and aliases in ref.
 func (s *stringer) reserve(ref TypeRef) {
 	ref = s.reg.Resolve(ref)
+	if name, ok := s.reg.names[ref]; ok {
+		s.define(name.def)
+		for _, arg := range name.args {
+			s.reserve(arg)
+		}
+		return
+	}
+	s.reserveBody(ref)
+}
+
+// reserveBody reserves the names in the resolved ref, not by its name.
+func (s *stringer) reserveBody(ref TypeRef) {
 	n := s.reg.at(ref)
 	switch n.kind {
 	case rigidKind:
@@ -856,13 +926,6 @@ func (s *stringer) reserve(ref TypeRef) {
 		}
 		s.taken[s.reg.labels[n.a]] = true
 	case enumKind:
-		if name, ok := s.reg.names[ref]; ok {
-			s.define(name.def)
-			for _, arg := range name.args {
-				s.reserve(arg)
-			}
-			return
-		}
 		if slices.Contains(s.path, ref) {
 			return
 		}
@@ -909,6 +972,15 @@ const (
 
 func (s *stringer) write(ref TypeRef, nesting int) {
 	ref = s.reg.Resolve(ref)
+	if name, ok := s.reg.names[ref]; ok {
+		s.named(name, nesting)
+		return
+	}
+	s.writeBody(ref, nesting)
+}
+
+// writeBody writes the resolved ref, not by its name.
+func (s *stringer) writeBody(ref TypeRef, nesting int) {
 	n := s.reg.at(ref)
 	switch n.kind {
 	case conKind:
@@ -946,10 +1018,6 @@ func (s *stringer) write(ref TypeRef, nesting int) {
 			s.write(typ, topLevel)
 		})
 	case enumKind:
-		if name, ok := s.reg.names[ref]; ok {
-			s.named(name, nesting)
-			return
-		}
 		if slices.Contains(s.path, ref) {
 			// Unification merges recursive types into named ones, so
 			// this shouldn't happen.
@@ -976,15 +1044,18 @@ func (s *stringer) enum(n node) {
 	})
 }
 
-// named writes a recursive type as its alias's name, applied to its
-// arguments.
+// named writes a type as its alias's name, applied to its arguments.
 func (s *stringer) named(name typeName, nesting int) {
 	s.define(name.def)
 	paren := len(name.args) > 0 && nesting >= atomLevel
 	if paren {
 		s.WriteByte('(')
 	}
-	s.WriteString(s.defs[name.def])
+	if name.def.imported {
+		s.WriteString(name.def.name)
+	} else {
+		s.WriteString(s.defs[name.def])
+	}
 	for _, arg := range name.args {
 		s.WriteByte(' ')
 		s.write(arg, atomLevel)

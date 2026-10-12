@@ -95,20 +95,20 @@ func TestInfer(t *testing.T) {
   , #b int
   , #c byte
   ]
-; a : type = [#x, #y, #z]`, `[ #a [ #x, #y, #z ], #b int, #c byte ] -> int`},
+; a : type = [#x, #y, #z]`, "t -> int\n; t : type = [ #a a, #b int, #c byte ]\n; a : type = [ #x, #y, #z ]"},
 		{`get-a ; get-a : { a : int, b : [#x] } -> int = r -> r.a`, `{ a : int, b : [ #x ] } -> int`},
 		{`ignore ; ignore : () -> {} -> [] -> int = _ -> _ -> _ -> 1`, `() -> {} -> [] -> int`},
 		// Type constructors.
 		{`or-zero ; or-zero : option int -> int = | #some n -> n | #none -> 0 ; option = a => [#some a, #none]`,
-			`[ #none, #some int ] -> int`},
+			"option int -> int\n; option = a => [ #none, #some a ]"},
 		{`ignore ; ignore : either int (option text) -> int = _ -> 1
 ; option : type -> type = a => [#some a, #none]
 ; either : type -> type -> type = a => b => [#left a, #right b]`,
-			`[ #left int, #right [ #none, #some text ] ] -> int`},
+			"either int (option text) -> int\n; either = a => b => [ #left a, #right b ]\n; option = a => [ #none, #some a ]"},
 		{`start ; start : turn int = { state = 1, out = "", next = #read-line }
 ; turn = s => { state : s, out : text, next : next-action }
 ; next-action : type = [#read-line, #exit int]`,
-			`{ next : [ #exit int, #read-line ], out : text, state : int }`},
+			"turn int\n; turn = a => { next : next-action, out : text, state : a }\n; next-action : type = [ #exit int, #read-line ]"},
 		// A type constructor's parameters may be rows.
 		{`1 ; t : type -> row -> type = a => r => { a : a, ..r } ; u = r => [#u (t int r), ..r]`, `int`},
 		// Annotated bindings are checked against, and used with, their schemes.
@@ -118,7 +118,7 @@ func TestInfer(t *testing.T) {
 			`{ l : a, r : b } -> { l : b, r : a }`},
 		{`get-a ; get-a : t => r => { a : t, ..r } -> t = x -> x.a`, `{ a : a, ..b } -> a`},
 		{`get-a { a = 1, b = "" } ; get-a : t => r => { a : t, ..r } -> t = x -> x.a`, `int`},
-		{`get-a ; get-a : r => has-a int r -> int = x -> x.a ; has-a = t => r => { a : t, ..r }`, `{ a : int, ..a } -> int`},
+		{`get-a ; get-a : r => has-a int r -> int = x -> x.a ; has-a = t => r => { a : t, ..r }`, "has-a int a -> int\n; has-a = a => b => { a : a, ..b }"},
 		{`to-list ; to-list : a => [#some a, #none] -> list a = | #some x -> [x] | #none -> []`, `[ #none, #some a ] -> list a`},
 		// An annotation informs the inference of its value's body.
 		{`join ; join : text -> text -> text = a -> b -> a ++ b`, `text -> text -> text`},
@@ -130,7 +130,7 @@ func TestInfer(t *testing.T) {
 		{`both ; both = x -> { a = id x, b = id 1 } ; id : a => a -> a = x -> x`, `a -> { a : a, b : int }`},
 		{`id ; id : a => a -> a = x -> id2 x ; id2 = y -> y`, `a -> a`},
 		// Type variables and aliases shadow the builtins.
-		{`ignore ; ignore : t text -> int = _ -> 1 ; t = int => [#a int]`, `[ #a text ] -> int`},
+		{`ignore ; ignore : t text -> int = _ -> 1 ; t = int => [#a int]`, "t text -> int\n; t = a => [ #a a ]"},
 		{`empty ; empty : int -> int = _ -> "" ; int : type = text`, `text -> text`},
 
 		{`| n >+ ns -> ns`, `list a -> list a`},
@@ -176,7 +176,7 @@ func TestInfer(t *testing.T) {
 		{`x ; x = y + 1 ; y = 2`, `int`},
 		// A scrap may denote a type.
 		{`t ; t : type = int`, `type = int`},
-		{`t ; t : type = [#a a, #b] ; a : type = [#x, #y]`, `type = [ #a [ #x, #y ], #b ]`},
+		{`t ; t : type = [#a a, #b] ; a : type = [#x, #y]`, "type = [ #a a, #b ]\n; a : type = [ #x, #y ]"},
 		{`t ; t : type = int -> list text`, `type = int -> list text`},
 		{`option ; option = a => [#some a, #none]`, `type -> type = a => [ #none, #some a ]`},
 		{`has-a ; has-a : type -> row -> type = t => r => { a : t, ..r }`, `type -> row -> type = a => b => { a : a, ..b }`},
@@ -202,6 +202,12 @@ func TestInfer(t *testing.T) {
 ; ints : type = [#nil, #cons { head : int, tail : ints }]`, "ints\n; ints : type = [ #cons { head : int, tail : ints }, #nil ]"},
 		// A recursive function may be under a where-clause.
 		{`f ; f = (n -> f (n - k) ; k = 1)`, `int -> a`},
+		// Aliases of primitives print as the primitive.
+		{`x ; x : name = "a" ; name : type = text`, `text`},
+		{`f ; f : handler = n -> n ; handler : type = int -> int`, "handler\n; handler : type = int -> int"},
+		// Where an alias and an unnamed type unify, the alias is kept.
+		{`[x, { a = 1 }] ; x : p = { a = 2 } ; p : type = { a : int }`, "list p\n; p : type = { a : int }"},
+		{`[{ a = 1 }, x] ; x : p = { a = 2 } ; p : type = { a : int }`, "list p\n; p : type = { a : int }"},
 		// Mutually recursive types each get a binding.
 		{`count ; count : tree -> int = _ -> 0
 ; tree : type = [#node { label : text, children : forest }]
@@ -212,7 +218,7 @@ func TestInfer(t *testing.T) {
 		{`{ a = x, b = (y ; y : t = #end ; t : type = [#b t, #end]) } ; x : t = #end ; t : type = [#a t, #end]`,
 			"{ a : t, b : t' }\n; t : type = [ #a t, #end ]\n; t' : type = [ #b t', #end ]"},
 		// Mutually recursive types.
-		{`a ; a : type = [#a b, #end] ; b : type = [#b a]`, "type = a\n; a : type = [ #a [ #b a ], #end ]"},
+		{`a ; a : type = [#a b, #end] ; b : type = [#b a]`, "type = a\n; a : type = [ #a b, #end ]\n; b : type = [ #b a ]"},
 		// Different unrollings of one type are the same type, and unify.
 		{`same ; same : t -> u = x -> x ; t : type = [#a t, #z] ; u : type = [#a [#a u, #z], #z]`,
 			"t -> t\n; t : type = [ #a t, #z ]"},
@@ -421,11 +427,11 @@ func TestInferImport(t *testing.T) {
 		// An imported type constructor is applied by substitution.
 		{in: `$sha256~~`, imp: option, sort: true, params: optionParams, result: `type -> type = a => [ #none, #some a ]`},
 		{in: `or-zero ; or-zero : $sha256~~ int -> int = | #some n -> n | #none -> 0`,
-			imp: option, sort: true, params: optionParams, result: `[ #none, #some int ] -> int`},
+			imp: option, sort: true, params: optionParams, result: `$sha256~~ int -> int`},
 		{in: `wrap ; wrap : a => a -> $sha256~~ a = x -> #some x`,
-			imp: option, sort: true, params: optionParams, result: `a -> [ #none, #some a ]`},
+			imp: option, sort: true, params: optionParams, result: `a -> $sha256~~ a`},
 		{in: `get-a ; get-a : r => $sha256~~ int r -> int = x -> x.a`,
-			imp: hasA, sort: true, params: hasAParams, result: `{ a : int, ..a } -> int`},
+			imp: hasA, sort: true, params: hasAParams, result: `$sha256~~ int a -> int`},
 		{in: `ignore ; ignore : $sha256~~ -> int = _ -> 1`, imp: option, sort: true, params: optionParams,
 			err: `$sha256~~ takes 1 type argument, not 0`},
 		{in: `ignore ; ignore : $sha256~~ int text -> int = _ -> 1`, imp: option, sort: true, params: optionParams,

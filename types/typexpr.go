@@ -34,7 +34,7 @@ type alias struct {
 	depth   int
 	back    TypeRef
 
-	// If it is recursive, its definition, which its types print by.
+	// Its definition, which its types print by, once it has one.
 	def *typeDef
 }
 
@@ -411,14 +411,15 @@ func (c *context) applyImport(x, imp ast.Node, args []ast.Node) TypeRef {
 		c.bail(x, fmt.Sprintf("%s takes %s, not %d", name, typeArguments(len(res.Params)), len(args)))
 	}
 	if len(args) == 0 {
-		return res.Type
+		return c.reg.reference(name, res.Type, nil)
 	}
 	vars := make([]TypeRef, len(res.Params))
 	rows := make([]bool, len(res.Params))
 	for i, p := range res.Params {
 		vars[i], rows[i] = p.Var, p.Row
 	}
-	return c.reg.apply(vars, res.Type, c.typeArgs(name, rows, args))
+	refs := c.typeArgs(name, rows, args)
+	return c.reg.reference(name, c.reg.apply(vars, res.Type, refs), refs)
 }
 
 // export returns the result of a scrap whose body names the alias a: the
@@ -470,6 +471,7 @@ func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 		return c.recur(x, a, refs)
 	}
 	a.pending, a.args, a.depth, a.back = true, refs, c.payloads, NoType
+	before := c.reg.next()
 	aliases, tvars := c.aliases, c.tvars
 	c.aliases, c.tvars = a.scope, nil
 	for i, p := range a.params {
@@ -481,13 +483,17 @@ func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 	a.pending, a.args = false, nil
 	if back != NoType {
 		c.reg.link(back, ref)
+	}
+	// The type prints by the alias's name, unless it is a type that
+	// existed before, such as a primitive or another alias's type, or an
+	// alias in its body named it first.
+	if _, named := c.reg.names[ref]; ref >= before && !named {
 		c.reg.name(ref, typeName{c.define(x, a, ref), refs})
 	}
 	return ref
 }
 
-// define returns the definition of the recursive alias a, whose type for
-// refs is ref.
+// define returns the definition of the alias a, whose type for refs is ref.
 func (c *context) define(x ast.Node, a *alias, ref TypeRef) *typeDef {
 	if a.def != nil {
 		return a.def
