@@ -52,3 +52,4 @@ Medians of 10 runs, Apple M3 Pro, `-cpu 1`.
 |---|---|---|---|---|---|---|---|
 | `149eeed` | Baseline: tree-walking eval over the AST, map frames | 1.18 ms | 3.09 ms | 4.59 ms | 27.3k | 1.04 ms | 49.6 µs |
 | `7a4d0e0` | Eval runs the compiled core: slot frames, match writes slots, failures panic | 0.31 ms | 1.38 ms | 2.12 ms | 13.9k | 1.02 ms | 49.1 µs |
+| `283734e` | No runtime type checks; tail calls run in constant stack | 0.31 ms | 1.31 ms | 1.51 ms | 13.9k | 1.00 ms | 48.8 µs |
