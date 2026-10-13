@@ -5,7 +5,12 @@ import "testing"
 // Sources whose results are known to break SPEC.md section 10, rule 6: a
 // printed value must evaluate to the same value, which prints identically.
 // TestRoundTrip checks that each still breaks, so a fix must remove it here.
-var brokenRoundTrips = map[string]string{}
+var brokenRoundTrips = map[string]string{
+	// Closures of one lambda in different frames print with the last
+	// frame's bindings (TODO.md section 8).
+	`list/map mk [1, 2] ; mk = n -> (x -> x + n)`:                 "both closures print with n = 2",
+	`list/fold (y -> y) (acc -> x -> (y -> acc y + x)) [1, 2, 3]`: "acc prints as calling itself",
+}
 
 // More sources to round-trip, beyond those of the other eval tests.
 var roundTrips = []string{

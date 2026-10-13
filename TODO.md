@@ -66,6 +66,24 @@ back into an error at its edge; builtins still return errors.
       and grow the stack without bound.
 - [ ] Sources have no file name, so errors in drafts don't say which file.
 
+## 8. Printing closures
+
+Known issue: the printer maps each free Ident node to one binding, so
+closures made by the same lambda in different frames all refer to the last
+frame's binding. A printed value can then mean something else, even call
+itself forever: `list/fold (y -> y) (acc -> x -> (y -> acc y + x)) [1, 2, 3]`
+prints `acc = y -> acc y + x''`. The sources are in `brokenRoundTrips`.
+
+Printed values should also stay proportional to the value's size; a 300-step
+version of that fold prints 189 KB.
+
+- [ ] Name clashing bindings with numbers (`acc`, `acc2`) instead of primes,
+      whose length grows with the number of clashes.
+- [ ] Merge bindings that print the same, bottom-up: `list/map mk [1, 1, 1]`
+      prints `n = 1` three times.
+- [ ] Resolve each printed piece of code's free names from its own frame,
+      not through one map for all of them.
+
 ## Accepted
 
 - The type registry only grows. Most programs don't keep accumulating types,
