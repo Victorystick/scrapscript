@@ -187,3 +187,50 @@ func TestDraftsWithPathsCannotBePushed(t *testing.T) {
 		t.Errorf("Expected 'cannot push a draft that refers to a path', got %v", err)
 	}
 }
+
+func TestApply(t *testing.T) {
+	examples := []struct{ fn, arg, result, err string }{
+		{`n -> n + 1`, `1`, `2`, ``},
+		{`list/map (x -> x * 2)`, `[1, 2]`, `[ 2, 4 ]`, ``},
+		{`x -> x`, `y -> y`, `y -> y`, ``},
+		// The application is checked, not only each side.
+		{`x -> x ++ "a"`, `1`, ``, "cannot apply: passed 'int' but expected 'text'"},
+		{`list/map (x -> x + 1)`, `["a"]`, ``, "cannot apply: passed 'list text' but expected 'list int'"},
+		{`1`, `1`, ``, "cannot apply: 'int' is not a function"},
+		// Aliases are defined after the message; different ones with the same
+		// name get primes.
+		{`f ; f : io -> int = _ -> 1 ; io : type = [#err text, #ok]`,
+			`(g ; g : io -> int = _ -> 2 ; io : type = [#err text, #ok])`, ``,
+			"cannot apply: passed 'io -> int' but expected 'io''\n; io : type = [ #err text, #ok ]\n; io' : type = [ #err text, #ok ]"},
+		{`get ; get : pair -> int = p -> p.a ; pair : type = { a : int, b : int }`, `{ a = "x", b = 2 }`, ``,
+			"cannot apply: passed '{ a : text, b : int }' but expected 'pair'\n; pair : type = { a : int, b : int }"},
+		// Variables are named across both types.
+		{`f ; f : a => (a -> a) -> int = _ -> 1`, `x -> [x]`, ``,
+			"cannot apply: passed 'a -> list a' but expected 'b -> b'"},
+		// Runtime failures are errors too.
+		{`| 0 -> 1`, `2`, ``, `no arm matches 2`},
+		{`t ; t : type = int`, `1`, ``, `cannot evaluate a type`},
+	}
+	for _, ex := range examples {
+		env := NewEnvironment()
+		fn, err := env.Read([]byte(ex.fn))
+		if err != nil {
+			t.Fatal(err)
+		}
+		arg, err := env.Read([]byte(ex.arg))
+		if err != nil {
+			t.Fatal(err)
+		}
+		val, err := env.Apply(fn, arg)
+		switch {
+		case ex.err != "":
+			if err == nil || !strings.Contains(err.Error(), ex.err) {
+				t.Errorf("%s <| %s: got %v, %v; want error %q", ex.fn, ex.arg, val, err, ex.err)
+			}
+		case err != nil:
+			t.Errorf("%s <| %s: %v", ex.fn, ex.arg, err)
+		case val.String() != ex.result:
+			t.Errorf("%s <| %s: got %s, want %s", ex.fn, ex.arg, val, ex.result)
+		}
+	}
+}

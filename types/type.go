@@ -763,12 +763,10 @@ func (r *Registry) errorf(format string, a, b TypeRef) error {
 // format formats the error with its types, which share the names of their
 // variables.
 func (e *typeError) format(r *Registry) error {
-	s := stringer{reg: r}
-	s.reserve(e.a)
-	s.reserve(e.b)
-	msg := strings.Replace(e.msg, "%s", s.string(e.a), 1)
-	msg = strings.Replace(msg, "%s", s.string(e.b), 1)
-	return errors.New(msg + s.where())
+	strs, where := r.Strings(e.a, e.b)
+	msg := strings.Replace(e.msg, "%s", strs[0], 1)
+	msg = strings.Replace(msg, "%s", strs[1], 1)
+	return errors.New(msg + where)
 }
 
 // Describe returns a string representation of a scrap's result: its type,
@@ -830,6 +828,21 @@ func (r *Registry) String(ref TypeRef) string {
 	s := stringer{reg: r}
 	s.reserve(ref)
 	return s.string(ref) + s.where()
+}
+
+// Strings returns string representations of types that are shown together,
+// which share the names of their variables and aliases, and the
+// where-clause that defines those aliases once for all of them.
+func (r *Registry) Strings(refs ...TypeRef) (strs []string, where string) {
+	s := stringer{reg: r}
+	for _, ref := range refs {
+		s.reserve(ref)
+	}
+	strs = make([]string, len(refs))
+	for i, ref := range refs {
+		strs[i] = s.string(ref)
+	}
+	return strs, s.where()
 }
 
 const varNames = "abcdefghijklmnopqrstuvwxyz"

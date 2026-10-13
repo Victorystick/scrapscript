@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/Victorystick/scrapscript"
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/yards"
 )
@@ -79,12 +78,13 @@ func evaluate(args []string) {
 	input := must(io.ReadAll(os.Stdin))
 	env := makeEnv()
 	scrap := must(env.Read(input))
-	val := must(env.Eval(scrap))
 
+	var val eval.Value
 	if len(args) >= 2 && args[0] == "apply" {
-		scrap = must(env.Read([]byte(args[1])))
-		fn := must(env.Eval(scrap))
-		val = must(scrapscript.Call(fn, val))
+		fn := must(env.Read([]byte(args[1])))
+		val = must(env.Apply(fn, scrap))
+	} else {
+		val = must(env.Eval(scrap))
 	}
 
 	fmt.Println(env.Scrap(val))

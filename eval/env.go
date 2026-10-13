@@ -280,6 +280,38 @@ func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
 	return s.value, nil
 }
 
+// Apply type-checks and evaluates the function fn applied to arg, as if fn
+// were called with arg in the same scrap.
+func (e *Environment) Apply(fn, arg *Scrap) (v Value, err error) {
+	ares, err := e.infer(arg)
+	if err != nil {
+		return nil, err
+	}
+	fres, err := e.infer(fn)
+	if err != nil {
+		return nil, err
+	}
+	a, err := e.eval(arg, ares)
+	if err != nil {
+		return nil, err
+	}
+	f, err := e.eval(fn, fres)
+	if err != nil {
+		return nil, err
+	}
+	fnType, param := e.reg.Instantiate(fres.Type), e.reg.Var()
+	if e.reg.Unify(fnType, e.reg.Func(param, e.reg.Var())) != nil {
+		strs, where := e.reg.Strings(fnType)
+		return nil, fmt.Errorf("cannot apply: '%s' is not a function%s", strs[0], where)
+	}
+	if argType := e.reg.Instantiate(ares.Type); e.reg.Unify(param, argType) != nil {
+		strs, where := e.reg.Strings(argType, param)
+		return nil, fmt.Errorf("cannot apply: passed '%s' but expected '%s'%s", strs[0], strs[1], where)
+	}
+	defer catch(&err)
+	return apply(f, a), nil
+}
+
 // Infer returns the string representation of the type of a Scrap.
 func (e *Environment) Infer(s *Scrap) (string, error) {
 	res, err := e.infer(s)

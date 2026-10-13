@@ -33,9 +33,6 @@ type Variant struct {
 	value Value
 }
 
-// A function value, as hosts call it.
-type Func func(Value) (Value, error)
-
 // A built-in function.
 type BuiltInFunc struct {
 	name string
@@ -158,15 +155,3 @@ func (v Variant) String() string      { return Print(v) }
 func (bf BuiltInFunc) String() string { return Print(bf) }
 func (p Partial) String() string      { return Print(p) }
 func (sf ScriptFunc) String() string  { return Print(sf) }
-
-// Callable returns a function value as a Func, or nil if it isn't one.
-func Callable(val Value) Func {
-	switch val.(type) {
-	case ScriptFunc, BuiltInFunc, Partial:
-		return func(arg Value) (v Value, err error) {
-			defer catch(&err)
-			return apply(val, arg), nil
-		}
-	}
-	return nil
-}
