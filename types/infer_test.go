@@ -169,6 +169,7 @@ func TestInfer(t *testing.T) {
 
 		// Composition
 		{`f >> g ; f = x -> x + 1 ; g = x -> [x]`, `int -> list int`},
+		{`g << f ; f = x -> x + 1 ; g = x -> [x]`, `int -> list int`},
 
 		// Bindings are generalized.
 		{`{ a = 1 >+ e, b = "" >+ e } ; e = []`, `{ a : list int, b : list text }`},

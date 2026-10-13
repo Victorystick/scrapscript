@@ -178,6 +178,10 @@ func (s *scanner) token() token.Token {
 	case '|':
 		return s.switch2(token.PIPE, '>', token.RPIPE)
 	case '<':
+		if s.at(start+1) == '<' {
+			s.pos++
+			return token.LCOMP
+		}
 		return s.switch2(token.LT, '|', token.LPIPE)
 	case '>':
 		if s.at(start+1) == '>' {

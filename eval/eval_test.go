@@ -64,6 +64,9 @@ var expressions = []struct {
 		  | "cat" -> "kitten"
 	    | "dog" -> "puppy"
 	    |   a   -> "baby " ++ a`, `"kitten"`},
+	{`(f << g) 3 ; f = x -> x * 2 ; g = x -> x + 1`, `8`},
+	{`(f >> g) 3 ; f = x -> x * 2 ; g = x -> x + 1`, `7`},
+	{`3 |> f << g ; f = x -> [x] ; g = x -> x + 1`, `[ 4 ]`},
 	{`(x -> x) (y -> y)`, `y -> y`},
 	{`#just 2 |> | #just 2 -> "two" | #just _ -> "other" | #no -> "x"`, `"two"`},
 	// {`| "hey" -> ""
@@ -180,6 +183,8 @@ var exp2str = []struct{ source, result string }{
 	{`~ff`, "~FF"},
 	{`~~abcd`, "~~abcd"},
 	{`f 1 <| 2 ; f = a -> b -> a + b`, "3"},
+	{`2 |> f <| 3 ; f = a -> b -> a - b`, "-1"},
+	{`f <| 3 |> g ; f = a -> [a] ; g = a -> a + 1`, "[ 4 ]"},
 	{`f 1 2 ; f = a -> b -> a + b`, "3"},
 	{`1 + 2 * floor 3.4`, "7"},
 	{`2 * ceil 2.2 + 1`, "7"},

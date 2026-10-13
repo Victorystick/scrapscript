@@ -261,6 +261,8 @@ func TestCompile(t *testing.T) {
 		// Composition.
 		{`f >> g ; f = x -> x ; g = x -> x`,
 			`((>> ^f@0.0 ^g@0.1 @0 @1) ; >0 (fn/1 home=f | >0 -> @0) ; >1 (fn/1 home=g | >0 -> @0))`, 2},
+		{`g << f ; f = x -> x ; g = x -> x`,
+			`((>> ^f@0.0 ^g@0.1 @0 @1) ; >0 (fn/1 home=f | >0 -> @0) ; >1 (fn/1 home=g | >0 -> @0))`, 2},
 		// Builtins are free names too.
 		{`xs -> list/map (x -> x) xs`,
 			`(fn/1 ^list/map | >0 -> ((list/map (fn/1 | >0 -> @0)) @0))`, 0},

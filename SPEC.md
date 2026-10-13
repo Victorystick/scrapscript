@@ -94,7 +94,7 @@ Comments:
 Binary operators are the following tokens:
 
 ```
-|>  >>  ==  /=  <  <=  >  >=  ++  >+  +<  +  -  *  /  %  ^
+|>  <|  >>  <<  ==  /=  <  <=  >  >=  ++  >+  +<  +  -  *  /  %  ^
 ```
 
 **A binary operator must have whitespace (or a delimiter) on both sides.**
@@ -135,8 +135,9 @@ arm      = "|" pattern { "->" pattern } "->" arm-body    # one pattern per argum
 arm-body = cmp                                   # NOT a bare match or a bare lambda: parenthesise
 
 binder   = NAME | "_"                            # "_" ignores the argument
-pipe     = comp { "|>" comp } [ "|>" body ]      # left-assoc; the last operand may be a function
-comp     = cmp { ">>" cmp }                      # left-assoc: f >> g is x -> g (f x)
+pipe     = comp { "|>" comp }                    # |> left-assoc, <| right-assoc
+           [ ( "|>" | "<|" ) body ]              # the last operand may be a function
+comp     = cmp { ( ">>" | "<<" ) cmp }           # left-assoc: f >> g and g << f are x -> g (f x)
 cmp      = listop [ cmp-op listop ]              # non-associative
 cmp-op   = "==" | "/=" | "<" | "<=" | ">" | ">="
 listop   = cat ( ">+" listop | { "+<" cat } )    # cons right-assoc; snoc left-assoc
@@ -173,7 +174,7 @@ Notes:
 - Commas are separators, not operators. Trailing commas are an error
   (revisit).
 - Comparisons are non-associative: `a < b < c` is a syntax error.
-- **Arms end at pipes.** An arm's body stops before `|>` and `>>`, so a pipe
+- **Arms end at pipes.** An arm's body stops before `|>`, `<|`, `>>` and `<<`, so a pipe
   after a match function applies the whole function, and the function can be
   piped into: `x |> | 0 -> "zero" | _ -> "other"`. The last operand of a
   pipe may be a function, which extends to the right: `3 |> a -> a + 1`.
@@ -236,8 +237,8 @@ Desugaring:
 
 | Surface | Core |
 |---|---|
-| `a \|> f` | `Apply(f, a)` |
-| `f >> g` | `Fn(Apply(g, Apply(f, Var0)))` (no generated names) |
+| `a \|> f`, `f <\| a` | `Apply(f, a)` |
+| `f >> g`, `g << f` | `Fn(Apply(g, Apply(f, Var0)))` (no generated names) |
 | `a + b` etc. | `Apply(Apply(Var(add), a), b)` against the platform prelude, or dedicated primitive nodes (decide once) |
 | `a >+ xs` / `xs +< a` | cons / snoc primitives |
 | `#tag` | `Variant(tag, Hole)` |
@@ -249,7 +250,6 @@ Desugaring:
 
 | Removed | Reason |
 |---|---|
-| `<\|`, `<<` | second spelling of `\|>`, `>>` |
 | `//`, `>*` | `//` was unevaluated; `>*` had no semantics. Use named functions. |
 | `!`, `?` | no specified meaning. If wanted, name them (`assert`). |
 | `@` | replaced by `.field` |
@@ -712,7 +712,7 @@ elsewhere, and leaves some of it open.
 - Match functions as the only control flow, with multi-pattern arms
   (`| 1 -> 2 -> 3`); no FLOAT patterns.
 - `()` as the hole; INT, FLOAT, TEXT, BYTE and BYTES literals: `~FF` is one
-  byte, `~~aGk=` is base64 bytes, and hashes are `$scheme:hex`.
+  byte and `~~aGk=` is base64 bytes.
 - Names with `-` and `/`: `bytes/to-utf8-text`.
 - Records with `..r` spread first, which can update fields but not change their
   types; record patterns with the rest first, `{ ..x, a = 1 }`.
@@ -732,8 +732,8 @@ elsewhere, and leaves some of it open.
 | `scoop::chocolate`, `(#radius int)::radius 4` | `#chocolate`; `::` removed | Tags are structural, so they need no type to build them |
 | `t : #a a #b int`, a type as tags side by side | `t : type = [#a a, #b int]` | The guide's form is clean, but ambiguous with tag values and payloads |
 | Variants printed with their type, `(result text e)::ok "hi"` | `#ok "hi"` | Values carry no types at runtime |
-| `<\|`, `<<`, `//`, `&&`, `\|\|`, `@` | Removed (section 6) | One spelling per thing; matching is the only branching |
-| Hash of the flat encoding, `$sha1~~…` | Hash of the source, `$source:…` | No canonical encoding yet; others can be added as schemes (section 9) |
+| `//`, `&&`, `\|\|`, `@` | Removed (section 6) | `//` was unevaluated; `@` is spelled `.field`; matching is the only branching |
+| sha1 of the flat encoding, written `$sha1~~…` | sha256 of the source, written `$source:` and hex digits (section 9) | No canonical encoding yet; hex is what `sha256sum` prints; other encodings can be added as schemes |
 
 **Open:**
 

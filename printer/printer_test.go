@@ -73,6 +73,7 @@ var trees = []string{
 	`x -> y -> x + y`,
 	`(x -> x) >> (y -> y)`,
 	`f >> g >> h`,
+	`f << g << h`,
 	`f <| g <| x`,
 	`(f <| g) <| x`,
 	`3 |> a -> b -> a`,

@@ -67,6 +67,8 @@ var elements = []elt{
 	{token.PIPE, "|", operator},
 	{token.LPIPE, "<|", operator},
 	{token.RPIPE, "|>", operator},
+	{token.RCOMP, ">>", operator},
+	{token.LCOMP, "<<", operator},
 
 	{token.LT, "<", operator},
 	{token.GT, ">", operator},
