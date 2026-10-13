@@ -20,6 +20,9 @@ var evalSources = []struct{ name, source string }{
     | 0 -> 0
     | 1 -> 1
     | n -> fib (n - 1) + fib (n - 2)`},
+	// Tail calls with an accumulator, in a curried function.
+	{"loop", `fib 0 1 10000
+; fib = a -> b -> | 0 -> a | n -> fib b (a + b) (n - 1)`},
 	// List patterns.
 	{"sum", `sum (list/repeat 1000 1)
 ; sum = | [] -> 0 | x >+ xs -> x + sum xs`},

@@ -34,6 +34,7 @@ the same machine; each milestone below names it.
 | `Infer` | Type inference on 1000 bindings. |
 | `Read` | The front end for a program and its drafts: loading, parsing and checking `Eval/echo`. |
 | `Eval/fib` | Calls and integer arithmetic. |
+| `Eval/loop` | Tail calls with an accumulator, 10000 deep. |
 | `Eval/sum` | List patterns, recursing over 1000 elements. |
 | `Eval/fold` | A builtin calling back into a closure, 10000 times. |
 | `Eval/records` | Record spreads and field access. |
