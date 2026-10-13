@@ -10,20 +10,20 @@ SPEC.md section 5 describes a desugared core, but the checker, the evaluator
 and the printer each walk the surface AST, handling pipes, composition,
 multi-pattern arms, where-groups and pattern operators separately.
 
-- [ ] Define the core IR, with each node pointing back to its AST node for
+- [x] Define the core IR, with each node pointing back to its AST node for
       errors and for printing closures.
-- [ ] Lower the AST to it after type checking.
-- [ ] Evaluate the core instead of the AST.
+- [x] Lower the AST to it after type checking.
+- [x] Evaluate the core instead of the AST.
 - [ ] Later: define the canonical encoding and the `core` hash scheme on it
       (SPEC.md section 9.1.1).
 
 ## 2. Eval re-reads source text on the hot path
 
-- [ ] Resolve variables to frame slots (depth, index) instead of looking up
+- [x] Resolve variables to frame slots (depth, index) instead of looking up
       names, which re-scans each token (`TokenText`) and allocates a string.
-- [ ] Frames as `[]Value` instead of a `Variables` map per call and per match
+- [x] Frames as `[]Value` instead of a `Variables` map per call and per match
       arm.
-- [ ] Decode literals once, not on every evaluation.
+- [x] Decode literals once, not on every evaluation.
 
 ## 3. Types are dropped before evaluation
 
@@ -34,14 +34,17 @@ multi-pattern arms, where-groups and pattern operators separately.
 
 ## 4. Errors everywhere after type checking
 
-`(Value, error)` dates from before the checker existed.
+`(Value, error)` dates from before the checker existed. The evaluator now
+returns plain values and panics with a `runtimeError`, which `catch` turns
+back into an error at its edge; builtins still return errors.
 
-- [ ] Drop the runtime type checks (`c.int`, `c.list`, …) that the checker
-      already guarantees.
-- [ ] Keep errors only for real runtime failures: unmatched TEXT, INT or
-      BYTES patterns, and builtins.
-- [ ] Match without panic and recover: return a bool and write into the
+- [ ] Drop the runtime type checks (`runAs`, the operand type switches in
+      `run`) that the checker already guarantees.
+- [ ] Builtins return plain values and panic like the evaluator.
+- [x] Match without panic and recover: return a bool and write into the
       frame.
+- [ ] Check exhaustiveness for all patterns, not only enums (SPEC.md
+      section 7.1); then a well-typed scrap never reaches "no arm matches".
 
 ## 5. Closures keep their whole scope chain
 

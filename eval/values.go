@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"maps"
 	"slices"
-
-	"github.com/Victorystick/scrapscript/ast"
 )
 
 // Values
@@ -51,15 +49,17 @@ type Partial struct {
 	fn   Func
 }
 
-// A user-defined function: a Func, MatchFunc or composition node, closed
-// over the context it was evaluated in.
+// A user-defined function: a lambda or composition node of a program,
+// closed over the frame it was made in.
 type ScriptFunc struct {
-	ctx  *context
-	node ast.Node
+	prog *program
+	node cnode
+	env  *frame
+	// A composition's functions, in the order they are applied.
+	composed []Value
 	// The hash reference that it was imported by, which it prints as, if it
 	// is the value of a published scrap.
 	ref string
-	fn  Func
 }
 
 func Equals(a, b Value) bool {
@@ -159,9 +159,13 @@ func (bf BuiltInFunc) String() string { return Print(bf) }
 func (p Partial) String() string      { return Print(p) }
 func (sf ScriptFunc) String() string  { return Print(sf) }
 
+// Callable returns a function value as a Func, or nil if it isn't one.
 func Callable(val Value) Func {
 	if f, ok := val.(ScriptFunc); ok {
-		return f.fn
+		return func(arg Value) (v Value, err error) {
+			defer catch(&err)
+			return f.call(arg), nil
+		}
 	}
 	if f, ok := val.(BuiltInFunc); ok {
 		return f.fn

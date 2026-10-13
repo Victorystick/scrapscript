@@ -96,8 +96,8 @@ func readBench(b *testing.B, source string) (*Environment, *Scrap) {
 	return e, scrap
 }
 
-// BenchmarkEval measures walking the tree while evaluating. Only the root
-// is evaluated each time; the values of the drafts it refers to are cached.
+// BenchmarkEval measures evaluating a compiled program. Only the root is
+// evaluated each time; the values of the drafts it refers to are cached.
 func BenchmarkEval(b *testing.B) {
 	for _, ex := range evalSources {
 		b.Run(ex.name, func(b *testing.B) {
@@ -105,13 +105,17 @@ func BenchmarkEval(b *testing.B) {
 			if _, err := e.infer(scrap); err != nil {
 				b.Fatal(err)
 			}
-			evalImport := func(n ast.Node) (Value, error) {
+			c, err := compile(&scrap.expr, e.vars)
+			if err != nil {
+				b.Fatal(err)
+			}
+			p := &program{core: c, evalImport: func(n ast.Node) (Value, error) {
 				dep := scrap.deps[n]
 				return e.eval(dep, dep.result)
-			}
+			}}
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := Eval(scrap.expr, e.vars, evalImport); err != nil {
+				if _, err := p.eval(); err != nil {
 					b.Fatal(err)
 				}
 			}

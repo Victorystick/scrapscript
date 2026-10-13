@@ -40,16 +40,15 @@ func Print(v Value) string {
 // to and so binds.
 type binding struct {
 	bindingKey
-	// Its Where node in frame.src, or None if frame isn't a where-group.
-	where   ast.Node
-	value   Value  // nil for a sort binding
-	printed string // its name in the printed scrap
+	prog    *program // whose binders key.b is in
+	value   Value    // nil for a sort binding
+	printed string   // its name in the printed scrap
 }
 
+// A bindingKey is a binder of the frame that binds it.
 type bindingKey struct {
-	frame *context
-	name  string
-	sort  bool
+	frame *frame
+	b     int32 // the index in binders of the program that frame belongs to
 }
 
 type srcNode struct {
@@ -68,16 +67,25 @@ type valuePrinter struct {
 	idents map[string]bool
 }
 
-// home returns the name of the binding that defines a function, if its
-// value is that very function.
-func home(sf ScriptFunc) (string, bool) {
-	for _, b := range sf.ctx.binds {
-		_, id, _, val := sf.ctx.src.Where(b)
-		if val == sf.node && !sf.ctx.src.Sort(b) {
-			return sf.ctx.src.TokenText(id), true
-		}
+func (b *binding) binder() binder {
+	return b.prog.binders[b.b]
+}
+
+// uses returns the index in sf.prog.uses of what sf's code refers to.
+func (sf ScriptFunc) uses() int32 {
+	if sf.composed != nil {
+		_, _, u := sf.prog.compose(sf.node)
+		return u
 	}
-	return "", false
+	_, u, _ := sf.prog.lambda(sf.node)
+	return u
+}
+
+// home returns the key of the binding that defines sf, if its value is sf
+// itself.
+func home(sf ScriptFunc) (bindingKey, bool) {
+	h := sf.prog.uses[sf.uses()].home
+	return bindingKey{sf.env, h}, h >= 0
 }
 
 // collect finds the bindings that v refers to.
@@ -106,47 +114,36 @@ func (p *valuePrinter) collect(v Value) {
 		if v.ref != "" {
 			return
 		}
-		if name, ok := home(v); ok {
-			p.need(bindingKey{v.ctx, name, false})
+		if key, ok := home(v); ok {
+			p.need(v.prog, key)
 			return
 		}
-		p.code(v.ctx, v.node)
+		p.code(v.prog, v.env, v.uses())
 	}
 }
 
-// need returns the binding for key, finding what it refers to the first
-// time.
-func (p *valuePrinter) need(key bindingKey) *binding {
+// need returns the binding for key, a binder of prog, finding what it
+// refers to the first time.
+func (p *valuePrinter) need(prog *program, key bindingKey) *binding {
 	if b := p.byKey[key]; b != nil {
 		return b
 	}
-	b := &binding{bindingKey: key}
+	b := &binding{bindingKey: key, prog: prog}
 	p.byKey[key] = b
 	p.bindings = append(p.bindings, b)
 
-	src := key.frame.src
-	for _, w := range key.frame.binds {
-		_, id, _, _ := src.Where(w)
-		if src.TokenText(id) == key.name && src.Sort(w) == key.sort {
-			b.where = w
-			break
-		}
-	}
-	if b.where != ast.None {
-		_, _, typ, val := src.Where(b.where)
-		if typ != ast.None {
-			p.typ(key.frame, typ)
-		}
-		if key.sort {
-			p.typ(key.frame, val)
+	bd := b.binder()
+	if bd.where != ast.None {
+		// Its annotation, or a sort binding's type.
+		p.code(prog, key.frame, bd.types)
+		if bd.sort {
 			return b
 		}
 	}
 
-	b.value = key.frame.vars.Get(key.name)
+	b.value = key.frame.slots[bd.slot]
 	if p.defines(b) {
-		_, _, _, val := src.Where(b.where)
-		p.code(key.frame, val)
+		p.code(prog, key.frame, b.value.(ScriptFunc).uses())
 	} else {
 		p.collect(b.value)
 	}
@@ -157,235 +154,31 @@ func (p *valuePrinter) need(key bindingKey) *binding {
 // prints as its code.
 func (p *valuePrinter) defines(b *binding) bool {
 	sf, ok := b.value.(ScriptFunc)
-	if !ok || sf.ref != "" || sf.ctx != b.frame || b.where == ast.None {
+	if !ok || sf.ref != "" || sf.prog != b.prog {
 		return false
 	}
-	_, _, _, val := b.frame.src.Where(b.where)
-	return val == sf.node
+	key, ok := home(sf)
+	return ok && key == b.bindingKey
 }
 
-// resolve returns the binding that a free name in frame refers to, or nil
-// if it is a builtin.
-func (p *valuePrinter) resolve(frame *context, name string) *binding {
-	for c := frame; c != nil; c = c.parent {
-		v := c.vars.Get(name)
-		if v == nil {
+// code finds the bindings that the code with uses u, in frame f of prog,
+// refers to.
+func (p *valuePrinter) code(prog *program, f *frame, u int32) {
+	us := prog.uses[u]
+	for _, name := range us.names {
+		p.idents[name] = true
+	}
+	for _, r := range us.free {
+		if r.b < 0 {
+			p.names[prog.src.TokenText(prog.src.Main(r.ident))] = true
 			continue
 		}
-		if bf, ok := v.(BuiltInFunc); ok && c.parent == nil && bf.name == name {
-			p.names[name] = true
-			return nil
+		bf := f
+		for range r.depth {
+			bf = bf.parent
 		}
-		return p.need(bindingKey{c, name, false})
+		p.refs[srcNode{prog.src, r.ident}] = p.need(prog, bindingKey{bf, r.b})
 	}
-	p.names[name] = true
-	return nil
-}
-
-// resolveType returns the sort binding that a free type name in frame
-// refers to, or nil if it is a builtin type.
-func (p *valuePrinter) resolveType(frame *context, name string) *binding {
-	for c := frame; c != nil; c = c.parent {
-		for _, w := range c.binds {
-			_, id, _, _ := c.src.Where(w)
-			if c.src.Sort(w) && c.src.TokenText(id) == name {
-				return p.need(bindingKey{c, name, true})
-			}
-		}
-	}
-	p.names[name] = true
-	return nil
-}
-
-// code finds the bindings that the free names of the code x in frame refer
-// to.
-func (p *valuePrinter) code(frame *context, x ast.Node) {
-	w := walker{p: p, frame: frame, se: frame.src,
-		values: make(map[string]int), types: make(map[string]int)}
-	w.expr(x)
-}
-
-// typ finds the sort bindings that the free names of the type x in frame
-// refer to.
-func (p *valuePrinter) typ(frame *context, x ast.Node) {
-	w := walker{p: p, frame: frame, se: frame.src,
-		values: make(map[string]int), types: make(map[string]int)}
-	w.typ(x)
-}
-
-// A walker finds the free names of code, and the bindings they refer to.
-type walker struct {
-	p     *valuePrinter
-	frame *context
-	se    *ast.SourceExpr
-	// The names bound within the code, by how many binders bind them.
-	values, types map[string]int
-}
-
-func (w *walker) ident(x ast.Node) string {
-	name := w.se.TokenText(w.se.Main(x))
-	w.p.idents[name] = true
-	return name
-}
-
-func (w *walker) expr(x ast.Node) {
-	se := w.se
-	switch se.Kind(x) {
-	case ast.Ident:
-		if name := w.ident(x); w.values[name] == 0 {
-			if b := w.p.resolve(w.frame, name); b != nil {
-				w.p.refs[srcNode{se, x}] = b
-			}
-		}
-	case ast.Binary:
-		_, left, right := se.Binary(x)
-		w.expr(left)
-		w.expr(right)
-	case ast.Call:
-		fn, arg := se.Call(x)
-		w.expr(fn)
-		w.expr(arg)
-	case ast.Func:
-		arg, body := se.Func(x)
-		defer w.bind(w.values, w.ident(arg))()
-		w.expr(body)
-	case ast.MatchFunc:
-		for _, arm := range se.Arms(x) {
-			w.arm(arm)
-		}
-	case ast.Variant:
-		if _, payload := se.Variant(x); payload != ast.None {
-			w.expr(payload)
-		}
-	case ast.Record:
-		rest, fields := se.Record(x)
-		if rest != ast.None {
-			w.expr(rest)
-		}
-		for i := range fields.Len() {
-			w.expr(fields.Value(i))
-		}
-	case ast.Access:
-		rec, _ := se.Access(x)
-		w.expr(rec)
-	case ast.List:
-		for _, elem := range se.List(x) {
-			w.expr(elem)
-		}
-	case ast.Where:
-		body, binds := se.Group(x)
-		for _, b := range binds {
-			_, id, _, _ := se.Where(b)
-			names := w.values
-			if se.Sort(b) {
-				names = w.types
-			}
-			name := se.TokenText(id)
-			w.p.idents[name] = true
-			defer w.bind(names, name)()
-		}
-		for _, b := range binds {
-			_, _, typ, val := se.Where(b)
-			if typ != ast.None {
-				w.typ(typ)
-			}
-			if se.Sort(b) {
-				w.typ(val)
-			} else {
-				w.expr(val)
-			}
-		}
-		w.expr(body)
-	}
-}
-
-// arm walks a match arm, whose pattern binds names in its body.
-func (w *walker) arm(arm ast.Node) {
-	pat, body := w.se.Func(arm)
-	var names []string
-	w.pattern(pat, &names)
-	for _, name := range names {
-		defer w.bind(w.values, name)()
-	}
-	w.expr(body)
-}
-
-// pattern adds the names that the pattern x binds to names.
-func (w *walker) pattern(x ast.Node, names *[]string) {
-	se := w.se
-	switch se.Kind(x) {
-	case ast.Ident:
-		*names = append(*names, w.ident(x))
-	case ast.Variant:
-		if _, payload := se.Variant(x); payload != ast.None {
-			w.pattern(payload, names)
-		}
-	case ast.Record:
-		rest, fields := se.Record(x)
-		if rest != ast.None {
-			w.pattern(rest, names)
-		}
-		for i := range fields.Len() {
-			w.pattern(fields.Value(i), names)
-		}
-	case ast.List:
-		for _, elem := range se.List(x) {
-			w.pattern(elem, names)
-		}
-	case ast.Binary:
-		_, left, right := se.Binary(x)
-		w.pattern(left, names)
-		w.pattern(right, names)
-	}
-}
-
-func (w *walker) typ(x ast.Node) {
-	se := w.se
-	switch se.Kind(x) {
-	case ast.Ident:
-		if name := w.ident(x); w.types[name] == 0 {
-			if b := w.p.resolveType(w.frame, name); b != nil {
-				w.p.refs[srcNode{se, x}] = b
-			}
-		}
-	case ast.Forall:
-		param, t := se.Forall(x)
-		name := se.TokenText(param)
-		w.p.idents[name] = true
-		defer w.bind(w.types, name)()
-		w.typ(t)
-	case ast.Func, ast.Call:
-		l, r := se.Func(x)
-		w.typ(l)
-		w.typ(r)
-	case ast.RecordType:
-		tail, fields := se.Record(x)
-		if tail != ast.None {
-			w.typ(tail)
-		}
-		for i := range fields.Len() {
-			w.typ(fields.Value(i))
-		}
-	case ast.Enum:
-		tail, variants := se.Enum(x)
-		if tail != ast.None {
-			w.typ(tail)
-		}
-		for _, v := range variants {
-			if _, payload := se.Variant(v); payload != ast.None {
-				w.typ(payload)
-			}
-		}
-	}
-}
-
-// bind binds name in names, until the returned function is called.
-func (w *walker) bind(names map[string]int, name string) func() {
-	if name == "_" {
-		return func() {}
-	}
-	names[name]++
-	return func() { names[name]-- }
 }
 
 // name names the bindings: each by its own name, unless an earlier binding
@@ -394,8 +187,9 @@ func (w *walker) bind(names map[string]int, name string) func() {
 func (p *valuePrinter) name() {
 	taken := make(map[string]bool, len(p.bindings))
 	for _, b := range p.bindings {
-		name := b.name
-		for p.names[name] || taken[name] || name != b.name && p.idents[name] {
+		own := b.binder().name
+		name := own
+		for p.names[name] || taken[name] || name != own && p.idents[name] {
 			name += "'"
 		}
 		taken[name] = true
@@ -409,15 +203,16 @@ func (p *valuePrinter) print(v Value) string {
 	for _, b := range p.bindings {
 		s.WriteString("\n; ")
 		s.WriteString(b.printed)
-		if b.where == ast.None {
+		bd := b.binder()
+		if bd.where == ast.None {
 			s.WriteString(" = ")
 			p.value(&s, b.value, printer.Body)
 			continue
 		}
-		pr := p.printer(b.frame.src)
-		_, _, typ, val := b.frame.src.Where(b.where)
-		if b.sort || p.defines(b) {
-			pr.Binding(typ, val, b.sort)
+		pr := p.printer(b.prog.src)
+		_, _, typ, val := b.prog.src.Where(bd.where)
+		if bd.sort || p.defines(b) {
+			pr.Binding(typ, val, bd.sort)
 			s.WriteString(pr.String())
 			continue
 		}
@@ -506,11 +301,11 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 	case ScriptFunc:
 		if v.ref != "" {
 			s.WriteString(v.ref)
-		} else if name, ok := home(v); ok {
-			s.WriteString(p.byKey[bindingKey{v.ctx, name, false}].printed)
+		} else if key, ok := home(v); ok {
+			s.WriteString(p.byKey[key].printed)
 		} else {
-			pr := p.printer(v.ctx.src)
-			pr.Expr(v.node, ctx)
+			pr := p.printer(v.prog.src)
+			pr.Expr(v.prog.at[v.node], ctx)
 			s.WriteString(pr.String())
 		}
 	}

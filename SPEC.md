@@ -269,7 +269,9 @@ Desugaring:
   it lists, so it is exhaustive by construction. A wildcard arm leaves the
   argument type open. Exhaustiveness is a typing rule: a scrap that type-checks
   cannot raise a match error. INT, BYTE, TEXT and BYTES patterns always need a
-  catch-all arm.
+  catch-all arm. Not yet enforced: the checker closes enums but checks no
+  other patterns, and until it does, a match that no arm accepts stops
+  evaluation with an error.
 - Records and variants share one row mechanism (7.3).
 - Int and Float are separate types with no overloading. Type classes are
   deferred; until then arithmetic uses separate Int and Float operators.

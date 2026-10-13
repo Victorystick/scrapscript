@@ -257,7 +257,11 @@ func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
 		return nil, fmt.Errorf("cannot evaluate a type")
 	}
 	if s.value == nil {
-		value, err := Eval(s.expr, e.vars, func(n ast.Node) (Value, error) {
+		c, err := compile(&s.expr, e.vars)
+		if err != nil {
+			return nil, err
+		}
+		p := &program{core: c, evalImport: func(n ast.Node) (Value, error) {
 			dep := s.deps[n]
 			v, err := e.eval(dep, dep.result)
 			// A published function prints as the reference to it.
@@ -266,7 +270,8 @@ func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
 				return sf, err
 			}
 			return v, err
-		})
+		}}
+		value, err := p.eval()
 		if err != nil {
 			return nil, err
 		}
