@@ -13,7 +13,7 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	var scope types.TypeScope
 	var builtIns = make(Variables)
 
-	define := func(name string, typ types.TypeRef, val Func) {
+	define := func(name string, typ types.TypeRef, val func(Value) Value) {
 		builtIns[name] = BuiltInFunc{name, val}
 		scope = scope.Bind(name, typ)
 	}
@@ -25,151 +25,94 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	bList := reg.List(b)
 	textList := reg.List(types.TextRef)
 
-	// Lists
-	define("list/length", reg.Func(aList, types.IntRef), func(val Value) (Value, error) {
-		ls, ok := val.(List)
-		if !ok {
-			return nil, fmt.Errorf("expected list, but got %T", val)
-		}
-		return Int(len(ls.elements)), nil
-	})
-	define("list/map", reg.Func(aToB, reg.Func(aList, bList)), func(val Value) (Value, error) {
-		fn := Callable(val)
-		if fn == nil {
-			// TODO: need more context to give better error messages.
-			return nil, fmt.Errorf("needed function, but got %T", val)
-		}
-		return Partial{
-			name: "list/map", args: []Value{val},
-			fn: func(val Value) (v Value, err error) {
-				ls, ok := val.(List)
-				if !ok {
-					return nil, fmt.Errorf("expected list, but got %T", val)
-				}
+	// The checker guarantees the arguments' types, so builtins only fail on
+	// their values.
 
-				results := List{elements: make([]Value, len(ls.elements))}
-				for i, v := range ls.elements {
-					val, err = fn(v)
-					if err != nil {
-						return nil, err
-					}
-					results.elements[i] = val
+	// Lists
+	define("list/length", reg.Func(aList, types.IntRef), func(ls Value) Value {
+		return Int(len(ls.(List).elements))
+	})
+	define("list/map", reg.Func(aToB, reg.Func(aList, bList)), func(fn Value) Value {
+		return Partial{
+			name: "list/map", args: []Value{fn},
+			fn: func(ls Value) Value {
+				elems := ls.(List).elements
+				results := make([]Value, len(elems))
+				for i, v := range elems {
+					results[i] = apply(fn, v)
 				}
-				return results, nil
+				return List{results}
 			},
-		}, nil
+		}
 	})
 	accum := reg.Func(a, reg.Func(b, a))
-	define("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), func(acc Value) (Value, error) {
+	define("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), func(init Value) Value {
 		return Partial{
-			name: "list/fold", args: []Value{acc},
-			fn: func(val Value) (Value, error) {
-				fn := Callable(val)
-				if fn == nil {
-					// TODO: need more context to give better error messages.
-					return nil, fmt.Errorf("needed function, but got %T", val)
-				}
+			name: "list/fold", args: []Value{init},
+			fn: func(fn Value) Value {
 				return Partial{
-					name: "list/fold", args: []Value{acc, val},
-					fn: func(val Value) (res Value, err error) {
-						ls, ok := val.(List)
-						if !ok {
-							return nil, fmt.Errorf("expected list, but got %T", val)
+					name: "list/fold", args: []Value{init, fn},
+					fn: func(ls Value) Value {
+						acc := init
+						for _, v := range ls.(List).elements {
+							acc = apply(apply(fn, acc), v)
 						}
-						var mid Value
-						for _, v := range ls.elements {
-							mid, err = fn(acc)
-							if err != nil {
-								return nil, err
-							}
-							fn2 := Callable(mid)
-							if fn2 == nil {
-								// TODO: need more context to give better error messages.
-								return nil, fmt.Errorf("needed function, but got %T", val)
-							}
-							acc, err = fn2(v)
-							if err != nil {
-								return nil, err
-							}
-						}
-						return acc, nil
+						return acc
 					},
-				}, nil
+				}
 			},
-		}, nil
+		}
 	})
-	define("list/repeat", reg.Func(types.IntRef, reg.Func(a, aList)), func(val Value) (Value, error) {
-		n, ok := val.(Int)
-		if !ok {
-			return nil, fmt.Errorf("expected int, but got %T", val)
+	define("list/repeat", reg.Func(types.IntRef, reg.Func(a, aList)), func(n Value) Value {
+		count := int(n.(Int))
+		if count < 0 {
+			panic(fail("list/repeat: negative count %d", count))
 		}
 		return Partial{
-			name: "list/repeat", args: []Value{val},
-			fn: func(val Value) (v Value, err error) {
-				elems := make([]Value, int(n))
+			name: "list/repeat", args: []Value{n},
+			fn: func(v Value) Value {
+				elems := make([]Value, count)
 				for i := range elems {
-					elems[i] = val
+					elems[i] = v
 				}
-				return List{elems}, nil
+				return List{elems}
 			},
-		}, nil
+		}
 	})
 
 	// Text
-	define("text/length", reg.Func(types.TextRef, types.IntRef), func(val Value) (Value, error) {
-		text, ok := val.(Text)
-		if !ok {
-			return nil, fmt.Errorf("expected text, but got %T", val)
-		}
-		return Int(len(text)), nil
+	define("text/length", reg.Func(types.TextRef, types.IntRef), func(text Value) Value {
+		return Int(len(text.(Text)))
 	})
-	define("text/repeat", reg.Func(types.IntRef, reg.Func(types.TextRef, types.TextRef)), func(val Value) (Value, error) {
-		n, ok := val.(Int)
-		if !ok {
-			return nil, fmt.Errorf("expected int, but got %T", val)
+	define("text/repeat", reg.Func(types.IntRef, reg.Func(types.TextRef, types.TextRef)), func(n Value) Value {
+		count := int(n.(Int))
+		if count < 0 {
+			panic(fail("text/repeat: negative count %d", count))
 		}
 		return Partial{
-			name: "text/repeat", args: []Value{val},
-			fn: func(val Value) (v Value, err error) {
-				text, ok := val.(Text)
-				if !ok {
-					return nil, fmt.Errorf("expected text, but got %T", val)
-				}
-				return Text(strings.Repeat(string(text), int(n))), nil
+			name: "text/repeat", args: []Value{n},
+			fn: func(text Value) Value {
+				return Text(strings.Repeat(string(text.(Text)), count))
 			},
-		}, nil
-	})
-	define("text/join", reg.Func(types.TextRef, reg.Func(textList, types.TextRef)), func(val Value) (Value, error) {
-		sep, ok := val.(Text)
-		if !ok {
-			return nil, fmt.Errorf("expected text, but got %T", val)
 		}
+	})
+	define("text/join", reg.Func(types.TextRef, reg.Func(textList, types.TextRef)), func(sep Value) Value {
 		return Partial{
-			name: "text/join", args: []Value{val},
-			fn: func(val Value) (v Value, err error) {
-				ls, ok := val.(List)
-				if !ok {
-					return nil, fmt.Errorf("expected list, but got %T", val)
+			name: "text/join", args: []Value{sep},
+			fn: func(ls Value) Value {
+				elems := ls.(List).elements
+				texts := make([]string, len(elems))
+				for i, v := range elems {
+					texts[i] = string(v.(Text))
 				}
-				elems := make([]string, len(ls.elements))
-				for i, v := range ls.elements {
-					text, ok := v.(Text)
-					if !ok {
-						return nil, fmt.Errorf("expected text, but got %T", v)
-					}
-					elems[i] = string(text)
-				}
-				return Text(strings.Join(elems, string(sep))), nil
+				return Text(strings.Join(texts, string(sep.(Text))))
 			},
-		}, nil
+		}
 	})
 
 	// int -> float
-	define("to-float", reg.Func(types.IntRef, types.FloatRef), func(val Value) (Value, error) {
-		if i, ok := val.(Int); ok {
-			return Float(float64(i)), nil
-		}
-		return Int(0), fmt.Errorf("non-int value %T", val)
+	define("to-float", reg.Func(types.IntRef, types.FloatRef), func(i Value) Value {
+		return Float(i.(Int))
 	})
 
 	// float -> int
@@ -179,30 +122,27 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	define("floor", floatToInt, roundFunc(math.Floor))
 
 	// bytes <-> text
-	define("bytes/to-utf8-text", reg.Func(types.BytesRef, types.TextRef), func(val Value) (Value, error) {
-		if bytes, ok := val.(Bytes); ok {
-			if !utf8.Valid(bytes) {
-				return nil, fmt.Errorf("bytes/to-utf8-text: %s is not valid UTF-8", bytes)
-			}
-			return Text(string([]byte(bytes))), nil
+	define("bytes/to-utf8-text", reg.Func(types.BytesRef, types.TextRef), func(v Value) Value {
+		bytes := v.(Bytes)
+		if !utf8.Valid(bytes) {
+			panic(fail("bytes/to-utf8-text: %s is not valid UTF-8", bytes))
 		}
-		return nil, fmt.Errorf("cannot bytes/to-utf8-text on %T", val)
+		return Text(bytes)
 	})
-	define("bytes/from-utf8-text", reg.Func(types.TextRef, types.BytesRef), func(val Value) (Value, error) {
-		if text, ok := val.(Text); ok {
-			return Bytes(text), nil
-		}
-		return nil, fmt.Errorf("cannot bytes/from-utf8-text on %T", val)
+	define("bytes/from-utf8-text", reg.Func(types.TextRef, types.BytesRef), func(text Value) Value {
+		return Bytes(text.(Text))
 	})
 
 	return scope, builtIns
 }
 
-func roundFunc(round func(float64) float64) Func {
-	return func(val Value) (Value, error) {
-		if f, ok := val.(Float); ok {
-			return Int(round(float64(f))), nil
-		}
-		return Int(0), fmt.Errorf("non-float value %T", val)
+func roundFunc(round func(float64) float64) func(Value) Value {
+	return func(f Value) Value {
+		return Int(round(float64(f.(Float))))
 	}
+}
+
+// fail returns a builtin's failure, for it to panic with.
+func fail(format string, args ...any) runtimeError {
+	return runtimeError{fmt.Errorf(format, args...)}
 }

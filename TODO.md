@@ -34,13 +34,12 @@ multi-pattern arms, where-groups and pattern operators separately.
 
 ## 4. Errors everywhere after type checking
 
-`(Value, error)` dates from before the checker existed. The evaluator now
-returns plain values and panics with a `runtimeError`, which `catch` turns
-back into an error at its edge; builtins still return errors.
+`(Value, error)` dates from before the checker existed. The evaluator and
+builtins now return plain values and panic with a `runtimeError`, which
+`catch` turns back into an error at the edge.
 
-- [ ] Drop the runtime type checks (`runAs`, the operand type switches in
-      `run`) that the checker already guarantees.
-- [ ] Builtins return plain values and panic like the evaluator.
+- [x] Drop the runtime type checks that the checker already guarantees.
+- [x] Builtins return plain values and panic like the evaluator.
 - [x] Match without panic and recover: return a bool and write into the
       frame.
 - [ ] Check exhaustiveness for all patterns, not only enums (SPEC.md

@@ -3,7 +3,6 @@ package eval
 import (
 	"fmt"
 	"maps"
-	"reflect"
 	"slices"
 )
 
@@ -69,63 +68,52 @@ func (p *program) run(n cnode, f *frame) Value {
 
 	case opCall:
 		fn := p.run(cnode(d.a), f)
-		return p.apply(cnode(d.a), fn, p.run(cnode(d.b), f))
+		return apply(fn, p.run(cnode(d.b), f))
 
+	// The checker guarantees the operands' types. Overloaded operators still
+	// choose by the left operand at runtime, until types reach the core.
 	case opAdd, opSub, opMul:
-		switch l := p.run(cnode(d.a), f).(type) {
-		case Float:
-			r := runAs[Float](p, cnode(d.b), f, "non-float")
-			return arith(p.ops[n], l, r)
-		case Int:
-			r := runAs[Int](p, cnode(d.b), f, "non-int")
-			return arith(p.ops[n], l, r)
-		default:
-			panic(p.errorf(n, "cannot perform arithmetic on %s", l))
+		l := p.run(cnode(d.a), f)
+		r := p.run(cnode(d.b), f)
+		if l, ok := l.(Int); ok {
+			return arith(p.ops[n], l, r.(Int))
 		}
+		return arith(p.ops[n], l.(Float), r.(Float))
 
 	// Values are immutable, so appending clips the left operand first:
 	// append must copy rather than write into spare capacity that other
 	// values share.
 	case opAppend:
-		switch l := p.run(cnode(d.a), f).(type) {
-		case Bytes:
-			r := runAs[Byte](p, cnode(d.b), f, "non-byte")
-			return append(slices.Clip(l), byte(r))
-		case List:
-			return List{append(slices.Clip(l.elements), p.run(cnode(d.b), f))}
-		default:
-			panic(p.errorf(n, "cannot append to non-list %s", reflect.TypeOf(l)))
+		l := p.run(cnode(d.a), f)
+		r := p.run(cnode(d.b), f)
+		if l, ok := l.(Bytes); ok {
+			return append(slices.Clip(l), byte(r.(Byte)))
 		}
+		ls := l.(List).elements
+		return List{append(slices.Clip(ls), r)}
 
 	case opPrepend:
-		switch r := p.run(cnode(d.b), f).(type) {
-		case Bytes:
-			l := runAs[Byte](p, cnode(d.a), f, "non-byte")
-			return append(Bytes{byte(l)}, r...)
-		case List:
-			return List{append([]Value{p.run(cnode(d.a), f)}, r.elements...)}
-		default:
-			panic(p.errorf(n, "cannot prepend to non-list %s", reflect.TypeOf(r)))
+		r := p.run(cnode(d.b), f)
+		l := p.run(cnode(d.a), f)
+		if r, ok := r.(Bytes); ok {
+			return append(Bytes{byte(l.(Byte))}, r...)
 		}
+		return List{append([]Value{l}, r.(List).elements...)}
 
 	case opConcat:
-		switch l := p.run(cnode(d.a), f).(type) {
+		l := p.run(cnode(d.a), f)
+		r := p.run(cnode(d.b), f)
+		switch l := l.(type) {
 		case Bytes:
-			r := runAs[Bytes](p, cnode(d.b), f, "non-bytes")
-			return append(slices.Clip(l), r...)
-		case List:
-			r := runAs[List](p, cnode(d.b), f, "non-list")
-			return List{append(slices.Clip(l.elements), r.elements...)}
+			return append(slices.Clip(l), r.(Bytes)...)
 		case Text:
-			r := runAs[Text](p, cnode(d.b), f, "non-text")
-			return l + r
-		default:
-			panic(p.errorf(n, "cannot append to non-list %s", reflect.TypeOf(l)))
+			return l + r.(Text)
 		}
+		return List{append(slices.Clip(l.(List).elements), r.(List).elements...)}
 
 	case opCompose:
 		first, second, _ := p.compose(n)
-		fns := []Value{p.fn(first, f), p.fn(second, f)}
+		fns := []Value{p.run(first, f), p.run(second, f)}
 		return ScriptFunc{prog: p, node: n, env: f, composed: fns}
 
 	case opLambda:
@@ -145,7 +133,7 @@ func (p *program) run(n cnode, f *frame) Value {
 			values = make(map[string]Value, len(fields)/2)
 		} else {
 			// A record based on another.
-			values = maps.Clone(runAs[Record](p, rest, f, "non-record").values)
+			values = maps.Clone(p.run(rest, f).(Record).values)
 		}
 		for i := 0; i < len(fields); i += 2 {
 			values[p.strings[fields[i]]] = p.run(cnode(fields[i+1]), f)
@@ -153,13 +141,7 @@ func (p *program) run(n cnode, f *frame) Value {
 		return Record{values}
 
 	case opAccess:
-		r := runAs[Record](p, cnode(d.a), f, "non-record")
-		key := p.strings[d.b]
-		v, ok := r.values[key]
-		if !ok {
-			panic(p.errorf(n, "record %s has no key %s", r, key))
-		}
-		return v
+		return p.run(cnode(d.a), f).(Record).values[p.strings[d.b]]
 
 	case opList:
 		elems := p.range_(n)
@@ -190,46 +172,15 @@ func arith[T ~int | ~float64](o op, a, b T) T {
 	return a * b
 }
 
-// runAs evaluates n, which must be a T; what names T in errors.
-func runAs[T Value](p *program, n cnode, f *frame, what string) T {
-	v := p.run(n, f)
-	if t, ok := v.(T); ok {
-		return t
-	}
-	panic(p.errorf(n, "%s value %s", what, v))
-}
-
-// fn evaluates n, which must be a function.
-func (p *program) fn(n cnode, f *frame) Value {
-	v := p.run(n, f)
-	switch v.(type) {
-	case ScriptFunc, BuiltInFunc, Partial:
-		return v
-	}
-	panic(p.errorf(n, "non-func value %s", v))
-}
-
-// apply calls the function fn, which the expression n evaluated to, with
-// arg.
-func (p *program) apply(n cnode, fn Value, arg Value) Value {
+// apply calls the function fn with arg.
+func apply(fn, arg Value) Value {
 	switch fn := fn.(type) {
 	case ScriptFunc:
 		return fn.call(arg)
 	case BuiltInFunc:
-		return builtin(fn.fn, arg)
-	case Partial:
-		return builtin(fn.fn, arg)
+		return fn.fn(arg)
 	}
-	panic(p.errorf(n, "non-func value %s", fn))
-}
-
-// builtin calls a builtin, whose errors unwind like the evaluator's.
-func builtin(fn Func, arg Value) Value {
-	v, err := fn(arg)
-	if err != nil {
-		panic(runtimeError{err})
-	}
-	return v
+	return fn.(Partial).fn(arg)
 }
 
 // call calls a script function: it matches arg against each arm in turn,
@@ -237,7 +188,7 @@ func builtin(fn Func, arg Value) Value {
 func (sf ScriptFunc) call(arg Value) Value {
 	p := sf.prog
 	if sf.composed != nil {
-		return p.apply(sf.node, sf.composed[1], p.apply(sf.node, sf.composed[0], arg))
+		return apply(sf.composed[1], apply(sf.composed[0], arg))
 	}
 	size, _, arms := p.lambda(sf.node)
 	f := &frame{parent: sf.env}

@@ -33,20 +33,20 @@ type Variant struct {
 	value Value
 }
 
-// The type of a function that can be evaluated.
+// A function value, as hosts call it.
 type Func func(Value) (Value, error)
 
 // A built-in function.
 type BuiltInFunc struct {
 	name string
-	fn   Func
+	fn   func(Value) Value
 }
 
 // A built-in function applied to some, but not all, of its arguments.
 type Partial struct {
 	name string
 	args []Value
-	fn   Func
+	fn   func(Value) Value
 }
 
 // A user-defined function: a lambda or composition node of a program,
@@ -161,17 +161,12 @@ func (sf ScriptFunc) String() string  { return Print(sf) }
 
 // Callable returns a function value as a Func, or nil if it isn't one.
 func Callable(val Value) Func {
-	if f, ok := val.(ScriptFunc); ok {
+	switch val.(type) {
+	case ScriptFunc, BuiltInFunc, Partial:
 		return func(arg Value) (v Value, err error) {
 			defer catch(&err)
-			return f.call(arg), nil
+			return apply(val, arg), nil
 		}
-	}
-	if f, ok := val.(BuiltInFunc); ok {
-		return f.fn
-	}
-	if f, ok := val.(Partial); ok {
-		return f.fn
 	}
 	return nil
 }

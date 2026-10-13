@@ -149,6 +149,10 @@ var failures = []struct {
 	{`{ b = 1 }.a`, `cannot unify '{ b : int }' with '{ a : a, ..b }'`},
 	{`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`, `cannot unify '{ a : int, c : int }' with '{ a : int, b : text, ..a }'`},
 	{`{ ..{ a = 2 }, a = "x"}`, `cannot unify 'int' with 'text'`},
+	// Builtins fail on their values.
+	{`list/repeat -1 0`, `list/repeat: negative count -1`},
+	{`text/repeat -1 "a"`, `text/repeat: negative count -1`},
+	{`bytes/to-utf8-text ~~/w==`, `is not valid UTF-8`},
 }
 
 func TestEval(t *testing.T) {
@@ -202,6 +206,8 @@ var exp2str = []struct{ source, result string }{
 	{`list/fold 0 (a -> b -> a + b)`, `list/fold 0 (a -> b -> a + b)`},
 	{`list/fold 0 (a -> b -> a + b) [1, 2]`, `3`},
 	{`list/fold 0 (a -> b -> a + text/length b) ["hey", "beautiful"]`, `12`},
+	// A partially applied fold starts from its initial value every time.
+	{`[g [1, 2], g [1, 2]] ; g = list/fold 0 (a -> b -> a + b)`, `[ 3, 3 ]`},
 
 	{`[ 4 + 2, 5 - 1 ]`, "[ 6, 4 ]"},
 	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four"`, `"four"`},
