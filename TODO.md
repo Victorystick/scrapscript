@@ -64,6 +64,13 @@ builtins now return plain values and panic with a `runtimeError`, which
 - [x] Tail calls, sorely missing: platform run loops recurse once per event
       and grow the stack without bound.
 - [ ] Sources have no file name, so errors in drafts don't say which file.
+- [ ] Multi-pattern arms (SPEC.md section 3) are rejected:
+      `f 5 8 ; f = | 1 -> 1 -> 1 | a -> b -> a + b` fails with "function
+      parameter must be an identifier". The parser reads the operand after
+      `->` as a lambda; the checker and the core take one pattern per arm, so
+      a later pattern can't fall through to the next arm. The function must
+      take all its arguments before matching any arm, and a partly applied
+      one must print.
 
 ## 8. Printing closures
 
