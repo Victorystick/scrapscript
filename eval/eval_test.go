@@ -2,6 +2,7 @@ package eval
 
 import (
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -225,6 +226,27 @@ var exp2str = []struct{ source, result string }{
 
 func TestEvalString(t *testing.T) {
 	for _, ex := range exp2str {
+		evalString(t, ex.source, ex.result)
+	}
+}
+
+// Calls in tail position run in constant stack, however deep they recurse.
+var tailCalls = []struct{ source, result string }{
+	{`count 1000000 ; count = | 0 -> "done" | n -> count (n - 1)`, `"done"`},
+	{`sum 0 1000000 ; sum = acc -> | 0 -> acc | n -> sum (acc + n) (n - 1)`, `500000500000`},
+	{`even 1000001
+; even = | 0 -> #true | n -> odd (n - 1)
+; odd = | 0 -> #false | n -> even (n - 1)`, `#false`},
+	{`count 1000000 ; count = | 0 -> 0 | n -> (count m ; m = n - 1)`, `0`},
+	{`count 1000000 ; count = | 0 -> 0 | n -> (n - 1 |> count)`, `0`},
+	{`count 1000000 ; count = | 0 -> 0 | n -> (dec >> count) n ; dec = n -> n - 1`, `0`},
+	{`count 1000000 ; count = | 0 -> 0 | n -> (| m -> count m) (n - 1)`, `0`},
+}
+
+func TestTailCalls(t *testing.T) {
+	// Without tail calls, these overflow the stack and crash.
+	defer debug.SetMaxStack(debug.SetMaxStack(16 << 20))
+	for _, ex := range tailCalls {
 		evalString(t, ex.source, ex.result)
 	}
 }

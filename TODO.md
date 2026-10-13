@@ -61,7 +61,7 @@ builtins now return plain values and panic with a `runtimeError`, which
 
 ## 7. Smaller
 
-- [ ] Tail calls, sorely missing: platform run loops recurse once per event
+- [x] Tail calls, sorely missing: platform run loops recurse once per event
       and grow the stack without bound.
 - [ ] Sources have no file name, so errors in drafts don't say which file.
 
