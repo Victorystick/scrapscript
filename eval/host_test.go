@@ -130,11 +130,11 @@ func TestHostFunc(t *testing.T) {
 }
 
 func TestCallFailure(t *testing.T) {
-	fn, err := environment().Eval(read(t, environment(), `| 1 -> 2`))
+	fn, err := environment().Eval(read(t, environment(), `| #a -> 2`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eval.Call(fn, eval.Int(2)); err == nil || !strings.Contains(err.Error(), "no arm matches 2") {
+	if _, err := eval.Call(fn, eval.NewVariant("b", nil)); err == nil || !strings.Contains(err.Error(), "no arm matches #b") {
 		t.Errorf("expected no arm to match, got %v", err)
 	}
 }

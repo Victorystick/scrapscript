@@ -208,7 +208,7 @@ func TestApply(t *testing.T) {
 		{`f ; f : a => (a -> a) -> int = _ -> 1`, `x -> [x]`, ``,
 			"cannot apply: passed 'a -> list a' but expected 'b -> b'"},
 		// Runtime failures are errors too.
-		{`| 0 -> 1`, `2`, ``, `no arm matches 2`},
+		{`n -> list/repeat n 1`, `-1`, ``, `list/repeat: negative count -1`},
 		{`t ; t : type = int`, `1`, ``, `cannot evaluate a type`},
 	}
 	for _, ex := range examples {

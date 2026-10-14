@@ -96,16 +96,16 @@ var expressions = []struct {
 	{`"hi " ++ text/repeat 3 "a" ++ "ron"`, `"hi aaaron"`},
 	{`"yo" |> list/repeat 2 |> text/join " "`, `"yo yo"`},
 
-	{`| n >+ ns -> ns <| [1, 2, 3]`, `[ 2, 3 ]`},
-	{`| ns +< n -> ns <| [1, 2, 3]`, `[ 1, 2 ]`},
-	{`| ns +< n -> n <| [1, 2, 3]`, `3`},
+	{`| n >+ ns -> ns | [] -> [] <| [1, 2, 3]`, `[ 2, 3 ]`},
+	{`| ns +< n -> ns | [] -> [] <| [1, 2, 3]`, `[ 1, 2 ]`},
+	{`| ns +< n -> n | [] -> 0 <| [1, 2, 3]`, `3`},
 	// Values are immutable: appending to one list twice gives two lists.
 	{`{ a = xs +< 1, b = xs +< 2 } ; xs = [0, 0, 0] +< 9`, `{ a = [ 0, 0, 0, 9, 1 ], b = [ 0, 0, 0, 9, 2 ] }`},
 	{`{ a = xs ++ [1], b = xs ++ [2] } ; xs = [0, 0, 0] +< 9`, `{ a = [ 0, 0, 0, 9, 1 ], b = [ 0, 0, 0, 9, 2 ] }`},
 	{`{ a = bs +< ~01, b = bs +< ~02 } ; bs = ~~AAAA +< ~09`, `{ a = ~~AAAACQE=, b = ~~AAAACQI= }`},
-	{`| ns ++ [2, 3] -> ns <| [1, 2, 3]`, `[ 1 ]`},
-	{`| [1, 2] ++ ns -> ns <| [1, 2, 3]`, `[ 3 ]`},
-	{`| ns ++ [2, last] -> ns +< last <| [1, 2, 3]`, `[ 1, 3 ]`},
+	{`| ns ++ [2, 3] -> ns | _ -> [] <| [1, 2, 3]`, `[ 1 ]`},
+	{`| [1, 2] ++ ns -> ns | _ -> [] <| [1, 2, 3]`, `[ 3 ]`},
+	{`| ns ++ [2, last] -> ns +< last | _ -> [] <| [1, 2, 3]`, `[ 1, 3 ]`},
 }
 
 func TestScrapItentity(t *testing.T) {
@@ -134,7 +134,7 @@ var failures = []struct {
 }{
 	{`f 1 ; f = a -> b`, "unbound variable: b"},
 	{`{} |> | { b = a } -> a`, "cannot unify '{ b : a }' with '{}'"},
-	{`[ 1 ] |> | [] -> "four"`, `no arm matches [ 1 ]`},
+	{`[ 1 ] |> | [] -> "four"`, `match is not exhaustive: no arm matches [ _ ] ++ _`},
 	{`[] ++ ""`, `cannot unify 'list a' with 'text'`},
 	{`"" ++ []`, `cannot unify 'text' with 'list a'`},
 	{`1 -> x`, `function parameter must be an identifier`},
@@ -211,7 +211,7 @@ var exp2str = []struct{ source, result string }{
 	{`[g [1, 2], g [1, 2]] ; g = list/fold 0 (a -> b -> a + b)`, `[ 3, 3 ]`},
 
 	{`[ 4 + 2, 5 - 1 ]`, "[ 6, 4 ]"},
-	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four"`, `"four"`},
+	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four" | _ -> "other"`, `"four"`},
 
 	// Generates a list of numbers from 0 to n inclusive.
 	{`seq 4 ; seq = | 0 -> [0] | n -> seq (n - 1) +< n`, `[ 0, 1, 2, 3, 4 ]`},

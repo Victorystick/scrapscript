@@ -42,7 +42,7 @@ builtins now return plain values and panic with a `runtimeError`, which
 - [x] Builtins return plain values and panic like the evaluator.
 - [x] Match without panic and recover: return a bool and write into the
       frame.
-- [ ] Check exhaustiveness for all patterns, not only enums (SPEC.md
+- [x] Check exhaustiveness for all patterns, not only enums (SPEC.md
       section 7.1); then a well-typed scrap never reaches "no arm matches".
 
 ## 5. Closures keep their whole scope chain

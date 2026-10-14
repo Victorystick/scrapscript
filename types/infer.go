@@ -68,6 +68,9 @@ type context struct {
 	imports Imports
 	// How many tag payloads the type expression being read is inside of.
 	payloads int
+	// The match functions, and their argument types, to check for
+	// exhaustiveness once the whole scrap is inferred.
+	matches []positioned
 }
 
 func (c *context) bail(n ast.Node, msg string) {
@@ -103,6 +106,9 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, imports Imports) (
 
 	reg.enter()
 	res = context.scrap(se.Expr)
+	for _, m := range context.matches {
+		context.exhaustive(m.node, m.typ)
+	}
 	reg.exit()
 	reg.generalize(res.Type)
 	return res, err
@@ -488,8 +494,9 @@ type arms struct {
 }
 
 type positioned struct {
-	at  position
-	typ TypeRef
+	at   position
+	node ast.Node
+	typ  TypeRef
 }
 
 // matchFunc infers the type of a match function. A tag pattern only closes
@@ -514,6 +521,7 @@ func (c *context) matchFunc(x ast.Node) TypeRef {
 			c.reg.closeEnum(e.typ)
 		}
 	}
+	c.matches = append(c.matches, positioned{node: x, typ: argTy})
 	return c.reg.Func(argTy, bodyTy)
 }
 
@@ -560,7 +568,7 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 		}
 		row := c.reg.extend(c.reg.intern(tag), typ, c.reg.Var())
 		c.ensure(x, ty, c.reg.add(node{kind: enumKind, a: row}))
-		m.enums = append(m.enums, positioned{at, ty})
+		m.enums = append(m.enums, positioned{at: at, typ: ty})
 		if payload != ast.None {
 			c.pattern(m, payload, typ, at.step("#"+tag))
 		}

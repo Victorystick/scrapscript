@@ -73,8 +73,8 @@ var platformFiles = fstest.MapFS{
 var inferSource = func() string {
 	bindings := []string{
 		`(f -> a -> [ a ]) "a" 3`,
-		`| n >+ ns -> ns <| [1, 2, 3]`,
-		`| ns ++ [2, last] -> ns +< last <| [1, 2, 3]`,
+		`| n >+ ns -> ns | [] -> [] <| [1, 2, 3]`,
+		`| ns ++ [2, last] -> ns +< last | _ -> [] <| [1, 2, 3]`,
 		`(a -> b -> { a = a, b = b }) 1 "yo"`,
 		`| [] -> { empty = #true } | _ -> { empty = #false }`,
 	}

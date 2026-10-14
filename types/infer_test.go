@@ -133,15 +133,15 @@ func TestInfer(t *testing.T) {
 		{`ignore ; ignore : t text -> int = _ -> 1 ; t = int => [#a int]`, "t text -> int\n; t = a => [ #a a ]"},
 		{`empty ; empty : int -> int = _ -> "" ; int : type = text`, `text -> text`},
 
-		{`| n >+ ns -> ns`, `list a -> list a`},
-		{`| ns +< n -> ns`, `list a -> list a`},
-		{`| ns ++ [a, b] -> ns`, `list a -> list a`},
+		{`| n >+ ns -> ns | [] -> []`, `list a -> list a`},
+		{`| ns +< n -> ns | [] -> []`, `list a -> list a`},
+		{`| ns ++ [a, b] -> ns | _ -> []`, `list a -> list a`},
 
-		{`| n >+ ns -> ns <| [1, 2, 3]`, `list int`},
-		{`| ns +< n -> ns <| [1, 2, 3]`, `list int`},
-		{`| ns ++ [2, 3] -> ns <| [1, 2, 3]`, `list int`},
-		{`| [1, 2] ++ ns -> ns <| [1, 2, 3]`, `list int`},
-		{`| ns ++ [2, last] -> ns +< last <| [1, 2, 3]`, `list int`},
+		{`| n >+ ns -> ns | [] -> [] <| [1, 2, 3]`, `list int`},
+		{`| ns +< n -> ns | [] -> [] <| [1, 2, 3]`, `list int`},
+		{`| ns ++ [2, 3] -> ns | _ -> [] <| [1, 2, 3]`, `list int`},
+		{`| [1, 2] ++ ns -> ns | _ -> [] <| [1, 2, 3]`, `list int`},
+		{`| ns ++ [2, last] -> ns +< last | _ -> [] <| [1, 2, 3]`, `list int`},
 		// Is empty.
 		{`| [] -> #true | _ -> #false`, `list a -> [ #false, #true, ..b ]`},
 		{`| a >+ _ -> #first a | _ -> #empty`, `list a -> [ #empty, #first a, ..b ]`},

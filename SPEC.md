@@ -204,14 +204,19 @@ validated afterwards).
 
 ```
 pattern  = pat-atom
+         | pattern ">+" pattern                  # head >+ tail
+         | pattern "+<" pattern                  # init +< last
+         | pat-list "++" pattern                 # [a, b] ++ rest
+         | pattern "++" pat-list                 # rest ++ [a, b]
 
 pat-atom = INT | TEXT | BYTE | BYTES             # no FLOAT patterns
          | NAME                                  # binds
          | "_"                                   # wildcard
          | TAG [ pat-atom ]                      # #true   #some x   #pair (a)
          | "(" [ pattern ] ")"                   # "()" matches the hole
-         | "[" [ pattern { "," pattern } [ "," ".." [ NAME ] ] ] "]"
+         | pat-list
          | "{" [ [ prest "," ] pfield { "," pfield } ] "}"
+pat-list = "[" [ pattern { "," pattern } ] "]"   # exactly these elements
 prest    = ".." [ NAME ]                         # the other fields; first, as in a record literal
 pfield   = NAME [ "=" pattern ]                  # `{ x }` is `{ x = x }`, binding x
 ```
@@ -269,9 +274,11 @@ Desugaring:
   it lists, so it is exhaustive by construction. A wildcard arm leaves the
   argument type open. Exhaustiveness is a typing rule: a scrap that type-checks
   cannot raise a match error. INT, BYTE, TEXT and BYTES patterns always need a
-  catch-all arm. Not yet enforced: the checker closes enums but checks no
-  other patterns, and until it does, a match that no arm accepts stops
-  evaluation with an error.
+  catch-all arm. The checker closes enums, then, once the whole scrap is
+  inferred, checks every match function against its argument type (Maranget's
+  usefulness, with list patterns split by length) and names a value that no arm
+  matches. A host's call into a scrap doesn't check its arguments, so a value
+  from a host that no arm accepts still stops evaluation with an error.
 - Records and variants share one row mechanism (7.3).
 - Int and Float are separate types with no overloading. Type classes are
   deferred; until then arithmetic uses separate Int and Float operators.
@@ -773,9 +780,9 @@ elsewhere, and leaves some of it open.
 - Float arithmetic: the guide writes `1.0 + 1.0`, while 7.1 asks for separate
   Int and Float operators that section 2.3 does not list.
 - TEXT: the guide allows raw newlines and has interpolation, `"a` x `b"`.
-- List patterns: the guide matches with `>+` and `++` (`head >+ tail`,
-  `[x, y] ++ tail`), and text and bytes by prefix (`"hi " ++ name`); this
-  grammar has `[a, b, ..rest]` only and lists prefix patterns as open (section 4).
+- Text and bytes prefix patterns: the guide matches `"hi " ++ name`; this
+  grammar lists them as open (section 4). List patterns follow the guide
+  (`head >+ tail`, `[x, y] ++ tail`).
 - The `,` where-operator, binding tighter than `;` (in the guide's source, not
   shown on the page).
 - Flat scraps (a compact binary encoding), scrap maps, yards, passes and books:
