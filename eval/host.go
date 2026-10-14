@@ -1,6 +1,10 @@
 package eval
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/Victorystick/scrapscript/types"
+)
 
 // The API for hosts: Go code that runs scraps, such as a platform's
 // bindings. A host checks a scrap against an interface type once, with
@@ -127,4 +131,55 @@ func (e *Environment) Check(s, iface *Scrap) error {
 		return fmt.Errorf("does not implement the interface: '%s' is not '%s'%s", strs[0], strs[1], where)
 	}
 	return nil
+}
+
+// TypeOf checks the scrap s and returns its result, in the environment's
+// registry of types, which the caller must only read.
+func (e *Environment) TypeOf(s *Scrap) (*types.Registry, types.Result, error) {
+	res, err := e.infer(s)
+	return &e.reg, res, err
+}
+
+// Fetch returns the published scrap with the hash digest in the scheme,
+// such as "source".
+func (e *Environment) Fetch(scheme, digest string) (*Scrap, error) {
+	return e.fetch(scheme, digest)
+}
+
+// Source returns the source of a scrap.
+func (s *Scrap) Source() []byte {
+	return s.expr.Source.Bytes()
+}
+
+// Closure returns the scraps that s refers to, directly or not, each once,
+// after the scraps they refer to. All of them, and s itself, must refer to
+// others only by hash, so that they can be published or embedded as they
+// are.
+func (e *Environment) Closure(s *Scrap) ([]*Scrap, error) {
+	if err := e.load(s); err != nil {
+		return nil, err
+	}
+	var order []*Scrap
+	seen := make(map[*Scrap]bool)
+	var visit func(s *Scrap) error
+	visit = func(s *Scrap) error {
+		for _, n := range s.expr.Imports() {
+			if _, ok := s.expr.Path(n); ok {
+				return s.expr.Error(n, "cannot embed a scrap that refers to a path")
+			}
+			dep := s.deps[n]
+			if !seen[dep] {
+				seen[dep] = true
+				if err := visit(dep); err != nil {
+					return err
+				}
+				order = append(order, dep)
+			}
+		}
+		return nil
+	}
+	if err := visit(s); err != nil {
+		return nil, err
+	}
+	return order, nil
 }

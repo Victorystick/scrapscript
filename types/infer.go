@@ -50,8 +50,9 @@ type Result struct {
 
 // A Param is a parameter of an exported type constructor.
 type Param struct {
-	Var TypeRef
-	Row bool
+	Name string
+	Var  TypeRef
+	Row  bool
 }
 
 // Imports gives the results of the scraps that a scrap's Import nodes refer

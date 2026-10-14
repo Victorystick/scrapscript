@@ -433,7 +433,7 @@ func (c *context) export(x ast.Node, a *alias) Result {
 	refs := make([]TypeRef, len(a.params))
 	for i, p := range a.params {
 		refs[i] = c.reg.Gen()
-		params[i] = Param{Var: refs[i], Row: p.row}
+		params[i] = Param{Name: p.name, Var: refs[i], Row: p.row}
 	}
 	return Result{Type: c.expand(x, a, refs), Sort: true, Params: params}
 }

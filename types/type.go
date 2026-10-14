@@ -953,7 +953,7 @@ func (s *stringer) reserveBody(ref TypeRef) {
 	case extendKind:
 		// In the order that they are written, which recursive types are
 		// named in.
-		entries, tail := s.entries(ref)
+		entries, tail := s.reg.entries(ref)
 		for _, e := range entries {
 			s.reserve(e.typ)
 		}
@@ -1085,15 +1085,15 @@ type rowEntry struct {
 }
 
 // entries returns a row's labels in order, and its tail.
-func (s *stringer) entries(row TypeRef) ([]rowEntry, TypeRef) {
+func (r *Registry) entries(row TypeRef) ([]rowEntry, TypeRef) {
 	var entries []rowEntry
 	for {
-		row = s.reg.Resolve(row)
-		n := s.reg.at(row)
+		row = r.Resolve(row)
+		n := r.at(row)
 		if n.kind != extendKind {
 			break
 		}
-		entries = append(entries, rowEntry{s.reg.labels[n.aux], n.a})
+		entries = append(entries, rowEntry{r.labels[n.aux], n.a})
 		row = n.b
 	}
 	slices.SortFunc(entries, func(a, b rowEntry) int { return strings.Compare(a.label, b.label) })
@@ -1102,7 +1102,7 @@ func (s *stringer) entries(row TypeRef) ([]rowEntry, TypeRef) {
 
 // row writes a row's labels in order, followed by its tail if it is open.
 func (s *stringer) row(row TypeRef, open, close byte, label func(string, TypeRef)) {
-	entries, row := s.entries(row)
+	entries, row := s.reg.entries(row)
 	s.WriteByte(open)
 	for i, e := range entries {
 		if i > 0 {
