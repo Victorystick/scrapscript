@@ -58,6 +58,10 @@ builtins now return plain values and panic with a `runtimeError`, which
 - [ ] Intern tags and labels to global ids, shared with the type registry.
 - [ ] Records as word buffers in label order, tags as `(id, payload)`
       (SPEC.md section 12, "Compact runtime values").
+- [ ] Compile matches to decision trees (Maranget 2008) with the same
+      matrix steps as the exhaustiveness check (types/exhaustive.go), so
+      each value is tested once instead of per arm. Pays off once tags are
+      ids.
 
 ## 7. Smaller
 

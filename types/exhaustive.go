@@ -1,7 +1,6 @@
 package types
 
 import (
-	"maps"
 	"slices"
 	"strings"
 
@@ -13,126 +12,45 @@ import (
 // (2007): a match function is exhaustive when a wildcard arm added after its
 // arms would match nothing that they don't. Lists split by length, as Rust
 // does for slice patterns: lengths below some bound, and all lengths from it.
+//
+// A matrix of patterns is a window of rows in cells, which holds pattern
+// nodes, with None for a wildcard. Its columns' types are the last ones in
+// types. Specializing a matrix pushes a new one after it, which is popped
+// once checked, so the buffers are reused across a scrap.
 
-type patKind uint8
+type exhauster struct {
+	cells []ast.Node
+	types []TypeRef
+	// The elements of the list patterns being split, with rest for a rest.
+	items []ast.Node
+	// A value that no arm matches, as its constructors in reverse preorder.
+	missing []ctor
+}
+
+// rest marks the rest of a list pattern in items.
+const rest = ^ast.Node(0)
+
+// A ctor is a constructor that a column splits by, or a part of a value that
+// no arm matches.
+type ctor struct {
+	kind  ctorKind
+	label string  // tagCtor: the tag.
+	typ   TypeRef // tagCtor: the payload type. recordCtor: the record type. listCtor: the element type.
+	// listCtor: the number of elements and, for all lengths from n,
+	// how many of them are first.
+	n, prefix int
+	rest      bool
+}
+
+type ctorKind uint8
 
 const (
-	wildPat    patKind = iota
-	litPat             // name: the literal's text
-	holePat            // ()
-	variantPat         // name: the tag. args: the payload.
-	recordPat          // fields: the patterns by label.
-	listPat            // args: the elements.
+	wildCtor ctorKind = iota
+	holeCtor
+	tagCtor
+	recordCtor
+	listCtor
 )
-
-// A pat is a pattern, simplified for checking exhaustiveness. The
-// constructors that the checker splits a column by, and the values it finds
-// that no arm matches, are pats too.
-type pat struct {
-	kind   patKind
-	name   string
-	args   []pat
-	fields map[string]pat
-	// listPat: whether there is a list of any length between the first
-	// prefix elements and the rest.
-	rest   bool
-	prefix int
-	// variantPat: whether the tag has no payload, so its payload is ().
-	bare bool
-	// A record constructor's labels, in order.
-	labels []string
-}
-
-var wild = pat{}
-
-func wilds(n int) []pat { return make([]pat, n) }
-
-// simplifier turns patterns into pats. A pattern that it can't describe
-// clears ok; it matches nothing as far as the checker is concerned.
-type simplifier struct {
-	src *ast.SourceExpr
-	ok  bool
-}
-
-func (s *simplifier) pat(x ast.Node) pat {
-	src := s.src
-	switch src.Kind(x) {
-	case ast.Ident:
-		return wild
-
-	case ast.Literal:
-		if src.LiteralKind(x) == token.HOLE {
-			return pat{kind: holePat}
-		}
-		return pat{kind: litPat, name: src.TokenText(src.Main(x))}
-
-	case ast.Variant:
-		tag, payload := src.Variant(x)
-		p := wild
-		if payload != ast.None {
-			p = s.pat(payload)
-		}
-		return pat{kind: variantPat, name: src.TokenText(tag), args: []pat{p}}
-
-	case ast.Record:
-		rest, fields := src.Record(x)
-		p := pat{kind: recordPat, fields: make(map[string]pat, fields.Len())}
-		for i := range fields.Len() {
-			p.fields[src.TokenText(fields.Key(i))] = s.pat(fields.Value(i))
-		}
-		if rest != ast.None {
-			// The rest is a record of the other fields.
-			if r := s.pat(rest); r.kind == recordPat {
-				maps.Copy(p.fields, r.fields)
-			}
-		}
-		return p
-
-	case ast.List:
-		var args []pat
-		for _, e := range src.List(x) {
-			args = append(args, s.pat(e))
-		}
-		return pat{kind: listPat, args: args}
-
-	case ast.Binary:
-		op, l, r := src.Binary(x)
-		switch op {
-		case token.PREPEND:
-			return s.concat(pat{kind: listPat, args: []pat{s.pat(l)}}, s.pat(r))
-		case token.APPEND:
-			return s.concat(s.pat(l), pat{kind: listPat, args: []pat{s.pat(r)}})
-		case token.CONCAT:
-			return s.concat(s.pat(l), s.pat(r))
-		}
-	}
-	s.ok = false
-	return wild
-}
-
-// concat joins two list patterns, if their result has at most one rest.
-func (s *simplifier) concat(l, r pat) pat {
-	if l.kind == wildPat {
-		l = pat{kind: listPat, rest: true}
-	}
-	if r.kind == wildPat {
-		r = pat{kind: listPat, rest: true}
-	}
-	if l.rest && r.rest {
-		if len(l.args) == l.prefix && r.prefix == 0 {
-			return pat{kind: listPat, args: slices.Concat(l.args, r.args), rest: true, prefix: l.prefix}
-		}
-		s.ok = false
-		return wild
-	}
-	p := pat{kind: listPat, args: slices.Concat(l.args, r.args), rest: l.rest || r.rest, prefix: r.prefix}
-	if l.rest {
-		p.prefix = l.prefix
-	} else if r.rest {
-		p.prefix = len(l.args) + r.prefix
-	}
-	return p
-}
 
 // exhaustive bails if some value of the argument type of the match function
 // x matches none of its arms.
@@ -143,269 +61,430 @@ func (c *context) exhaustive(x ast.Node, argTy TypeRef) {
 			return // a catch-all arm
 		}
 	}
-	s := simplifier{src: c.src}
-	rows := make([][]pat, 0, len(arms))
+	e := &c.ex
 	for _, arm := range arms {
 		arg, _ := c.src.Func(arm)
-		s.ok = true
-		if p := s.pat(arg); s.ok {
-			rows = append(rows, []pat{p})
-		}
+		e.cells = append(e.cells, arg)
 	}
-	if w, ok := c.missing(rows, []TypeRef{argTy}); ok {
+	e.types = append(e.types, argTy)
+	e.missing = e.missing[:0]
+	missing := c.missingIn(0, len(arms), 1)
+	e.cells, e.types = e.cells[:0], e.types[:0]
+	if missing {
+		slices.Reverse(e.missing)
 		var b strings.Builder
-		w[0].write(&b, false)
+		c.write(&b, e.missing, false)
 		c.bail(x, "match is not exhaustive: no arm matches "+b.String())
 	}
 }
 
-// missing returns values, one per column of types, that no row matches, if
-// there are any.
-func (c *context) missing(rows [][]pat, types []TypeRef) ([]pat, bool) {
-	if len(rows) > 0 && !slices.ContainsFunc(rows[0], pat.refutable) {
-		return nil, false // the first row matches everything
+// missingIn returns true if some value matches no row of the matrix of rows
+// and width columns at cells[at:], whose types are the last width types. If
+// so, it pushes such a value to missing.
+func (c *context) missingIn(at, rows, width int) bool {
+	e := &c.ex
+	if rows > 0 && !slices.ContainsFunc(e.cells[at:at+width], refutable) {
+		return false // the first row matches everything
 	}
-	if len(types) == 0 {
-		return nil, true
+	if width == 0 {
+		return true
 	}
+	heads := false
+	for i := range rows {
+		heads = heads || e.cells[at+i*width] != ast.None
+	}
+	typ := c.reg.Resolve(e.types[len(e.types)-width])
+	n := c.reg.at(typ)
+	// A constructor that no head has.
+	head := ctor{}
 
-	var shape Shape
-	var ctors []pat
-	complete, heads := false, slices.ContainsFunc(rows, func(row []pat) bool { return row[0].refutable() })
-	if heads {
-		shape = c.reg.Shape(types[0])
-		ctors, complete = c.signature(shape, rows)
-	}
-	if complete {
-		for _, ctor := range ctors {
-			argTypes := ctorTypes(shape, ctor)
-			n := len(argTypes)
-			w, ok := c.missing(specialize(rows, ctor), append(argTypes, types[1:]...))
-			if ok {
-				return append([]pat{ctor.with(w[:n])}, w[n:]...), true
+	switch {
+	case !heads:
+	case n.kind == enumKind:
+		missing := false
+		k, row, ok := c.tag(n.a)
+		for ; ok; k, row, ok = c.tag(row) {
+			if !missing && !c.hasTag(at, rows, width, k.label) {
+				head, missing = k, true
 			}
 		}
-		return nil, false
-	}
-
-	var rest [][]pat
-	for _, row := range rows {
-		if row[0].kind == wildPat {
-			rest = append(rest, row[1:])
+		if c.reg.at(row).kind != emptyKind {
+			head = ctor{} // other tags than these
+			break
 		}
-	}
-	w, ok := c.missing(rest, types[1:])
-	if !ok {
-		return nil, false
-	}
-	head := wild
-	if len(ctors) > 0 {
-		head = ctors[0]
-	}
-	return append([]pat{head}, w...), true
-}
-
-// signature returns the constructors of the first column of rows, of the
-// type shape, and whether they are complete: then each value is in one of
-// them. Otherwise, it returns the constructors that no row's head has, if the
-// type has finitely many.
-func (c *context) signature(shape Shape, rows [][]pat) ([]pat, bool) {
-	switch shape.Kind {
-	case ShapeEnum:
-		var all, missing []pat
-		for _, l := range shape.Labels {
-			ctor := pat{kind: variantPat, name: l.Name, args: wilds(1), bare: c.reg.Resolve(l.Type) == HoleRef}
-			all = append(all, ctor)
-			if !slices.ContainsFunc(rows, func(row []pat) bool { return row[0].name == l.Name }) {
-				missing = append(missing, ctor)
+		if missing {
+			break
+		}
+		for k, row, ok := c.tag(n.a); ok; k, row, ok = c.tag(row) {
+			if c.split(at, rows, width, k) {
+				return true
 			}
 		}
-		if shape.Open {
-			return nil, false
-		}
-		if len(missing) > 0 {
-			return missing, false
-		}
-		return all, true
+		return false
 
-	case ShapeRecord:
-		ctor := pat{kind: recordPat}
-		for _, l := range shape.Labels {
-			ctor.labels = append(ctor.labels, l.Name)
-		}
-		ctor.args = wilds(len(ctor.labels))
-		return []pat{ctor}, true
+	case n.kind == recordKind:
+		return c.split(at, rows, width, ctor{kind: recordCtor, typ: typ})
 
-	case ShapeList:
+	case n.kind == listKind:
 		// Lengths up to the longest fixed list, and beyond it all lengths
 		// at once, long enough for each prefix and suffix.
 		fixed, prefix, suffix := -1, 0, 0
-		for _, row := range rows {
-			h := row[0]
-			if h.kind == wildPat {
+		for i := range rows {
+			h := e.cells[at+i*width]
+			if h == ast.None {
 				continue
 			}
-			if h.rest {
-				prefix = max(prefix, h.prefix)
-				suffix = max(suffix, len(h.args)-h.prefix)
-			} else {
-				fixed = max(fixed, len(h.args))
+			start := len(e.items)
+			items, p, ok := c.listItems(h)
+			e.items = e.items[:start]
+			switch {
+			case !ok:
+			case p < 0:
+				fixed = max(fixed, items)
+			default:
+				prefix, suffix = max(prefix, p), max(suffix, items-p)
 			}
 		}
-		n := max(fixed+1, prefix+suffix)
-		var ctors []pat
-		for i := range n {
-			ctors = append(ctors, pat{kind: listPat, args: wilds(i)})
+		length := max(fixed+1, prefix+suffix)
+		for i := range length {
+			if c.split(at, rows, width, ctor{kind: listCtor, typ: n.a, n: i}) {
+				return true
+			}
 		}
-		return append(ctors, pat{kind: listPat, args: wilds(n), rest: true, prefix: n - suffix}), true
+		return c.split(at, rows, width, ctor{kind: listCtor, typ: n.a, n: length, rest: true, prefix: length - suffix})
 
-	case ShapePrimitive:
-		if shape.Ref == HoleRef {
-			return []pat{{kind: holePat}}, true
+	case typ == HoleRef:
+		return c.split(at, rows, width, ctor{kind: holeCtor})
+	}
+
+	// The heads' constructors are incomplete, so the rows with a wildcard
+	// head must cover the other columns.
+	end, types := len(e.cells), len(e.types)
+	kept := 0
+	for i := range rows {
+		if e.cells[at+i*width] == ast.None {
+			e.cells = append(e.cells, e.cells[at+i*width+1:at+(i+1)*width]...)
+			kept++
 		}
 	}
-	return nil, false
+	e.types = append(e.types, e.types[types-width+1:]...)
+	missing := c.missingIn(end, kept, width-1)
+	e.cells, e.types = e.cells[:end], e.types[:types]
+	if missing {
+		if head.kind == tagCtor {
+			e.missing = append(e.missing, ctor{}) // its payload
+		}
+		e.missing = append(e.missing, head)
+	}
+	return missing
 }
 
-// ctorTypes returns the types of the arguments of a constructor of a column
-// of the type shape.
-func ctorTypes(shape Shape, ctor pat) []TypeRef {
-	var types []TypeRef
-	switch ctor.kind {
-	case variantPat:
-		i := slices.IndexFunc(shape.Labels, func(l Label) bool { return l.Name == ctor.name })
-		types = append(types, shape.Labels[i].Type)
-	case recordPat:
-		for _, l := range shape.Labels {
-			types = append(types, l.Type)
-		}
-	case listPat:
-		for range ctor.args {
-			types = append(types, shape.Elem)
+// tag returns the first tag of the enum row, and the rest of the row.
+func (c *context) tag(row TypeRef) (ctor, TypeRef, bool) {
+	row = c.reg.Resolve(row)
+	l := c.reg.at(row)
+	if l.kind != extendKind {
+		return ctor{}, row, false
+	}
+	return ctor{kind: tagCtor, label: c.reg.labels[l.aux], typ: l.a}, l.b, true
+}
+
+// split returns true if some value made with the constructor k matches no
+// row of the matrix at at. If so, it pushes such a value to missing.
+func (c *context) split(at, rows, width int, k ctor) bool {
+	e := &c.ex
+	end, types := len(e.cells), len(e.types)
+	arity := c.argTypes(k)
+	e.types = append(e.types, e.types[types-width+1:types]...)
+	kept := 0
+	for i := range rows {
+		mark := len(e.cells)
+		if c.args(e.cells[at+i*width], k) {
+			e.cells = append(e.cells, e.cells[at+i*width+1:at+(i+1)*width]...)
+			kept++
+		} else {
+			e.cells = e.cells[:mark]
 		}
 	}
-	return types
+	missing := c.missingIn(end, kept, arity+width-1)
+	e.cells, e.types = e.cells[:end], e.types[:types]
+	if missing {
+		e.missing = append(e.missing, k)
+	}
+	return missing
 }
 
-// specialize returns the rows whose head matches the constructor ctor, with
-// the head replaced by its arguments.
-func specialize(rows [][]pat, ctor pat) [][]pat {
-	out := make([][]pat, 0, len(rows))
-	for _, row := range rows {
-		if args, ok := row[0].split(ctor); ok {
-			out = append(out, slices.Concat(args, row[1:]))
+// argTypes pushes the types of k's arguments, and returns how many there are.
+func (c *context) argTypes(k ctor) int {
+	e := &c.ex
+	start := len(e.types)
+	switch k.kind {
+	case tagCtor:
+		e.types = append(e.types, k.typ)
+	case recordCtor:
+		for row := c.reg.Resolve(c.reg.at(k.typ).a); c.reg.at(row).kind == extendKind; row = c.reg.Resolve(c.reg.at(row).b) {
+			e.types = append(e.types, c.reg.at(row).a)
+		}
+	case listCtor:
+		for range k.n {
+			e.types = append(e.types, k.typ)
 		}
 	}
-	return out
+	return len(e.types) - start
 }
 
-// split returns the arguments of p as the constructor ctor, if p can match
-// a value made with ctor.
-func (p pat) split(ctor pat) ([]pat, bool) {
-	switch p.kind {
-	case wildPat:
-		return wilds(len(ctor.args)), true
-	case variantPat:
-		return p.args, p.name == ctor.name
-	case recordPat:
-		args := make([]pat, len(ctor.labels))
-		for i, l := range ctor.labels {
-			args[i] = p.fields[l]
+// args pushes the arguments of the pattern p as the constructor k, and
+// returns true if p can match a value made with k.
+func (c *context) args(p ast.Node, k ctor) bool {
+	e := &c.ex
+	src := c.src
+	if p == ast.None {
+		for range c.arity(k) {
+			e.cells = append(e.cells, ast.None)
 		}
-		return args, true
-	case listPat:
-		n := len(ctor.args)
-		if !p.rest {
-			return p.args, !ctor.rest && len(p.args) == n
-		}
-		if n < len(p.args) {
-			return nil, false
-		}
-		// A list with a rest only splits a constructor of all lengths from
-		// n with its prefix first and its suffix last.
-		return slices.Concat(p.args[:p.prefix], wilds(n-len(p.args)), p.args[p.prefix:]), true
+		return true
 	}
-	return nil, p.kind == ctor.kind
+	switch k.kind {
+	case holeCtor:
+		return true
+
+	case tagCtor:
+		tag, payload := src.Variant(p)
+		if !c.tokenIs(tag, k.label) {
+			return false
+		}
+		e.cells = append(e.cells, c.cell(payload))
+		return true
+
+	case recordCtor:
+		for row := c.reg.Resolve(c.reg.at(k.typ).a); c.reg.at(row).kind == extendKind; row = c.reg.Resolve(c.reg.at(row).b) {
+			e.cells = append(e.cells, c.field(p, c.reg.labels[c.reg.at(row).aux]))
+		}
+		return true
+
+	case listCtor:
+		start := len(e.items)
+		items, prefix, ok := c.listItems(p)
+		elems := e.items[start:]
+		switch {
+		case !ok:
+		case prefix < 0:
+			ok = !k.rest && items == k.n
+			if ok {
+				e.cells = append(e.cells, elems...)
+			}
+		case items > k.n:
+			ok = false
+		default:
+			// A list with a rest splits the constructor of all lengths
+			// from n with its prefix first and its suffix last.
+			e.cells = append(e.cells, elems[:prefix]...)
+			for range k.n - items {
+				e.cells = append(e.cells, ast.None)
+			}
+			e.cells = append(e.cells, elems[prefix+1:]...)
+		}
+		e.items = e.items[:start]
+		return ok
+	}
+	return false
 }
 
-// refutable returns true if some value doesn't match p.
-func (p pat) refutable() bool { return p.kind != wildPat }
-
-// with returns the constructor ctor applied to args.
-func (ctor pat) with(args []pat) pat {
-	ctor.args = slices.Clone(args)
-	return ctor
+// arity returns the number of k's arguments.
+func (c *context) arity(k ctor) int {
+	switch k.kind {
+	case tagCtor:
+		return 1
+	case recordCtor:
+		n := 0
+		for row := c.reg.Resolve(c.reg.at(k.typ).a); c.reg.at(row).kind == extendKind; row = c.reg.Resolve(c.reg.at(row).b) {
+			n++
+		}
+		return n
+	case listCtor:
+		return k.n
+	}
+	return 0
 }
 
-// write writes p as a pattern. In an argument, it parenthesizes patterns
-// that take one.
-func (p pat) write(b *strings.Builder, arg bool) {
-	switch p.kind {
-	case wildPat:
+// listItems pushes the elements of the list pattern p to items, with rest
+// for its rest, if it has one. It returns the number of elements and the
+// index of the rest, or -1, and whether p has at most one rest.
+func (c *context) listItems(p ast.Node) (items, prefix int, ok bool) {
+	e := &c.ex
+	start := len(e.items)
+	if !c.flatten(p) {
+		return 0, 0, false
+	}
+	prefix, j := -1, start
+	for i := start; i < len(e.items); i++ {
+		x := e.items[i]
+		if x == rest {
+			if prefix >= 0 && e.items[j-1] != rest {
+				return 0, 0, false
+			}
+			if prefix >= 0 {
+				continue // adjacent rests are one rest
+			}
+			prefix = j - start
+		}
+		e.items[j] = x
+		j++
+	}
+	e.items = e.items[:j]
+	items = j - start
+	if prefix >= 0 {
+		items--
+	}
+	return items, prefix, true
+}
+
+// flatten pushes the elements of the list pattern p to items.
+func (c *context) flatten(p ast.Node) bool {
+	e := &c.ex
+	src := c.src
+	switch src.Kind(p) {
+	case ast.Ident:
+		e.items = append(e.items, rest)
+		return true
+	case ast.List:
+		for _, x := range src.List(p) {
+			e.items = append(e.items, c.cell(x))
+		}
+		return true
+	case ast.Binary:
+		op, l, r := src.Binary(p)
+		switch op {
+		case token.PREPEND:
+			e.items = append(e.items, c.cell(l))
+			return c.flatten(r)
+		case token.APPEND:
+			ok := c.flatten(l)
+			e.items = append(e.items, c.cell(r))
+			return ok
+		case token.CONCAT:
+			return c.flatten(l) && c.flatten(r)
+		}
+	}
+	return false
+}
+
+// hasTag returns true if some head of the matrix at at has the tag.
+func (c *context) hasTag(at, rows, width int, tag string) bool {
+	for i := range rows {
+		h := c.ex.cells[at+i*width]
+		if h == ast.None {
+			continue
+		}
+		if t, _ := c.src.Variant(h); c.tokenIs(t, tag) {
+			return true
+		}
+	}
+	return false
+}
+
+// field returns the pattern of the record pattern p for the label.
+func (c *context) field(p ast.Node, label string) ast.Node {
+	for c.src.Kind(p) == ast.Record {
+		rest, fields := c.src.Record(p)
+		for i := range fields.Len() {
+			if c.tokenIs(fields.Key(i), label) {
+				return c.cell(fields.Value(i))
+			}
+		}
+		p = rest
+	}
+	return ast.None
+}
+
+// cell returns the pattern p as a cell, with None for a name.
+func (c *context) cell(p ast.Node) ast.Node {
+	if p == ast.None || c.src.Kind(p) == ast.Ident {
+		return ast.None
+	}
+	return p
+}
+
+func refutable(p ast.Node) bool { return p != ast.None }
+
+// tokenIs returns true if the token t's text is s.
+func (c *context) tokenIs(t ast.Tok, s string) bool {
+	span := c.src.TokenSpan(t)
+	return string(c.src.Source.Bytes()[span.Start:span.End]) == s
+}
+
+// write writes the value ks, in preorder, as a pattern, and returns the
+// rest of ks. In an argument, it parenthesizes patterns that take one.
+func (c *context) write(b *strings.Builder, ks []ctor, arg bool) []ctor {
+	k, ks := ks[0], ks[1:]
+	switch k.kind {
+	case wildCtor:
 		b.WriteString("_")
-	case holePat:
+	case holeCtor:
 		b.WriteString("()")
-	case variantPat:
-		bare := p.bare && p.args[0].kind == wildPat
-		if arg && !bare {
-			b.WriteString("(")
-		}
-		b.WriteString("#" + p.name)
-		if !bare {
-			b.WriteString(" ")
-			p.args[0].write(b, true)
-		}
-		if arg && !bare {
-			b.WriteString(")")
-		}
-	case recordPat:
-		if len(p.labels) == 0 {
-			b.WriteString("{}")
-			return
-		}
-		b.WriteString("{ ")
-		for i, l := range p.labels {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString(l + " = ")
-			p.args[i].write(b, false)
-		}
-		b.WriteString(" }")
-	case listPat:
-		if !p.rest {
-			writeList(b, p.args)
-			return
+	case tagCtor:
+		if c.reg.Resolve(k.typ) == HoleRef && ks[0].kind == wildCtor {
+			b.WriteString("#" + k.label)
+			return ks[1:]
 		}
 		if arg {
 			b.WriteString("(")
 		}
-		if p.prefix > 0 {
-			writeList(b, p.args[:p.prefix])
+		b.WriteString("#" + k.label + " ")
+		ks = c.write(b, ks, true)
+		if arg {
+			b.WriteString(")")
+		}
+	case recordCtor:
+		// The fields are in row order; write them by label.
+		var fields []string
+		for row := c.reg.Resolve(c.reg.at(k.typ).a); c.reg.at(row).kind == extendKind; row = c.reg.Resolve(c.reg.at(row).b) {
+			var f strings.Builder
+			f.WriteString(c.reg.labels[c.reg.at(row).aux] + " = ")
+			ks = c.write(&f, ks, false)
+			fields = append(fields, f.String())
+		}
+		if len(fields) == 0 {
+			b.WriteString("{}")
+			return ks
+		}
+		slices.Sort(fields)
+		b.WriteString("{ " + strings.Join(fields, ", ") + " }")
+	case listCtor:
+		if !k.rest {
+			return c.writeList(b, ks, k.n)
+		}
+		if arg {
+			b.WriteString("(")
+		}
+		if k.prefix > 0 {
+			ks = c.writeList(b, ks, k.prefix)
 			b.WriteString(" ++ ")
 		}
 		b.WriteString("_")
-		if p.prefix < len(p.args) {
+		if k.prefix < k.n {
 			b.WriteString(" ++ ")
-			writeList(b, p.args[p.prefix:])
+			ks = c.writeList(b, ks, k.n-k.prefix)
 		}
 		if arg {
 			b.WriteString(")")
 		}
 	}
+	return ks
 }
 
-func writeList(b *strings.Builder, ps []pat) {
-	if len(ps) == 0 {
+func (c *context) writeList(b *strings.Builder, ks []ctor, n int) []ctor {
+	if n == 0 {
 		b.WriteString("[]")
-		return
+		return ks
 	}
 	b.WriteString("[ ")
-	for i, p := range ps {
+	for i := range n {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		p.write(b, false)
+		ks = c.write(b, ks, false)
 	}
 	b.WriteString(" ]")
+	return ks
 }

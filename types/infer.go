@@ -71,6 +71,7 @@ type context struct {
 	// The match functions, and their argument types, to check for
 	// exhaustiveness once the whole scrap is inferred.
 	matches []positioned
+	ex      exhauster
 }
 
 func (c *context) bail(n ast.Node, msg string) {
