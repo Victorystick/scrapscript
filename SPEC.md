@@ -683,24 +683,54 @@ always gives the same hashes.
 
 ## 13. Platforms (sketch)
 
-A platform is what lets a scrap affect the world. Platforms are defined by their
-implementations, so the language only fixes how a script meets one. A platform
-has three parts:
+A platform is what lets a scrap affect the world. Scraps stay pure: a platform
+gives them no effects to call, only types to return effects as data in. A
+platform has three parts:
 
 1. **An interface**: a type scrap (7.6) for the contract between script and
-   host, such as a record of state transitions and the events and actions they
-   exchange. Its hash identifies the platform, so a script names a platform by
-   naming its interface.
-2. **A host**: native code that implements the interface for one host language,
-   generated from the interface type, with the effects filled in by hand.
-3. **A script**: an ordinary scrap whose value has the interface's type. Running
-   it on a platform first checks it against the interface, so a script that
-   type-checks cannot violate the contract.
+   host. A script names a platform by naming its interface.
+2. **A host**: a Go program that runs scripts on the platform, using Go
+   bindings generated from the interface, with the effects written by hand.
+   The `scrap` tool may build in hosts for a few platforms; there is no
+   general way to run a script on a platform by name (section 14).
+3. **A script**: an ordinary scrap whose value has the interface's type. The
+   host checks it against the interface once, when loading it; after that the
+   host calls it without checking, so a script that type-checks cannot violate
+   the contract.
 
-Open: how generic interfaces such as `program s` are instantiated per script;
-whether a platform can provide a pure reference semantics (like
-`platforms/terminal.scrap`'s `simulate`) that hosts must agree with; and how
-hosts are found from an interface's hash without breaking rule 1 of section 10.
+**Effects as data.** A script returns what it wants done, and a function to
+continue with once it is done, which the host calls with the result:
+
+```scrap
+; reply : type = [#respond response, #fetch { request : request, then : response -> reply }]
+```
+
+**State.** A type constructor's parameters are the script's to choose, and
+opaque to the host: the terminal platform's `program s` threads a state `s`
+from one event to the next. A platform that serves requests concurrently
+instead takes an immutable context, made once at startup and passed to each
+request; state that outlives a request belongs to the host's effects, such as
+a database.
+
+**Bindings.** Generated from the interface's type:
+
+| Type | Go |
+|---|---|
+| `()`, `int`, `float`, `text`, `byte`, `bytes` | `struct{}`, `int64`, `float64`, `string`, `byte`, `[]byte` (copied) |
+| `list a` | `[]A` |
+| record | struct, labels in CamelCase |
+| enum | struct of a tag, constants dense per enum, and a typed accessor and constructor per tag |
+| function | Go func, uncurried; it returns an error if evaluation fails |
+| type parameter | an opaque wrapper of the value, which the host can only pass back |
+
+Values convert eagerly at the boundary. Aliases name the Go types.
+
+Open: cancelling a running evaluation (a `context.Context`, checked on each
+call, without counting steps); whether host resources such as connections can
+be values, and how they print; open rows and aliases used at more than one type
+in interfaces, rejected at first; whether a platform provides a pure reference
+semantics (like `platforms/terminal/simulate.scrap`'s `simulate`) that hosts
+must agree with.
 
 ## 14. Relation to the guide
 
@@ -736,6 +766,7 @@ elsewhere, and leaves some of it open.
 | Variants printed with their type, `(result text e)::ok "hi"` | `#ok "hi"` | Values carry no types at runtime |
 | `//`, `&&`, `\|\|`, `@` | Removed (section 6) | `//` was unevaluated; `@` is spelled `.field`; matching is the only branching |
 | sha1 of the flat encoding, written `$sha1~~…` | sha256 of the source, written `$source:` and hex digits (section 9) | No canonical encoding yet; hex is what `sha256sum` prints; other encodings can be added as schemes |
+| `scrap platform connie2036/server`, a platform found by name | A host is a Go program, with bindings generated from the platform's interface (section 13) | Effects need native code, which a scrap name cannot supply |
 
 **Open:**
 
