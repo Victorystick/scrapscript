@@ -1,0 +1,12 @@
+-- The terminal platform's contract: a program's whole authority.
+--
+-- A program keeps its own state, of type s, which the host never inspects.
+-- The host starts it with `init`, then feeds each `event` to `step` until the
+-- program asks to exit.
+
+program
+
+; program     : type -> type = s => { init : turn s, step : event -> s -> turn s }
+; turn        : type -> type = s => { state : s, out : text, next : next-action }
+; event       : type = [#line text, #eof]
+; next-action : type = [#read-line, #exit int]

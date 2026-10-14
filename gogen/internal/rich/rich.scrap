@@ -1,0 +1,21 @@
+-- An interface that uses every kind of type that bindings support.
+
+api
+
+; api : type -> type = c => {
+    init   : c,
+    handle : c -> text -> reply,
+    tags   : list text,
+    data   : bytes,
+    ratio  : float,
+    flag   : byte,
+    unit   : (),
+    tree   : tree,
+    helper : (int -> int -> int) -> int
+  }
+; reply : type =
+    [ #respond { status : int, body : bytes }
+    , #fetch   { url : text, then : text -> reply }
+    , #range   text
+    ]
+; tree : type = [#leaf, #node { left : tree, value : int, right : tree }]
