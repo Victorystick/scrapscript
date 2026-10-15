@@ -38,6 +38,10 @@ the same machine; each milestone below names it.
 | `Eval/sum` | List patterns, recursing over 1000 elements. |
 | `Eval/fold` | A builtin calling back into a closure, 10000 times. |
 | `Eval/records` | Record spreads and field access. |
+| `Eval/fields` | Wide record literals, destructured by closed patterns. |
+| `Eval/rows` | One field access over records of three shapes, and a rest pattern. |
+| `Eval/destructure` | A rest pattern whose rest is built but never used. |
+| `Eval/destructure-closed` | The same with a closed pattern; the difference from `destructure` is the rest's cost. |
 | `Eval/tree` | Tags of a recursive type, built and matched. |
 | `Eval/text` | Text concatenation. |
 | `Eval/echo` | A terminal-platform program, run on 1000 lines by its reference semantics. |

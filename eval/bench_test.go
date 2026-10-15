@@ -31,6 +31,26 @@ var evalSources = []struct{ name, source string }{
 	// Record spreads and field access.
 	{"records", `loop 1000 { a = 0, b = 0 }
 ; loop = n -> r -> (| 0 -> r | _ -> loop (n - 1) { ..r, a = r.a + 1 }) n`},
+	// Wide record literals, destructured by closed patterns.
+	{"fields", `loop 1000 0
+; loop = | 0 -> acc -> acc | n -> acc -> loop (n - 1) (acc + sum (make n))
+; make = n -> { a = n, b = n, c = n, d = n, e = n, f = n, g = n, h = n }
+; sum = | { a = a, b = b, c = c, d = d, e = e, f = f, g = g, h = h } -> a + b + c + d + e + f + g + h`},
+	// One field access over records of three shapes, and a rest pattern.
+	{"rows", `loop 1000 0
+; loop = | 0 -> acc -> acc | n -> acc -> loop (n - 1) (acc + get-x { x = n } + get-x { w = 1, x = n } + get-x { x = n, y = 2, z = 3 } + drop { x = n, y = 1, z = 2 })
+; get-x = r -> r.x
+; drop = | { ..rest, x = x } -> x + rest.y`},
+	// A rest that is built but never used; compare destructure-closed.
+	{"destructure", `loop 1000 0
+; loop = | 0 -> sum -> sum | n -> sum -> loop (n - 1) (sum + take (record n))
+; record = i -> { a = i, b = i + 2, c = "ignored" }
+; take = | { ..r, a = a, b = b } -> a + b`},
+	// The same as destructure, with a closed pattern instead of a rest.
+	{"destructure-closed", `loop 1000 0
+; loop = | 0 -> sum -> sum | n -> sum -> loop (n - 1) (sum + take (record n))
+; record = i -> { a = i, b = i + 2, c = "ignored" }
+; take = | { a = a, b = b, c = _ } -> a + b`},
 	// Tags of a recursive type, built and matched.
 	{"tree", `size (build 10)
 ; build : int -> tree = | 0 -> #leaf | n -> #node { left = build (n - 1), right = build (n - 1) }
