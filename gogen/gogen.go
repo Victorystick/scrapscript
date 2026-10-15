@@ -48,14 +48,13 @@ func Generate(env *eval.Environment, iface *eval.Scrap, cfg Config) (map[string]
 	}
 
 	g := &generator{
-		reg:    reg,
-		params: make(map[types.TypeRef]string),
-		names:  make(map[string]bool),
-		byRef:  make(map[types.TypeRef]*decl),
-		byKey:  make(map[string]*decl),
-		labels: make(map[string]string),
-		// The labels struct's field of the environment.
-		labelNames: map[string]bool{"env": true},
+		reg:        reg,
+		params:     make(map[types.TypeRef]string),
+		names:      make(map[string]bool),
+		byRef:      make(map[types.TypeRef]*decl),
+		byKey:      make(map[string]*decl),
+		labels:     make(map[string]string),
+		labelNames: make(map[string]bool),
 	}
 	for _, name := range []string{"Interface", "Load"} {
 		g.names[name] = true
@@ -114,6 +113,9 @@ type generator struct {
 	// of, and the field names taken.
 	labels     map[string]string
 	labelNames map[string]bool
+	// The fields of the labels struct that hold the shapes of records, in
+	// the order of the records' declarations.
+	shapes []shapeField
 	// Whether the bindings use the bytes package.
 	usesBytes bool
 }
@@ -131,12 +133,34 @@ func (g *generator) label(name string) string {
 	if token.IsKeyword(f) {
 		f += "_"
 	}
-	for base, i := f, 2; g.labelNames[f]; i++ {
+	f = g.labelsField(f)
+	g.labels[name] = f
+	return "l." + f
+}
+
+// A shapeField is a field of the labels struct that holds the shape of a
+// record declaration.
+type shapeField struct {
+	name string
+	decl *decl
+}
+
+// shape returns an expression of the shape of the record d, a field of the
+// labels struct l.
+func (g *generator) shape(d *decl) string {
+	f := g.labelsField(lower(d.name) + "Shape")
+	g.shapes = append(g.shapes, shapeField{f, d})
+	return "l." + f
+}
+
+// labelsField claims a field name of the labels struct, starting from base.
+func (g *generator) labelsField(base string) string {
+	f := base
+	for i := 2; g.labelNames[f]; i++ {
 		f = fmt.Sprintf("%s%d", base, i)
 	}
 	g.labelNames[f] = true
-	g.labels[name] = f
-	return "l." + f
+	return f
 }
 
 // A gotype is a Go type that a type binds to.
@@ -456,22 +480,36 @@ func (g *generator) bindings(pkg, hash string, sources map[string]string, top *g
 }
 
 // labelsType writes the labels struct, of the IDs of the labels and tags
-// that the conversions use, and newLabels, which resolves them in an
-// environment.
+// that the conversions use and the shapes of the records they make, and
+// newLabels, which resolves them in an environment.
 func (g *generator) labelsType(w func(string, ...any)) {
 	names := slices.Sorted(maps.Keys(g.labels))
 	w("\n// labels are the IDs of the interface's record labels and tags in the\n")
 	w("// environment that Load checked the script in, which values hold, and\n")
-	w("// that environment, which records are made in.\n")
-	w("type labels struct {\n\tenv *eval.Environment\n")
+	w("// the shapes of its records there.\n")
+	w("type labels struct {\n")
 	for _, name := range names {
 		w("\t%s label.ID\n", g.labels[name])
 	}
-	w("}\n\nfunc newLabels(env *eval.Environment) *labels {\n\treturn &labels{\n\t\tenv: env,\n")
+	for _, s := range g.shapes {
+		w("\t%s *eval.Shape\n", s.name)
+	}
+	w("}\n\nfunc newLabels(env *eval.Environment) *labels {\n\tl := &labels{\n")
 	for _, name := range names {
 		w("\t\t%s: env.Label(%q),\n", g.labels[name], name)
 	}
-	w("\t}\n}\n")
+	w("\t}\n")
+	for _, s := range g.shapes {
+		w("\tl.%s = env.Shape(", s.name)
+		for i, f := range s.decl.fields {
+			if i > 0 {
+				w(", ")
+			}
+			w("l.%s", g.labels[f.label])
+		}
+		w(")\n")
+	}
+	w("\treturn l\n}\n")
 }
 
 func (g *generator) record(w func(string, ...any), d *decl) {
@@ -492,9 +530,10 @@ func (g *generator) record(w func(string, ...any), d *decl) {
 		w("\t}\n}\n")
 	}
 
-	w("\nfunc (x %s) toValue(l *labels) eval.Value {\n\treturn l.env.NewRecord(\n", d.name)
+	w("\nfunc (x %s) toValue(l *labels) eval.Value {\n\treturn %s.New(\n", d.name, g.shape(d))
 	for _, f := range d.fields {
-		w("\t\teval.Field{Label: %s, Value: %s},\n", g.label(f.label), g.to(f.typ, "x."+f.name))
+		g.label(f.label)
+		w("\t\t%s,\n", g.to(f.typ, "x."+f.name))
 	}
 	w("\t)\n}\n")
 }

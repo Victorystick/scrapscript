@@ -129,12 +129,9 @@ func TestHostFunc(t *testing.T) {
 	}
 }
 
-func TestNewRecord(t *testing.T) {
+func TestShape(t *testing.T) {
 	e := environment()
-	r := e.NewRecord(
-		eval.Field{Label: e.Label("b"), Value: eval.Int(1)},
-		eval.Field{Label: e.Label("a"), Value: eval.Text("x")},
-	)
+	r := e.Shape(e.Label("b"), e.Label("a")).New(eval.Int(1), eval.Text("x"))
 	if got := e.Print(r); got != `{ a = "x", b = 1 }` {
 		t.Errorf("expected { a = \"x\", b = 1 }, got %s", got)
 	}
@@ -149,12 +146,19 @@ func TestNewRecord(t *testing.T) {
 	if !eval.Equals(r, v) {
 		t.Errorf("expected %s to equal %s", e.Print(r), e.Print(v))
 	}
+	// Labels given in the record's order need no reordering.
+	if got := e.Print(e.Shape(e.Label("a"), e.Label("b")).New(eval.Text("x"), eval.Int(1))); got != `{ a = "x", b = 1 }` {
+		t.Errorf("expected { a = \"x\", b = 1 }, got %s", got)
+	}
+	if got := e.Print(e.Shape().New()); got != `{}` {
+		t.Errorf("expected {}, got %s", got)
+	}
 	defer func() {
 		if recover() == nil {
-			t.Errorf("expected a label set twice to panic")
+			t.Errorf("expected a label given twice to panic")
 		}
 	}()
-	e.NewRecord(eval.Field{Label: e.Label("a")}, eval.Field{Label: e.Label("a")})
+	e.Shape(e.Label("a"), e.Label("a"))
 }
 
 func TestCallFailure(t *testing.T) {

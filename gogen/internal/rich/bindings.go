@@ -114,17 +114,17 @@ func apiFromValue(l *labels, v eval.Value) Api {
 }
 
 func (x Api) toValue(l *labels) eval.Value {
-	return l.env.NewRecord(
-		eval.Field{Label: l.data, Value: eval.Bytes(bytes.Clone(x.Data))},
-		eval.Field{Label: l.flag, Value: eval.Byte(x.Flag)},
-		eval.Field{Label: l.handle, Value: eval.NewFunc("apiHandle", 2, func(args []eval.Value) (eval.Value, error) {
+	return l.apiShape.New(
+		eval.Bytes(bytes.Clone(x.Data)),
+		eval.Byte(x.Flag),
+		eval.NewFunc("apiHandle", 2, func(args []eval.Value) (eval.Value, error) {
 			r, err := x.Handle(C{args[0]}, string(args[1].(eval.Text)))
 			if err != nil {
 				return nil, err
 			}
 			return r.toValue(l), nil
-		})},
-		eval.Field{Label: l.helper, Value: eval.NewFunc("apiHelper", 1, func(args []eval.Value) (eval.Value, error) {
+		}),
+		eval.NewFunc("apiHelper", 1, func(args []eval.Value) (eval.Value, error) {
 			r, err := x.Helper(func(fn eval.Value) func(int64, int64) (int64, error) {
 				return func(a0 int64, a1 int64) (int64, error) {
 					v, err := eval.Call(fn, eval.Int(a0), eval.Int(a1))
@@ -139,12 +139,12 @@ func (x Api) toValue(l *labels) eval.Value {
 				return nil, err
 			}
 			return eval.Int(r), nil
-		})},
-		eval.Field{Label: l.init, Value: x.Init.v},
-		eval.Field{Label: l.ratio, Value: eval.Float(x.Ratio)},
-		eval.Field{Label: l.tags, Value: host.ListTo(x.Tags, func(x string) eval.Value { return eval.Text(x) })},
-		eval.Field{Label: l.tree, Value: x.Tree.toValue(l)},
-		eval.Field{Label: l.unit, Value: eval.Hole{}},
+		}),
+		x.Init.v,
+		eval.Float(x.Ratio),
+		host.ListTo(x.Tags, func(x string) eval.Value { return eval.Text(x) }),
+		x.Tree.toValue(l),
+		eval.Hole{},
 	)
 }
 
@@ -251,15 +251,15 @@ func replyFetchPayloadFromValue(l *labels, v eval.Value) ReplyFetchPayload {
 }
 
 func (x ReplyFetchPayload) toValue(l *labels) eval.Value {
-	return l.env.NewRecord(
-		eval.Field{Label: l.then, Value: eval.NewFunc("replyFetchPayloadThen", 1, func(args []eval.Value) (eval.Value, error) {
+	return l.replyFetchPayloadShape.New(
+		eval.NewFunc("replyFetchPayloadThen", 1, func(args []eval.Value) (eval.Value, error) {
 			r, err := x.Then(string(args[0].(eval.Text)))
 			if err != nil {
 				return nil, err
 			}
 			return r.toValue(l), nil
-		})},
-		eval.Field{Label: l.url, Value: eval.Text(x.Url)},
+		}),
+		eval.Text(x.Url),
 	)
 }
 
@@ -277,9 +277,9 @@ func replyRespondPayloadFromValue(l *labels, v eval.Value) ReplyRespondPayload {
 }
 
 func (x ReplyRespondPayload) toValue(l *labels) eval.Value {
-	return l.env.NewRecord(
-		eval.Field{Label: l.body, Value: eval.Bytes(bytes.Clone(x.Body))},
-		eval.Field{Label: l.status, Value: eval.Int(x.Status)},
+	return l.replyRespondPayloadShape.New(
+		eval.Bytes(bytes.Clone(x.Body)),
+		eval.Int(x.Status),
 	)
 }
 
@@ -357,44 +357,46 @@ func treeNodePayloadFromValue(l *labels, v eval.Value) TreeNodePayload {
 }
 
 func (x TreeNodePayload) toValue(l *labels) eval.Value {
-	return l.env.NewRecord(
-		eval.Field{Label: l.left, Value: x.Left.toValue(l)},
-		eval.Field{Label: l.right, Value: x.Right.toValue(l)},
-		eval.Field{Label: l.value, Value: eval.Int(x.Value)},
+	return l.treeNodePayloadShape.New(
+		x.Left.toValue(l),
+		x.Right.toValue(l),
+		eval.Int(x.Value),
 	)
 }
 
 // labels are the IDs of the interface's record labels and tags in the
 // environment that Load checked the script in, which values hold, and
-// that environment, which records are made in.
+// the shapes of its records there.
 type labels struct {
-	env     *eval.Environment
-	body    label.ID
-	data    label.ID
-	fetch   label.ID
-	flag    label.ID
-	handle  label.ID
-	helper  label.ID
-	init    label.ID
-	leaf    label.ID
-	left    label.ID
-	node    label.ID
-	range_  label.ID
-	ratio   label.ID
-	respond label.ID
-	right   label.ID
-	status  label.ID
-	tags    label.ID
-	then    label.ID
-	tree    label.ID
-	unit    label.ID
-	url     label.ID
-	value   label.ID
+	body                     label.ID
+	data                     label.ID
+	fetch                    label.ID
+	flag                     label.ID
+	handle                   label.ID
+	helper                   label.ID
+	init                     label.ID
+	leaf                     label.ID
+	left                     label.ID
+	node                     label.ID
+	range_                   label.ID
+	ratio                    label.ID
+	respond                  label.ID
+	right                    label.ID
+	status                   label.ID
+	tags                     label.ID
+	then                     label.ID
+	tree                     label.ID
+	unit                     label.ID
+	url                      label.ID
+	value                    label.ID
+	apiShape                 *eval.Shape
+	replyFetchPayloadShape   *eval.Shape
+	replyRespondPayloadShape *eval.Shape
+	treeNodePayloadShape     *eval.Shape
 }
 
 func newLabels(env *eval.Environment) *labels {
-	return &labels{
-		env:     env,
+	l := &labels{
 		body:    env.Label("body"),
 		data:    env.Label("data"),
 		fetch:   env.Label("fetch"),
@@ -417,4 +419,9 @@ func newLabels(env *eval.Environment) *labels {
 		url:     env.Label("url"),
 		value:   env.Label("value"),
 	}
+	l.apiShape = env.Shape(l.data, l.flag, l.handle, l.helper, l.init, l.ratio, l.tags, l.tree, l.unit)
+	l.replyFetchPayloadShape = env.Shape(l.then, l.url)
+	l.replyRespondPayloadShape = env.Shape(l.body, l.status)
+	l.treeNodePayloadShape = env.Shape(l.left, l.right, l.value)
+	return l
 }

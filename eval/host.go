@@ -2,6 +2,7 @@ package eval
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/types"
@@ -16,30 +17,51 @@ import (
 // Labels and tags are IDs in the environment's table; Environment.Label
 // returns them by name.
 
-// A Field is a record field, for NewRecord.
-type Field struct {
-	Label label.ID
-	Value Value
+// A Shape makes records with the same labels. A host makes one per kind
+// of record, once, and gives the values of each record in the order that
+// it gave the labels in.
+type Shape struct {
+	shape *shape
+	// The index in a record of each value given to New, or nil if they are
+	// in the record's order.
+	order []int
 }
 
-// NewRecord returns a record of the fields, whose labels must be distinct.
-func (e *Environment) NewRecord(fields ...Field) Record {
-	labels := make([]label.ID, len(fields))
-	for i, f := range fields {
-		labels[i] = f.Label
-	}
-	e.shapes.sort(labels)
-	for i := 1; i < len(labels); i++ {
-		if labels[i] == labels[i-1] {
-			panic(fmt.Sprintf("eval.NewRecord: %s is set twice", e.reg.Labels().Name(labels[i])))
+// Shape returns the shape of records with the labels, which must be
+// distinct.
+func (e *Environment) Shape(labels ...label.ID) *Shape {
+	sorted := slices.Clone(labels)
+	e.shapes.sort(sorted)
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i] == sorted[i-1] {
+			panic(fmt.Sprintf("eval.Shape: %s is given twice", e.reg.Labels().Name(sorted[i])))
 		}
 	}
-	s := e.shapes.of(labels)
-	values := make([]Value, len(fields))
-	for _, f := range fields {
-		values[s.index(f.Label)] = f.Value
+	s := &Shape{shape: e.shapes.of(sorted)}
+	if !slices.Equal(labels, sorted) {
+		s.order = make([]int, len(labels))
+		for i, l := range labels {
+			s.order[i] = s.shape.index(l)
+		}
 	}
-	return Record{s, values}
+	return s
+}
+
+// New returns a record of the shape with the values, one per label, in
+// the order that Shape was given the labels in. It takes ownership of
+// values.
+func (s *Shape) New(values ...Value) Record {
+	if len(values) != len(s.shape.labels) {
+		panic(fmt.Sprintf("eval.Shape.New: %d values for %d labels", len(values), len(s.shape.labels)))
+	}
+	if s.order == nil {
+		return Record{s.shape, values}
+	}
+	ordered := make([]Value, len(values))
+	for i, v := range values {
+		ordered[s.order[i]] = v
+	}
+	return Record{s.shape, ordered}
 }
 
 // Get returns the value of a record's field, or nil if it has none.
