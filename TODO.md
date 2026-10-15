@@ -69,6 +69,12 @@ builtins now return plain values and panic with a `runtimeError`, which
 - [x] Tail calls, sorely missing: platform run loops recurse once per event
       and grow the stack without bound.
 - [ ] Sources have no file name, so errors in drafts don't say which file.
+- [ ] Structure parse and type errors for an LSP as well as the CLI: a
+      start and end position (line and column, convertible to LSP's UTF-16
+      columns), a severity, related locations (such as "the first arm is
+      here"), several diagnostics per scrap instead of bailing at the first,
+      and no ANSI colours in the error itself, only in the CLI's rendering
+      (token.Error bakes them into Error()).
 - [ ] Multi-pattern arms (SPEC.md section 3) are rejected:
       `f 5 8 ; f = | 1 -> 1 -> 1 | a -> b -> a + b` fails with "function
       parameter must be an identifier". The parser reads the operand after
