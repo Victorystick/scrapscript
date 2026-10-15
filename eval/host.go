@@ -115,36 +115,22 @@ func NewFunc(name string, arity int, fn func(args []Value) (Value, error)) Value
 		return v
 	}
 	if arity == 1 {
-		return BuiltInFunc{name, func(arg Value) Value {
+		return BuiltInFunc{name: name, arity: 1, one: func(arg Value) Value {
 			return call([]Value{arg})
 		}}
 	}
-	return BuiltInFunc{name, collect(name, nil, arity, call)}
+	return BuiltInFunc{name: name, arity: arity, call: call}
 }
 
-// collect returns a function that adds its argument to args, and calls
-// call once it has arity of them.
-func collect(name string, args []Value, arity int, call func([]Value) Value) func(Value) Value {
-	return func(arg Value) Value {
-		// Each partial application has its own arguments.
-		args := append(args[:len(args):len(args)], arg)
-		if len(args) == arity {
-			return call(args)
-		}
-		return Partial{name, args, collect(name, args, arity, call)}
-	}
-}
-
-// Call applies the function fn to args in turn, without checking their
-// types. It fails if the evaluation does, as when no arm matches or a
+// Call applies the function fn to args, all at once if it takes as many,
+// without checking their types. It fails if the evaluation does, as when no arm matches or a
 // builtin fails.
 func Call(fn Value, args ...Value) (v Value, err error) {
 	defer catch(&err)
-	v = fn
-	for _, arg := range args {
-		v = apply(v, arg)
+	if len(args) == 0 {
+		return fn, nil
 	}
-	return v, nil
+	return call(fn, args...), nil
 }
 
 // Check checks that the value of the scrap s has the type that the type

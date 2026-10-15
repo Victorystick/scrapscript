@@ -60,6 +60,17 @@ var expressions = []struct {
 	{`f 5 8 ; f = | 1 -> 1 -> 1 | a -> b -> a + b`, `13`},
 	{`f 1 8 ; f = | 1 -> 1 -> 1 | a -> b -> a + b`, `9`},
 	{`f 1 1 ; f = | 1 -> 1 -> 1 | a -> b -> a + b`, `1`},
+	// A chain of lambdas, and the match function it ends in, take all
+	// their arguments at once; later names shadow earlier ones.
+	{`f 1 2 ; f = a -> a -> a`, `2`},
+	{`[f 1 0, f 1 5] ; f = n -> | 0 -> n | n -> n * 10`, `[ 1, 50 ]`},
+	// Fewer arguments than a function takes, and more.
+	{`g 2 ; g = f 1 ; f = a -> b -> a - b`, `-1`},
+	{`f 1 2 ; f = a -> (g ; g = b -> a + b)`, `3`},
+	{`f 1 2 3 ; f = a -> b -> (g ; g = c -> a + b + c)`, `6`},
+	{`(f 1 2) 3 ; f = a -> b -> c -> a + b + c`, `6`},
+	{`m [1, 2] ; m = list/map (x -> x + 1)`, `[ 2, 3 ]`},
+	{`list/map (list/repeat 2) [1, 2]`, `[ [ 1, 1 ], [ 2, 2 ] ]`},
 	{`[f #a #c, f #a #d, f #b #c] ; f = | #a -> #c -> 1 | _ -> #d -> 2 | _ -> _ -> 3`, `[ 1, 2, 3 ]`},
 	{`list/map (f 1) [1, 2] ; f = | 1 -> 1 -> 0 | a -> b -> a + b`, `[ 0, 3 ]`},
 	{`f "b" ; f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`, `2`},
@@ -87,7 +98,7 @@ var expressions = []struct {
 	// Destructuring.
 	{`{ a = 1, b = 2 } |> | { a = c, b = d } -> c + d`, `3`},
 	{`{ a = 1 } |> | { a = 2 } -> 0 | { a = c } -> c`, `1`},
-	{`3 |> a -> b -> a`, "b -> a\n; a = 3"},
+	{`3 |> a -> b -> a`, `(a -> b -> a) 3`},
 
 	{`#true #false`, `#true #false`},
 
@@ -252,6 +263,10 @@ var tailCalls = []struct{ source, result string }{
 	{`count 1000000 ; count = | 0 -> 0 | n -> (n - 1 |> count)`, `0`},
 	{`count 1000000 ; count = | 0 -> 0 | n -> (dec >> count) n ; dec = n -> n - 1`, `0`},
 	{`count 1000000 ; count = | 0 -> 0 | n -> (| m -> count m) (n - 1)`, `0`},
+	// Calls with several arguments, all at once or more than it takes.
+	{`loop 1000000 0 ; loop = | 0 -> acc -> acc | n -> acc -> loop (n - 1) (acc + 1)`, `1000000`},
+	{`loop 0 1000000 ; loop = acc -> | 0 -> acc | n -> loop (acc + 1) (n - 1)`, `1000000`},
+	{`loop 1000000 0 ; loop = n -> (step ; step = | acc -> (| 0 -> acc | _ -> loop (n - 1) (acc + 1)) n)`, `1000000`},
 }
 
 func TestTailCalls(t *testing.T) {

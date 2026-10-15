@@ -78,7 +78,7 @@ builtins now return plain values and panic with a `runtimeError`, which
 - [x] Multi-pattern arms (SPEC.md section 3): an arm has one pattern per
       argument, and a match function collects all its arguments before
       matching any arm, so a later pattern falls through to the next arm.
-- [ ] Functions with an arity: merge lambda chains `a -> b -> body` into
+- [x] Functions with an arity: merge lambda chains `a -> b -> body` into
       one function and frame, compile `f a b` to one call of two arguments
       (eval/apply, Marlow and Peyton Jones 2004), with partial and extra
       arguments handled at runtime, so that a call with all its arguments
@@ -90,11 +90,11 @@ builtins now return plain values and panic with a `runtimeError`, which
 Known issue: the printer maps each free Ident node to one binding, so
 closures made by the same lambda in different frames all refer to the last
 frame's binding. A printed value can then mean something else, even call
-itself forever: `list/fold (y -> y) (acc -> x -> (y -> acc y + x)) [1, 2, 3]`
-prints `acc = y -> acc y + x''`. The sources are in `brokenRoundTrips`.
+itself forever: `list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x)) [1, 2, 3]`
+prints `acc = f'` with `f' = y -> acc y + x''`. The sources are in `brokenRoundTrips`.
 
 Printed values should also stay proportional to the value's size; a 300-step
-version of that fold prints 189 KB.
+version of that fold prints 281 KB.
 
 - [ ] Name clashing bindings with numbers (`acc`, `acc2`) instead of primes,
       whose length grows with the number of clashes.

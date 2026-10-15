@@ -66,6 +66,33 @@ func (p *program) run(n cnode, f *frame) Value {
 				return v
 			}
 
+		case opCallN:
+			r := p.range_(n)
+			fn := p.run(cnode(r[0]), f)
+			argNodes := r[1:]
+			// A script function that takes exactly these arguments gets
+			// them in its frame directly.
+			if sf, ok := fn.(ScriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
+				if size, _, arity, _ := sf.prog.lambda(sf.node); arity == len(argNodes) {
+					g := sf.frame(size)
+					for i, x := range argNodes {
+						g.slots[i] = p.run(cnode(x), f)
+					}
+					p, f = sf.prog, g
+					n = p.arm(sf, f)
+					continue
+				}
+			}
+			args := make([]Value, len(argNodes))
+			for i, x := range argNodes {
+				args[i] = p.run(cnode(x), f)
+			}
+			var v Value
+			p, n, f, v = enterN(fn, args)
+			if v != nil {
+				return v
+			}
+
 		case opWhere:
 			body, binds := p.where(n)
 			for i := 0; i < len(binds); i += 2 {
@@ -199,17 +226,37 @@ func apply(fn, arg Value) Value {
 	return p.run(n, f)
 }
 
-// enter starts calling fn with arg. A builtin returns its result v. A
-// script function matches arg against each arm in turn, in a new frame f,
-// and returns the body n of the first that matches, for its program p to
-// evaluate. A composition applies its first function and enters its second.
+// call calls the function fn with args, one or more, whether it takes as
+// many or not.
+func call(fn Value, args ...Value) Value {
+	p, n, f, v := enterN(fn, args)
+	if v != nil {
+		return v
+	}
+	return p.run(n, f)
+}
+
+// enter starts calling fn with arg. A builtin returns its result v, as
+// does a function that takes more arguments, with arg added to the ones it
+// has. Otherwise, enter returns the body n of a script function's first
+// arm that matches all its arguments, in a new frame f, for its program p
+// to evaluate. A composition applies its first function and enters its
+// second.
 func enter(fn, arg Value) (p *program, n cnode, f *frame, v Value) {
 	for {
 		switch g := fn.(type) {
 		case BuiltInFunc:
-			return nil, none, nil, g.fn(arg)
+			if g.arity == 1 {
+				return nil, none, nil, g.one(arg)
+			}
+			return nil, none, nil, Partial{g, []Value{arg}}
 		case Partial:
-			return nil, none, nil, g.fn(arg)
+			// Each partial application has its own arguments.
+			args := append(g.args[:len(g.args):len(g.args)], arg)
+			if len(args) == g.fn.arity {
+				return nil, none, nil, g.fn.call(args)
+			}
+			return nil, none, nil, Partial{g.fn, args}
 		}
 		sf := fn.(ScriptFunc)
 		if sf.composition() {
@@ -217,36 +264,63 @@ func enter(fn, arg Value) (p *program, n cnode, f *frame, v Value) {
 			fn = sf.args[1]
 			continue
 		}
-		p = sf.prog
-		size, _, arity, arms := p.lambda(sf.node)
-		var args []Value
-		if arity > 1 {
-			// Each partial application has its own arguments.
-			args = append(sf.args[:len(sf.args):len(sf.args)], arg)
-			if len(args) < arity {
-				sf.args = args
-				return nil, none, nil, sf
-			}
+		size, _, arity, _ := sf.prog.lambda(sf.node)
+		if len(sf.args)+1 < arity {
+			sf.args = append(sf.args[:len(sf.args):len(sf.args)], arg)
+			return nil, none, nil, sf
 		}
-		f = &frame{parent: sf.env}
-		if size > 0 {
-			f.slots = make([]Value, size)
-		}
-		for i := 0; i < len(arms); i += arity + 1 {
-			if arity == 1 && p.match(cnode(arms[i]), arg, f) ||
-				arity > 1 && p.matchAll(arms[i:i+arity], args, f) {
-				return p, cnode(arms[i+arity]), f, nil
-			}
-		}
-		if args == nil {
-			args = []Value{arg}
-		}
-		strs := make([]string, len(args))
-		for i, a := range args {
-			strs[i] = printValue(sf.prog.labels, a)
-		}
-		panic(p.errorf(sf.node, "no arm matches %s", strings.Join(strs, ", ")))
+		f = sf.frame(size)
+		copy(f.slots, sf.args)
+		f.slots[arity-1] = arg
+		return sf.prog, sf.prog.arm(sf, f), f, nil
 	}
+}
+
+// enterN is enter for one or more arguments args at once. A function that
+// takes exactly as many is called with all of them, without applying it to
+// one at a time.
+func enterN(fn Value, args []Value) (p *program, n cnode, f *frame, v Value) {
+	switch g := fn.(type) {
+	case BuiltInFunc:
+		if g.arity == len(args) && g.arity > 1 {
+			return nil, none, nil, g.call(args)
+		}
+	case ScriptFunc:
+		if len(g.args) == 0 && !g.composition() {
+			if size, _, arity, _ := g.prog.lambda(g.node); arity == len(args) {
+				f = g.frame(size)
+				copy(f.slots, args)
+				return g.prog, g.prog.arm(g, f), f, nil
+			}
+		}
+	}
+	last := len(args) - 1
+	for _, arg := range args[:last] {
+		fn = apply(fn, arg)
+	}
+	return enter(fn, args[last])
+}
+
+// frame returns a new frame of size slots for a call of the lambda sf.
+func (sf ScriptFunc) frame(size int) *frame {
+	return &frame{parent: sf.env, slots: make([]Value, size)}
+}
+
+// arm returns the body of the first arm of the lambda sf that matches its
+// arguments, the first slots of f, binding the arm's names in f.
+func (p *program) arm(sf ScriptFunc, f *frame) cnode {
+	_, _, arity, arms := p.lambda(sf.node)
+	args := f.slots[:arity]
+	for i := 0; i < len(arms); i += arity + 1 {
+		if p.matchAll(arms[i:i+arity], args, f) {
+			return cnode(arms[i+arity])
+		}
+	}
+	strs := make([]string, arity)
+	for i, a := range args {
+		strs[i] = printValue(p.labels, a)
+	}
+	panic(p.errorf(sf.node, "no arm matches %s", strings.Join(strs, ", ")))
 }
 
 // match matches v against the pattern n, writing the names it binds into

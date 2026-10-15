@@ -13,8 +13,13 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	var scope types.TypeScope
 	var builtIns = make(Variables)
 
-	define := func(name string, typ types.TypeRef, val func(Value) Value) {
-		builtIns[name] = BuiltInFunc{name, val}
+	define := func(name string, typ types.TypeRef, one func(Value) Value) {
+		builtIns[name] = BuiltInFunc{name: name, arity: 1, one: one}
+		scope = scope.Bind(name, typ)
+	}
+	// defineN defines a builtin that takes arity arguments, more than one.
+	defineN := func(name string, typ types.TypeRef, arity int, call func([]Value) Value) {
+		builtIns[name] = BuiltInFunc{name: name, arity: arity, call: call}
 		scope = scope.Bind(name, typ)
 	}
 
@@ -32,82 +37,52 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	define("list/length", reg.Func(aList, types.IntRef), func(ls Value) Value {
 		return Int(len(ls.(List).elements))
 	})
-	define("list/map", reg.Func(aToB, reg.Func(aList, bList)), func(fn Value) Value {
-		return Partial{
-			name: "list/map", args: []Value{fn},
-			fn: func(ls Value) Value {
-				elems := ls.(List).elements
-				results := make([]Value, len(elems))
-				for i, v := range elems {
-					results[i] = apply(fn, v)
-				}
-				return List{results}
-			},
+	defineN("list/map", reg.Func(aToB, reg.Func(aList, bList)), 2, func(args []Value) Value {
+		fn, elems := args[0], args[1].(List).elements
+		results := make([]Value, len(elems))
+		for i, v := range elems {
+			results[i] = apply(fn, v)
 		}
+		return List{results}
 	})
 	accum := reg.Func(a, reg.Func(b, a))
-	define("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), func(init Value) Value {
-		return Partial{
-			name: "list/fold", args: []Value{init},
-			fn: func(fn Value) Value {
-				return Partial{
-					name: "list/fold", args: []Value{init, fn},
-					fn: func(ls Value) Value {
-						acc := init
-						for _, v := range ls.(List).elements {
-							acc = apply(apply(fn, acc), v)
-						}
-						return acc
-					},
-				}
-			},
+	defineN("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), 3, func(args []Value) Value {
+		acc, fn := args[0], args[1]
+		for _, v := range args[2].(List).elements {
+			acc = call(fn, acc, v)
 		}
+		return acc
 	})
-	define("list/repeat", reg.Func(types.IntRef, reg.Func(a, aList)), func(n Value) Value {
-		count := int(n.(Int))
+	defineN("list/repeat", reg.Func(types.IntRef, reg.Func(a, aList)), 2, func(args []Value) Value {
+		count := int(args[0].(Int))
 		if count < 0 {
 			panic(fail("list/repeat: negative count %d", count))
 		}
-		return Partial{
-			name: "list/repeat", args: []Value{n},
-			fn: func(v Value) Value {
-				elems := make([]Value, count)
-				for i := range elems {
-					elems[i] = v
-				}
-				return List{elems}
-			},
+		elems := make([]Value, count)
+		for i := range elems {
+			elems[i] = args[1]
 		}
+		return List{elems}
 	})
 
 	// Text
 	define("text/length", reg.Func(types.TextRef, types.IntRef), func(text Value) Value {
 		return Int(len(text.(Text)))
 	})
-	define("text/repeat", reg.Func(types.IntRef, reg.Func(types.TextRef, types.TextRef)), func(n Value) Value {
-		count := int(n.(Int))
+	defineN("text/repeat", reg.Func(types.IntRef, reg.Func(types.TextRef, types.TextRef)), 2, func(args []Value) Value {
+		count := int(args[0].(Int))
 		if count < 0 {
 			panic(fail("text/repeat: negative count %d", count))
 		}
-		return Partial{
-			name: "text/repeat", args: []Value{n},
-			fn: func(text Value) Value {
-				return Text(strings.Repeat(string(text.(Text)), count))
-			},
-		}
+		return Text(strings.Repeat(string(args[1].(Text)), count))
 	})
-	define("text/join", reg.Func(types.TextRef, reg.Func(textList, types.TextRef)), func(sep Value) Value {
-		return Partial{
-			name: "text/join", args: []Value{sep},
-			fn: func(ls Value) Value {
-				elems := ls.(List).elements
-				texts := make([]string, len(elems))
-				for i, v := range elems {
-					texts[i] = string(v.(Text))
-				}
-				return Text(strings.Join(texts, string(sep.(Text))))
-			},
+	defineN("text/join", reg.Func(types.TextRef, reg.Func(textList, types.TextRef)), 2, func(args []Value) Value {
+		elems := args[1].(List).elements
+		texts := make([]string, len(elems))
+		for i, v := range elems {
+			texts[i] = string(v.(Text))
 		}
+		return Text(strings.Join(texts, string(args[0].(Text))))
 	})
 
 	// int -> float

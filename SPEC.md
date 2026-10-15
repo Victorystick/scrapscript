@@ -571,8 +571,11 @@ Reliability is a top-level requirement. The rules:
    the same value and prints identically. So `scrap eval` of the output of an
    earlier `scrap eval` always gives that same output again. This requires:
    - Functions print with the bindings they capture as a where-clause,
-     `b -> a ; a = 3`, recursive ones included. Builtins print by name, and
-     captured hash references stay hash references.
+     `f ; f = b -> a ; a = 3`, recursive ones included. Builtins print by
+     name, and captured hash references stay hash references.
+   - A function applied to fewer arguments than it takes prints as that
+     application: `(a -> b -> a) 3`, or `f 3` for a function bound to `f`.
+     A chain of lambdas `a -> b -> …` takes all its arguments at once.
    - A function that a binding defines prints as that binding's name, so
      recursive and mutually recursive groups print as groups:
      `f ; f = | 0 -> 1 | n -> n * f (n - 1)`.

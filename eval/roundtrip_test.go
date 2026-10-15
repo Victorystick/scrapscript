@@ -8,8 +8,8 @@ import "testing"
 var brokenRoundTrips = map[string]string{
 	// Closures of one lambda in different frames print with the last
 	// frame's bindings (TODO.md section 8).
-	`list/map mk [1, 2] ; mk = n -> (x -> x + n)`:                 "both closures print with n = 2",
-	`list/fold (y -> y) (acc -> x -> (y -> acc y + x)) [1, 2, 3]`: "acc prints as calling itself",
+	`list/map mk [1, 2] ; mk = n -> (f ; f = x -> x + n)`:                 "both closures print with n = 2",
+	`list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x)) [1, 2, 3]`: "acc prints as calling itself",
 }
 
 // More sources to round-trip, beyond those of the other eval tests.
@@ -49,7 +49,12 @@ var roundTrips = []string{
 
 // Printed results, where their form matters.
 var printed = []struct{ source, result string }{
-	{`3 |> a -> b -> a`, "b -> a\n; a = 3"},
+	// A function applied to some of its arguments prints applied.
+	{`3 |> a -> b -> a`, `(a -> b -> a) 3`},
+	{`f 1 ; f = a -> b -> c -> a + b + c`, `f 1
+; f = a -> b -> c -> a + b + c`},
+	// A lambda in a where-clause is a function of its own.
+	{`3 |> a -> (f ; f = b -> a)`, "f\n; f = b -> a\n; a = 3"},
 	// A recursive function prints as its name, bound to its code.
 	{`[ f ] ; f = | 0 -> 1 | n -> n * f (n - 1)`, `[ f ]
 ; f =
@@ -67,8 +72,10 @@ var printed = []struct{ source, result string }{
   | _ -> b -> b`},
 	// Bindings from different scopes with the same name get primes, which
 	// avoid the names that the code binds.
-	{`{ f = (a -> b -> a) 1, g = (a -> a' -> a) 2 }`, `{ f = b -> a, g = a' -> a'' }
+	{`{ f = (a -> (h ; h = b -> a)) 1, g = (a -> (h ; h = a' -> a)) 2 }`, `{ f = h, g = h' }
+; h = b -> a
 ; a = 1
+; h' = a' -> a''
 ; a'' = 2`},
 	// Annotations, and the sort bindings that they refer to, are kept.
 	{`get ; get : pair -> int = p -> p.a ; pair : type = { a : int, b : int } ; unused = 1`, `get
@@ -137,7 +144,7 @@ func TestPrintedImports(t *testing.T) {
 		// A published function prints as the reference to it.
 		{`{ f = ` + add + ` }`, `{ f = ` + add + ` }`},
 		// Applying it gives a function of its code, with what it captures.
-		{add + ` 1`, "b -> a + b\n; a = 1"},
+		{add + ` 1`, add + ` 1`},
 		// Code that refers to it keeps the reference.
 		{`x -> ` + add + ` x`, `x -> ` + add + ` x`},
 	}

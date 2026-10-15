@@ -41,6 +41,7 @@ const (
 	opLocal   // A: the depth of the frame, how many out from the current one. B: the slot.
 	opImport  // The value of the scrap that the AST node refers to.
 	opCall    // A: the function. B: the argument.
+	opCallN   // A..B: the function, then two or more arguments.
 	opAdd     // A, B: the operands; and so for the operators below.
 	opSub     //
 	opMul     //
@@ -48,7 +49,7 @@ const (
 	opPrepend // a >+ b
 	opConcat  // a ++ b
 	opCompose // A..B: the function applied first, then second, then its uses.
-	opLambda  // A..B: its frame's size, its uses, its arity n, then n patterns and a body per arm.
+	opLambda  // A..B: its frame's size, its uses, its arity n, then n patterns and a body per arm. Its frame's first n slots are its arguments.
 	opWhere   // A..B: the body, then a slot and value per binding, in evaluation order.
 	opRecord  // A..B: the record it is based on or none, its shape or -1 if it has a base, then a key and value per field.
 	opAccess  // A: the record. B: the key, a label.ID.
@@ -401,7 +402,7 @@ func (c *compiler) expr(x ast.Node) cnode {
 
 	case ast.Call:
 		fn, arg := se.Call(x)
-		return c.node(opCall, int32(c.expr(fn)), int32(c.expr(arg)), x)
+		return c.call(x, fn, arg)
 
 	case ast.Where:
 		return c.group(x)
@@ -466,9 +467,9 @@ func (c *compiler) binary(x ast.Node) cnode {
 	op, left, right := c.src.Binary(x)
 	switch op {
 	case token.RPIPE:
-		return c.node(opCall, int32(c.expr(right)), int32(c.expr(left)), x)
+		return c.call(x, right, left)
 	case token.LPIPE:
-		return c.node(opCall, int32(c.expr(left)), int32(c.expr(right)), x)
+		return c.call(x, left, right)
 	case token.RCOMP, token.LCOMP:
 		if op == token.LCOMP {
 			left, right = right, left
@@ -485,32 +486,69 @@ func (c *compiler) binary(x ast.Node) cnode {
 	return c.node(o, int32(c.expr(left)), int32(c.expr(right)), x)
 }
 
-// fn compiles a function, a Func node or a match function, in a new frame.
-// A Func node is a match function of one arm with one pattern. The arms'
-// slots overlap.
+// call compiles the call x of fn to arg. Calls whose function is itself a
+// call, f a b, become one call with all the arguments.
+func (c *compiler) call(x, fn, arg ast.Node) cnode {
+	args := []ast.Node{arg}
+	for c.src.Kind(fn) == ast.Call {
+		var a ast.Node
+		fn, a = c.src.Call(fn)
+		args = append(args, a)
+	}
+	if len(args) == 1 {
+		return c.node(opCall, int32(c.expr(fn)), int32(c.expr(arg)), x)
+	}
+	xs := []int32{int32(c.expr(fn))}
+	for i := len(args) - 1; i >= 0; i-- {
+		xs = append(xs, int32(c.expr(args[i])))
+	}
+	return c.span(opCallN, xs, x)
+}
+
+// fn compiles a function, a Func node or a match function, in a new frame,
+// whose first slots are its arguments. A chain of Func nodes, a -> b -> …,
+// is one function that takes an argument per node, and if the chain ends
+// in a match function, its arguments too. A Func node is a match function
+// of one arm with one pattern. The arms' slots overlap.
 func (c *compiler) fn(x ast.Node) cnode {
 	u := c.open()
 	level, next, size := c.level, c.next, c.size
 	c.level, c.next, c.size = c.level+1, 0, 0
 
-	arms, arity := []ast.Node{x}, 1
-	if c.src.Kind(x) == ast.MatchFunc {
-		arms, arity = c.src.Arms(x), c.src.Arity(x)
+	var params []ast.Node
+	body := x
+	for c.src.Kind(body) == ast.Func {
+		var param ast.Node
+		param, body = c.src.Func(body)
+		params = append(params, param)
 	}
+	arms := []ast.Node{body}
+	arity := len(params)
+	match := c.src.Kind(body) == ast.MatchFunc
+	if match {
+		arms = c.src.Arms(body)
+		arity += c.src.Arity(body)
+	}
+	c.size = arity
+
 	xs := []int32{0, u, int32(arity)}
 	for _, a := range arms {
-		var pats []ast.Node
-		var body ast.Node
-		if c.src.Kind(a) == ast.Func {
-			var pat ast.Node
-			pat, body = c.src.Func(a)
-			pats = []ast.Node{pat}
-		} else {
-			pats, body = c.src.Arm(a)
-		}
-		c.next = 0
+		c.next = arity
 		scope := len(c.values)
-		xs = c.patterns(xs, pats, scope)
+		// Each parameter is a scope of its own, which may shadow the ones
+		// before it.
+		for i, param := range params {
+			xs = append(xs, int32(c.param(param, i, len(c.values))))
+		}
+		body := a
+		if match {
+			var pats []ast.Node
+			pats, body = c.src.Arm(a)
+			arm := len(c.values)
+			for i, pat := range pats {
+				xs = append(xs, int32(c.param(pat, len(params)+i, arm)))
+			}
+		}
 		xs = append(xs, int32(c.expr(body)))
 		c.values = c.values[:scope]
 	}
@@ -577,6 +615,20 @@ func (c *compiler) group(x ast.Node) cnode {
 
 // pattern compiles a pattern, binding its names in the current frame.
 // Names in c.values from scope onwards are bound by the same pattern.
+// param compiles the pattern x of argument i. A name binds the argument's
+// own slot, which already holds it.
+func (c *compiler) param(x ast.Node, i, scope int) cnode {
+	if c.src.Kind(x) != ast.Ident || c.src.TokenText(c.src.Main(x)) == "_" {
+		return c.pattern(x, scope)
+	}
+	name := c.name(c.src.Main(x))
+	if lookup(c.values, name) >= scope {
+		c.error(x, fmt.Sprintf("cannot bind %s twice", name))
+	}
+	c.bind(binder{name: name, slot: i, where: ast.None, types: -1})
+	return c.node(patBind, int32(i), 0, x)
+}
+
 func (c *compiler) pattern(x ast.Node, scope int) cnode {
 	se := c.src
 	switch se.Kind(x) {

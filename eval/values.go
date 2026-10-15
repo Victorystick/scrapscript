@@ -38,17 +38,19 @@ type Variant struct {
 	value Value
 }
 
-// A built-in function.
+// A built-in function, or one that a host implements, which takes arity
+// arguments.
 type BuiltInFunc struct {
-	name string
-	fn   func(Value) Value
+	name  string
+	arity int
+	one   func(Value) Value   // if arity is 1
+	call  func([]Value) Value // if arity is more, with all the arguments
 }
 
 // A built-in function applied to some, but not all, of its arguments.
 type Partial struct {
-	name string
+	fn   BuiltInFunc
 	args []Value
-	fn   func(Value) Value
 }
 
 // A user-defined function: a lambda or composition node of a program,
@@ -145,7 +147,7 @@ func (bf BuiltInFunc) eq(other Value) bool {
 // Functions are equal if they print the same.
 func (p Partial) eq(other Value) bool {
 	o, ok := other.(Partial)
-	return ok && p.name == o.name && slices.EqualFunc(p.args, o.args, Equals)
+	return ok && p.fn.name == o.fn.name && slices.EqualFunc(p.args, o.args, Equals)
 }
 func (sf ScriptFunc) eq(other Value) bool {
 	o, ok := other.(ScriptFunc)

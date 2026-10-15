@@ -107,7 +107,7 @@ func (p *valuePrinter) collect(v Value) {
 	case BuiltInFunc:
 		p.names[v.name] = true
 	case Partial:
-		p.names[v.name] = true
+		p.names[v.fn.name] = true
 		for _, arg := range v.args {
 			p.collect(arg)
 		}
@@ -303,7 +303,7 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 	case BuiltInFunc:
 		s.WriteString(v.name)
 	case Partial:
-		p.app(s, ctx, v.name, v.args...)
+		p.app(s, ctx, v.fn.name, v.args...)
 	case ScriptFunc:
 		if len(v.args) > 0 && !v.composition() {
 			// A function applied to some of its arguments prints as such.
