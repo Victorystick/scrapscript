@@ -2,8 +2,6 @@ package eval
 
 import (
 	"encoding/base64"
-	"maps"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -95,8 +93,8 @@ func home(sf ScriptFunc) (bindingKey, bool) {
 func (p *valuePrinter) collect(v Value) {
 	switch v := v.(type) {
 	case Record:
-		for _, key := range p.keys(v) {
-			p.collect(v.values[key])
+		for _, val := range v.values {
+			p.collect(val)
 		}
 	case List:
 		for _, elem := range v.elements {
@@ -269,13 +267,13 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 			return
 		}
 		s.WriteString("{ ")
-		for i, key := range p.keys(v) {
+		for i, key := range v.shape.labels {
 			if i > 0 {
 				s.WriteString(", ")
 			}
 			s.WriteString(p.labels.Name(key))
 			s.WriteString(" = ")
-			p.value(s, v.values[key], printer.Expr)
+			p.value(s, v.values[i], printer.Expr)
 		}
 		s.WriteString(" }")
 	case List:
@@ -312,11 +310,6 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 			s.WriteString(pr.String())
 		}
 	}
-}
-
-// keys returns a record's keys, in order by name.
-func (p *valuePrinter) keys(r Record) []label.ID {
-	return slices.SortedFunc(maps.Keys(r.values), p.labels.Compare)
 }
 
 // app prints head applied to args, in parentheses if ctx is an argument.

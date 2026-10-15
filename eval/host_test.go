@@ -129,6 +129,34 @@ func TestHostFunc(t *testing.T) {
 	}
 }
 
+func TestNewRecord(t *testing.T) {
+	e := environment()
+	r := e.NewRecord(
+		eval.Field{Label: e.Label("b"), Value: eval.Int(1)},
+		eval.Field{Label: e.Label("a"), Value: eval.Text("x")},
+	)
+	if got := e.Print(r); got != `{ a = "x", b = 1 }` {
+		t.Errorf("expected { a = \"x\", b = 1 }, got %s", got)
+	}
+	if r.Get(e.Label("b")) != eval.Int(1) || r.Get(e.Label("c")) != nil {
+		t.Errorf("expected b = 1 and no c")
+	}
+	// A record from a scrap has the same shape, whatever its fields' order.
+	v, err := e.Eval(read(t, e, `{ b = 1, a = "x" }`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !eval.Equals(r, v) {
+		t.Errorf("expected %s to equal %s", e.Print(r), e.Print(v))
+	}
+	defer func() {
+		if recover() == nil {
+			t.Errorf("expected a label set twice to panic")
+		}
+	}()
+	e.NewRecord(eval.Field{Label: e.Label("a")}, eval.Field{Label: e.Label("a")})
+}
+
 func TestCallFailure(t *testing.T) {
 	e := environment()
 	fn, err := e.Eval(read(t, e, `| #a -> 2`))

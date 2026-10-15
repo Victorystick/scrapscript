@@ -2,6 +2,7 @@ package eval
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/label"
@@ -49,7 +50,7 @@ const (
 	opCompose // A..B: the function applied first, then second, then its uses.
 	opLambda  // A..B: its frame's size, its uses, then a pattern and body per arm.
 	opWhere   // A..B: the body, then a slot and value per binding, in evaluation order.
-	opRecord  // A..B: the record it is based on or none, then a key and value per field.
+	opRecord  // A..B: the record it is based on or none, its shape or -1 if it has a base, then a key and value per field.
 	opAccess  // A: the record. B: the key, a label.ID.
 	opList    // A..B: the elements.
 	opVariant // A: the tag, a label.ID. B: the payload, or none.
@@ -59,7 +60,7 @@ const (
 	patWild    // _
 	patLiteral // A: the index of the value in consts.
 	patVariant // A: the tag, a label.ID. B: the payload, or none.
-	patRecord  // A..B: the rest or none, then a key and pattern per field.
+	patRecord  // A..B: the rest or none, the shape of its fields, then a key and pattern per field.
 	patList    // A..B: the elements.
 	patCons    // head >+ tail. A: head. B: tail.
 	patSnoc    // init +< last. A: init. B: last.
@@ -92,6 +93,10 @@ type core struct {
 	consts []Value
 	// The table that tags and record keys are interned in.
 	labels *label.Table
+	// The table that the shapes of records are interned in, and the shapes
+	// of record literals and patterns.
+	table  *shapeTable
+	shapes []*shape
 
 	// For printing closures, not for evaluating them. A lambda's or
 	// composition's uses is what its code refers to; a binder is a name that
@@ -158,10 +163,22 @@ func (c *core) where(n cnode) (body cnode, binds []int32) {
 }
 
 // Record returns the record or record pattern that a record is based on,
-// and its fields as pairs of key and value.
-func (c *core) record(n cnode) (rest cnode, fields []int32) {
+// its shape, and its fields as pairs of key and value.
+//
+// A record without a base has the shape of its fields, and a key is the
+// index of its value in the record. A record with a base has the base's
+// shape, which is not known until it runs, so a key is a label.ID, and the
+// shape is nil.
+//
+// A record pattern's shape is the shape of its fields, and a key is the
+// index of its label in that shape. Without a rest, the record it matches
+// has that shape too, so the key is the index of its value.
+func (c *core) record(n cnode) (rest cnode, s *shape, fields []int32) {
 	r := c.range_(n)
-	return cnode(r[0]), r[1:]
+	if r[1] >= 0 {
+		s = c.shapes[r[1]]
+	}
+	return cnode(r[0]), s, r[2:]
 }
 
 // Elems returns the rest pattern of a prefix or suffix pattern, and its
@@ -172,11 +189,11 @@ func (c *core) elems(n cnode) (rest cnode, elems []int32) {
 }
 
 // compile lowers se, which must have been type-checked. Free names that it
-// doesn't bind refer to globals. Tags and record keys are interned in
-// labels.
-func compile(se *ast.SourceExpr, globals Vars, labels *label.Table) (*core, error) {
+// doesn't bind refer to globals. Tags and record keys are interned in the
+// label table of shapes, and the shapes of records in shapes.
+func compile(se *ast.SourceExpr, globals Vars, shapes *shapeTable) (*core, error) {
 	c := compiler{
-		core:     core{src: se, labels: labels},
+		core:     core{src: se, labels: shapes.labels, table: shapes},
 		globals:  globals,
 		builtins: make(map[string]int32),
 	}
@@ -268,6 +285,24 @@ func (c *compiler) builtin(x ast.Node, name string) int32 {
 // label returns the ID of the tag or record key t.
 func (c *compiler) label(t ast.Tok) int32 {
 	return int32(c.labels.Of(c.name(t)))
+}
+
+// shape adds the shape of a record's fields to shapes, and returns its
+// index there and each field's index in it.
+func (c *compiler) shape(fields ast.Fields) (int32, []int32) {
+	labels := make([]label.ID, fields.Len())
+	for i := range labels {
+		labels[i] = label.ID(c.label(fields.Key(i)))
+	}
+	sorted := slices.Clone(labels)
+	c.table.sort(sorted)
+	s := c.table.of(sorted)
+	keys := make([]int32, len(labels))
+	for i, l := range labels {
+		keys[i] = int32(s.index(l))
+	}
+	c.shapes = append(c.shapes, s)
+	return int32(len(c.shapes) - 1), keys
 }
 
 // open starts collecting what code in the current frame refers to into a
@@ -380,13 +415,17 @@ func (c *compiler) expr(x ast.Node) cnode {
 
 	case ast.Record:
 		rest, fields := se.Record(x)
-		r := none
 		if rest != ast.None {
-			r = c.expr(rest)
+			xs := []int32{int32(c.expr(rest)), -1}
+			for i := range fields.Len() {
+				xs = append(xs, c.label(fields.Key(i)), int32(c.expr(fields.Value(i))))
+			}
+			return c.span(opRecord, xs, x)
 		}
-		xs := []int32{int32(r)}
+		s, keys := c.shape(fields)
+		xs := []int32{int32(none), s}
 		for i := range fields.Len() {
-			xs = append(xs, c.label(fields.Key(i)), int32(c.expr(fields.Value(i))))
+			xs = append(xs, keys[i], int32(c.expr(fields.Value(i))))
 		}
 		return c.span(opRecord, xs, x)
 
@@ -563,9 +602,10 @@ func (c *compiler) pattern(x ast.Node, scope int) cnode {
 
 	case ast.Record:
 		rest, fields := se.Record(x)
-		xs := []int32{0}
+		s, keys := c.shape(fields)
+		xs := []int32{int32(none), s}
 		for i := range fields.Len() {
-			xs = append(xs, c.label(fields.Key(i)), int32(c.pattern(fields.Value(i), scope)))
+			xs = append(xs, keys[i], int32(c.pattern(fields.Value(i), scope)))
 		}
 		if rest != ast.None {
 			xs[0] = int32(c.pattern(rest, scope))

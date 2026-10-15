@@ -114,7 +114,7 @@ func apiFromValue(l *labels, v eval.Value) Api {
 }
 
 func (x Api) toValue(l *labels) eval.Value {
-	return eval.NewRecord(
+	return l.env.NewRecord(
 		eval.Field{Label: l.data, Value: eval.Bytes(bytes.Clone(x.Data))},
 		eval.Field{Label: l.flag, Value: eval.Byte(x.Flag)},
 		eval.Field{Label: l.handle, Value: eval.NewFunc("apiHandle", 2, func(args []eval.Value) (eval.Value, error) {
@@ -251,7 +251,7 @@ func replyFetchPayloadFromValue(l *labels, v eval.Value) ReplyFetchPayload {
 }
 
 func (x ReplyFetchPayload) toValue(l *labels) eval.Value {
-	return eval.NewRecord(
+	return l.env.NewRecord(
 		eval.Field{Label: l.then, Value: eval.NewFunc("replyFetchPayloadThen", 1, func(args []eval.Value) (eval.Value, error) {
 			r, err := x.Then(string(args[0].(eval.Text)))
 			if err != nil {
@@ -277,7 +277,7 @@ func replyRespondPayloadFromValue(l *labels, v eval.Value) ReplyRespondPayload {
 }
 
 func (x ReplyRespondPayload) toValue(l *labels) eval.Value {
-	return eval.NewRecord(
+	return l.env.NewRecord(
 		eval.Field{Label: l.body, Value: eval.Bytes(bytes.Clone(x.Body))},
 		eval.Field{Label: l.status, Value: eval.Int(x.Status)},
 	)
@@ -357,7 +357,7 @@ func treeNodePayloadFromValue(l *labels, v eval.Value) TreeNodePayload {
 }
 
 func (x TreeNodePayload) toValue(l *labels) eval.Value {
-	return eval.NewRecord(
+	return l.env.NewRecord(
 		eval.Field{Label: l.left, Value: x.Left.toValue(l)},
 		eval.Field{Label: l.right, Value: x.Right.toValue(l)},
 		eval.Field{Label: l.value, Value: eval.Int(x.Value)},
@@ -365,8 +365,10 @@ func (x TreeNodePayload) toValue(l *labels) eval.Value {
 }
 
 // labels are the IDs of the interface's record labels and tags in the
-// environment that Load checked the script in, which values hold.
+// environment that Load checked the script in, which values hold, and
+// that environment, which records are made in.
 type labels struct {
+	env     *eval.Environment
 	body    label.ID
 	data    label.ID
 	fetch   label.ID
@@ -392,6 +394,7 @@ type labels struct {
 
 func newLabels(env *eval.Environment) *labels {
 	return &labels{
+		env:     env,
 		body:    env.Label("body"),
 		data:    env.Label("data"),
 		fetch:   env.Label("fetch"),

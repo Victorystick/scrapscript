@@ -22,18 +22,32 @@ type Field struct {
 	Value Value
 }
 
-// NewRecord returns a record of the fields.
-func NewRecord(fields ...Field) Record {
-	values := make(map[label.ID]Value, len(fields))
-	for _, f := range fields {
-		values[f.Label] = f.Value
+// NewRecord returns a record of the fields, whose labels must be distinct.
+func (e *Environment) NewRecord(fields ...Field) Record {
+	labels := make([]label.ID, len(fields))
+	for i, f := range fields {
+		labels[i] = f.Label
 	}
-	return Record{values}
+	e.shapes.sort(labels)
+	for i := 1; i < len(labels); i++ {
+		if labels[i] == labels[i-1] {
+			panic(fmt.Sprintf("eval.NewRecord: %s is set twice", e.reg.Labels().Name(labels[i])))
+		}
+	}
+	s := e.shapes.of(labels)
+	values := make([]Value, len(fields))
+	for _, f := range fields {
+		values[s.index(f.Label)] = f.Value
+	}
+	return Record{s, values}
 }
 
 // Get returns the value of a record's field, or nil if it has none.
 func (r Record) Get(l label.ID) Value {
-	return r.values[l]
+	if i := r.shape.index(l); i >= 0 {
+		return r.values[i]
+	}
+	return nil
 }
 
 // NewList returns a list of the elements, which it takes ownership of.

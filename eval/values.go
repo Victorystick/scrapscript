@@ -2,7 +2,6 @@ package eval
 
 import (
 	"bytes"
-	"maps"
 	"slices"
 
 	"github.com/Victorystick/scrapscript/label"
@@ -24,8 +23,10 @@ type Text string
 type Byte byte
 type Bytes []byte
 
+// A record holds its values in the order of its shape's labels.
 type Record struct {
-	values map[label.ID]Value
+	shape  *shape
+	values []Value
 }
 
 type List struct {
@@ -119,7 +120,7 @@ func (bs Bytes) eq(other Value) bool {
 }
 func (i Record) eq(other Value) bool {
 	o, ok := other.(Record)
-	return ok && maps.EqualFunc(i.values, o.values, Equals)
+	return ok && i.shape == o.shape && slices.EqualFunc(i.values, o.values, Equals)
 }
 func (l List) eq(other Value) bool {
 	o, ok := other.(List)

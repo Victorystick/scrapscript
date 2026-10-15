@@ -2,7 +2,6 @@ package eval
 
 import (
 	"fmt"
-	"maps"
 	"slices"
 
 	"github.com/Victorystick/scrapscript/label"
@@ -139,21 +138,25 @@ func (p *program) run(n cnode, f *frame) Value {
 			return ScriptFunc{prog: p, node: n, env: f}
 
 		case opRecord:
-			rest, fields := p.record(n)
-			var values map[label.ID]Value
-			if rest == none {
-				values = make(map[label.ID]Value, len(fields)/2)
-			} else {
-				// A record based on another.
-				values = maps.Clone(p.run(rest, f).(Record).values)
+			base, s, fields := p.record(n)
+			if base == none {
+				values := make([]Value, len(fields)/2)
+				for i := 0; i < len(fields); i += 2 {
+					values[fields[i]] = p.run(cnode(fields[i+1]), f)
+				}
+				return Record{s, values}
 			}
+			// A record based on another, with some of its fields updated.
+			r := p.run(base, f).(Record)
+			values := slices.Clone(r.values)
 			for i := 0; i < len(fields); i += 2 {
-				values[label.ID(fields[i])] = p.run(cnode(fields[i+1]), f)
+				values[r.shape.index(label.ID(fields[i]))] = p.run(cnode(fields[i+1]), f)
 			}
-			return Record{values}
+			return Record{r.shape, values}
 
 		case opAccess:
-			return p.run(cnode(d.a), f).(Record).values[label.ID(d.b)]
+			r := p.run(cnode(d.a), f).(Record)
+			return r.values[r.shape.index(label.ID(d.b))]
 
 		case opList:
 			elems := p.range_(n)
@@ -264,21 +267,29 @@ func (p *program) match(n cnode, v Value, f *frame) bool {
 		if !ok {
 			return false
 		}
-		rest, fields := p.record(n)
+		rest, s, fields := p.record(n)
+		if rest == none {
+			// The checker closed the record's type to the pattern's fields.
+			for i := 0; i < len(fields); i += 2 {
+				if !p.match(cnode(fields[i+1]), r.values[fields[i]], f) {
+					return false
+				}
+			}
+			return true
+		}
 		for i := 0; i < len(fields); i += 2 {
-			val, ok := r.values[label.ID(fields[i])]
-			if !ok || !p.match(cnode(fields[i+1]), val, f) {
+			val := r.values[r.shape.index(s.labels[fields[i]])]
+			if !p.match(cnode(fields[i+1]), val, f) {
 				return false
 			}
 		}
-		if rest == none {
-			return true
+		values := make([]Value, 0, len(r.values)-len(s.labels))
+		for i, l := range r.shape.labels {
+			if s.index(l) < 0 {
+				values = append(values, r.values[i])
+			}
 		}
-		values := maps.Clone(r.values)
-		for i := 0; i < len(fields); i += 2 {
-			delete(values, label.ID(fields[i]))
-		}
-		return p.match(rest, Record{values}, f)
+		return p.match(rest, Record{p.table.without(r.shape, s), values}, f)
 
 	case patList:
 		l, ok := v.(List)

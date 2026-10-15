@@ -660,8 +660,9 @@ always gives the same hashes.
   made abstract, and when two such records' types are equal. Type scraps (7.6)
   are the interim mechanism.
 - **Compact runtime values.** Names exist only in source, types and printing;
-  at runtime, values are words. Started: variables are frame slots, and tags
-  and labels are interned IDs, but records are still maps. The design:
+  at runtime, values are words. Started: variables are frame slots, tags
+  and labels are interned IDs, and records are buffers under a shape. The
+  design:
   - Variables resolve to frame slots (section 5's `Var(index)`), so a frame is
     a buffer of words and binding a pattern writes into it.
   - Tags and labels are interned to integers by a table that the runtime and
@@ -669,17 +670,17 @@ always gives the same hashes.
     without a payload needs only its id. A match switches on the id. Ids are
     global rather than dense per enum, because rows let one value flow
     through enums with different tag sets.
-  - A record is its field values in label order: `{ a = 2, b = 4 }` is
-    `(2, 4)`, and a field's index is its label's rank in the record's label
-    set. When the checker knows that set, indices are static.
+  - A record is its field values in label order, by name: `{ a = 2, b = 4 }`
+    is `(2, 4)`, and a field's index is its label's rank in the record's
+    label set. When the checker knows that set, indices are static.
   - Row polymorphism is the hard part: `{ a : int, ..r } -> int` doesn't know
     where `a` is. Options: a shape word per record (its interned sorted label
     set, which a field access searches, or caches per site), indices passed as
     hidden arguments (evidence passing, as in Leijen's row calculi), or
     specialising functions per shape. A shape word costs one word per record
     and keeps types erased, which suits closures that print their source.
-  - Spreads `{ ..r, a = 1 }` build a new buffer, under the new shape when one
-    is added.
+  - Spreads `{ ..r, a = 1 }` build a new buffer under `r`'s shape: a spread
+    only updates fields that `r` has (section 7), so the shape never changes.
   - Printing, equality and the flat encoding map ids back to names through the
     table. Ids are per environment and never part of a scrap's identity
     (section 9); a host gets them by name, as generated bindings do once

@@ -62,7 +62,7 @@ func programFromValue(l *labels, v eval.Value) Program {
 }
 
 func (x Program) toValue(l *labels) eval.Value {
-	return eval.NewRecord(
+	return l.env.NewRecord(
 		eval.Field{Label: l.init, Value: x.Init.toValue(l)},
 		eval.Field{Label: l.step, Value: eval.NewFunc("programStep", 2, func(args []eval.Value) (eval.Value, error) {
 			r, err := x.Step(eventFromValue(l, args[0]), S{args[1]})
@@ -90,7 +90,7 @@ func turnFromValue(l *labels, v eval.Value) Turn {
 }
 
 func (x Turn) toValue(l *labels) eval.Value {
-	return eval.NewRecord(
+	return l.env.NewRecord(
 		eval.Field{Label: l.next, Value: x.Next.toValue(l)},
 		eval.Field{Label: l.out, Value: eval.Text(x.Out)},
 		eval.Field{Label: l.state, Value: x.State.v},
@@ -214,8 +214,10 @@ func (x Event) toValue(l *labels) eval.Value {
 }
 
 // labels are the IDs of the interface's record labels and tags in the
-// environment that Load checked the script in, which values hold.
+// environment that Load checked the script in, which values hold, and
+// that environment, which records are made in.
 type labels struct {
+	env      *eval.Environment
 	eof      label.ID
 	exit     label.ID
 	init     label.ID
@@ -229,6 +231,7 @@ type labels struct {
 
 func newLabels(env *eval.Environment) *labels {
 	return &labels{
+		env:      env,
 		eof:      env.Label("eof"),
 		exit:     env.Label("exit"),
 		init:     env.Label("init"),

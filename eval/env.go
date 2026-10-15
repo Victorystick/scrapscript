@@ -61,6 +61,8 @@ type Environment struct {
 	// aren't allowed.
 	files fs.FS
 	reg   types.Registry
+	// The shapes of records, whose labels are in reg's table.
+	shapes *shapeTable
 	// The TypeScope and Variables match each other's contents.
 	// One is used for type inference, the other for evaluation.
 	typeScope types.TypeScope
@@ -74,6 +76,7 @@ func NewEnvironment() *Environment {
 	typeScope, vars := bindBuiltIns(&env.reg)
 	env.typeScope = typeScope
 	env.vars = vars
+	env.shapes = newShapeTable(env.reg.Labels())
 	env.scraps = make(map[hashKey]*Scrap)
 	env.drafts = make(map[string]*Scrap)
 	return env
@@ -258,7 +261,7 @@ func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
 		return nil, fmt.Errorf("cannot evaluate a type")
 	}
 	if s.value == nil {
-		c, err := compile(&s.expr, e.vars, e.reg.Labels())
+		c, err := compile(&s.expr, e.vars, e.shapes)
 		if err != nil {
 			return nil, err
 		}

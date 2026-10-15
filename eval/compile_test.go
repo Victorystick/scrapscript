@@ -123,13 +123,17 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 		}
 		s.WriteString(")")
 	case opRecord, patRecord:
-		rest, fields := c.record(n)
+		rest, sh, fields := c.record(n)
 		s.WriteString("{")
 		for i := 0; i < len(fields); i += 2 {
 			if i > 0 {
 				s.WriteString(",")
 			}
-			fmt.Fprintf(s, " %s = ", c.labels.Name(label.ID(fields[i])))
+			key := label.ID(fields[i])
+			if sh != nil {
+				key = sh.labels[fields[i]]
+			}
+			fmt.Fprintf(s, " %s = ", c.labels.Name(key))
 			c.dump(s, cnode(fields[i+1]))
 		}
 		if rest != none {
@@ -219,7 +223,7 @@ func compileString(t *testing.T, source string) *core {
 	}
 	var reg types.Registry
 	_, globals := bindBuiltIns(&reg)
-	c, err := compile(&se, globals, reg.Labels())
+	c, err := compile(&se, globals, newShapeTable(reg.Labels()))
 	if err != nil {
 		t.Fatalf("compile %q: %v", source, err)
 	}
@@ -333,7 +337,7 @@ func TestCompileErrors(t *testing.T) {
 		}
 		var reg types.Registry
 		_, globals := bindBuiltIns(&reg)
-		_, err = compile(&se, globals, reg.Labels())
+		_, err = compile(&se, globals, newShapeTable(reg.Labels()))
 		if err == nil || !strings.Contains(err.Error(), tt.err) {
 			t.Errorf("%s: got %v, want %q", tt.source, err, tt.err)
 		}

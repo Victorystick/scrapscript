@@ -54,6 +54,8 @@ func Generate(env *eval.Environment, iface *eval.Scrap, cfg Config) (map[string]
 		byRef:  make(map[types.TypeRef]*decl),
 		byKey:  make(map[string]*decl),
 		labels: make(map[string]string),
+		// The labels struct's field of the environment.
+		labelNames: map[string]bool{"env": true},
 	}
 	for _, name := range []string{"Interface", "Load"} {
 		g.names[name] = true
@@ -131,9 +133,6 @@ func (g *generator) label(name string) string {
 	}
 	for base, i := f, 2; g.labelNames[f]; i++ {
 		f = fmt.Sprintf("%s%d", base, i)
-	}
-	if g.labelNames == nil {
-		g.labelNames = make(map[string]bool)
 	}
 	g.labelNames[f] = true
 	g.labels[name] = f
@@ -462,12 +461,13 @@ func (g *generator) bindings(pkg, hash string, sources map[string]string, top *g
 func (g *generator) labelsType(w func(string, ...any)) {
 	names := slices.Sorted(maps.Keys(g.labels))
 	w("\n// labels are the IDs of the interface's record labels and tags in the\n")
-	w("// environment that Load checked the script in, which values hold.\n")
-	w("type labels struct {\n")
+	w("// environment that Load checked the script in, which values hold, and\n")
+	w("// that environment, which records are made in.\n")
+	w("type labels struct {\n\tenv *eval.Environment\n")
 	for _, name := range names {
 		w("\t%s label.ID\n", g.labels[name])
 	}
-	w("}\n\nfunc newLabels(env *eval.Environment) *labels {\n\treturn &labels{\n")
+	w("}\n\nfunc newLabels(env *eval.Environment) *labels {\n\treturn &labels{\n\t\tenv: env,\n")
 	for _, name := range names {
 		w("\t\t%s: env.Label(%q),\n", g.labels[name], name)
 	}
@@ -492,7 +492,7 @@ func (g *generator) record(w func(string, ...any), d *decl) {
 		w("\t}\n}\n")
 	}
 
-	w("\nfunc (x %s) toValue(l *labels) eval.Value {\n\treturn eval.NewRecord(\n", d.name)
+	w("\nfunc (x %s) toValue(l *labels) eval.Value {\n\treturn l.env.NewRecord(\n", d.name)
 	for _, f := range d.fields {
 		w("\t\teval.Field{Label: %s, Value: %s},\n", g.label(f.label), g.to(f.typ, "x."+f.name))
 	}
