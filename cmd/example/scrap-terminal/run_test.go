@@ -14,12 +14,11 @@ const simulate = `simulate
 ; simulate : s => $"./program.scrap" s -> list text -> result
   = prog -> input -> run prog.step input "" prog.init
 ; result : type = { out : text, status : int }
-; run = step -> input -> acc -> t -> dispatch step input (text/join "" [acc, t.out]) t.state t.next
-; dispatch = step -> input -> acc -> state ->
-  | #exit status -> { out = acc, status = status }
-  | #read-line ->
-      (| []           -> run step [] acc (step #eof state)
-       | line >+ rest -> run step rest acc (step (#line line) state)) input`
+; run = step -> input -> acc -> t -> dispatch step (text/join "" [acc, t.out]) t.state t.next input
+; dispatch = step -> acc -> state ->
+  | #exit status -> _            -> { out = acc, status = status }
+  | #read-line   -> []           -> run step [] acc (step #eof state)
+  | #read-line   -> line >+ rest -> run step rest acc (step (#line line) state)`
 
 var programs = map[string]string{
 	"echo": `{ init = { state = (), out = "", next = #read-line }
@@ -39,8 +38,8 @@ var programs = map[string]string{
 }`,
 	// Reads past the end of the input, which keeps giving #eof.
 	"eofs": `{ init = { state = 0, out = "", next = #read-line }
-, step = | #eof    -> n -> (| 2 -> { state = 2, out = "done\n", next = #exit 0 }
-                             | _ -> { state = n + 1, out = "eof\n", next = #read-line }) n
+, step = | #eof    -> 2 -> { state = 2, out = "done\n", next = #exit 0 }
+         | #eof    -> n -> { state = n + 1, out = "eof\n", next = #read-line }
          | #line t -> n -> { state = n, out = t, next = #read-line }
 }`,
 }

@@ -38,6 +38,18 @@ never inspects. The host prints `init.out`, then, while the program asks to
 along with the state, and prints the `out` of each turn, until the program
 asks to `#exit`.
 
+`step` takes the event and then the state, so its arms can match on both,
+with one pattern per argument; the first arm whose patterns all match wins.
+This program exits after reading two lines, or at the end of the input:
+
+```scrap
+{ init = { state = 0, out = "", next = #read-line }
+, step = | #line _ -> 1 -> { state = 2, out = "two\n", next = #exit 0 }
+         | #line _ -> n -> { state = n + 1, out = "", next = #read-line }
+         | #eof    -> n -> { state = n, out = "", next = #exit 1 }
+}
+```
+
 A program can refer to the interface by its hash, which `--help` prints:
 
 ```scrap
