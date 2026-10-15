@@ -1,0 +1,390 @@
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    3724	    316088 ns/op	  252792 B/op	   10376 allocs/op
+BenchmarkEval/loop        	     540	   2202341 ns/op	 2878243 B/op	   99743 allocs/op
+BenchmarkEval/sum         	   12156	     98610 ns/op	  110624 B/op	    3755 allocs/op
+BenchmarkEval/fold        	     880	   1337645 ns/op	 1842218 B/op	   59758 allocs/op
+BenchmarkEval/records     	    4576	    344763 ns/op	  332344 B/op	   10501 allocs/op
+BenchmarkEval/fields      	    2542	    459835 ns/op	  594904 B/op	   19319 allocs/op
+BenchmarkEval/rows        	    1838	    667779 ns/op	  748353 B/op	   28500 allocs/op
+BenchmarkEval/destructure 	    2934	    397528 ns/op	  443352 B/op	   16375 allocs/op
+BenchmarkEval/destructure-closed         	    3657	    333566 ns/op	  379352 B/op	   14375 allocs/op
+BenchmarkEval/tree                       	    3747	    327718 ns/op	  311352 B/op	   12291 allocs/op
+BenchmarkEval/text                       	    5314	    226482 ns/op	 1256688 B/op	    7014 allocs/op
+BenchmarkEval/echo                       	     844	   1490618 ns/op	 4242311 B/op	   48090 allocs/op
+BenchmarkRead                            	   22675	     51712 ns/op	   61990 B/op	     885 allocs/op
+BenchmarkInfer                           	    1159	   1019238 ns/op	 1868688 B/op	   17511 allocs/op
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     216	   5495356 ns/op	 190.87 MB/s	10068048 B/op	      14 allocs/op
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	     100	  11527044 ns/op	 449.15 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    3914	    306037 ns/op	  252792 B/op	   10376 allocs/op
+BenchmarkEval/loop        	     560	   2141593 ns/op	 2878242 B/op	   99743 allocs/op
+BenchmarkEval/sum         	   12423	     96468 ns/op	  110624 B/op	    3755 allocs/op
+BenchmarkEval/fold        	     910	   1323845 ns/op	 1842218 B/op	   59758 allocs/op
+BenchmarkEval/records     	    4598	    261127 ns/op	  332344 B/op	   10501 allocs/op
+BenchmarkEval/fields      	    2433	    456418 ns/op	  594904 B/op	   19319 allocs/op
+BenchmarkEval/rows        	    1838	    658882 ns/op	  748353 B/op	   28500 allocs/op
+BenchmarkEval/destructure 	    3168	    382031 ns/op	  443352 B/op	   16375 allocs/op
+BenchmarkEval/destructure-closed         	    3676	    330190 ns/op	  379352 B/op	   14375 allocs/op
+BenchmarkEval/tree                       	    3771	    327804 ns/op	  311352 B/op	   12291 allocs/op
+BenchmarkEval/text                       	    5164	    227127 ns/op	 1256688 B/op	    7014 allocs/op
+BenchmarkEval/echo                       	     841	   1425522 ns/op	 4242311 B/op	   48090 allocs/op
+BenchmarkRead                            	   24273	     49390 ns/op	   61990 B/op	     885 allocs/op
+BenchmarkInfer                           	    1183	   1026794 ns/op	 1868688 B/op	   17511 allocs/op
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     214	   5406501 ns/op	 194.00 MB/s	10068048 B/op	      14 allocs/op
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	      97	  11812512 ns/op	 438.29 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    3757	    314743 ns/op	  252792 B/op	   10376 allocs/op
+BenchmarkEval/loop        	     553	   2272821 ns/op	 2878243 B/op	   99743 allocs/op
+BenchmarkEval/sum         	   12392	     96601 ns/op	  110624 B/op	    3755 allocs/op
+BenchmarkEval/fold        	     914	   1319143 ns/op	 1842218 B/op	   59758 allocs/op
+BenchmarkEval/records     	    4621	    265722 ns/op	  332344 B/op	   10501 allocs/op
+BenchmarkEval/fields      	    2678	    446711 ns/op	  594904 B/op	   19319 allocs/op
+BenchmarkEval/rows        	    1782	    655288 ns/op	  748353 B/op	   28500 allocs/op
+BenchmarkEval/destructure 	    3181	    379012 ns/op	  443352 B/op	   16375 allocs/op
+BenchmarkEval/destructure-closed         	    3669	    330716 ns/op	  379352 B/op	   14375 allocs/op
+BenchmarkEval/tree                       	    3733	    325831 ns/op	  311352 B/op	   12291 allocs/op
+BenchmarkEval/text                       	    5348	    232498 ns/op	 1256688 B/op	    7014 allocs/op
+BenchmarkEval/echo                       	     825	   1428341 ns/op	 4242311 B/op	   48090 allocs/op
+BenchmarkRead                            	   24250	     50227 ns/op	   61989 B/op	     885 allocs/op
+BenchmarkInfer                           	    1202	   1027801 ns/op	 1868688 B/op	   17511 allocs/op
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     218	   5443110 ns/op	 192.70 MB/s	10068048 B/op	      14 allocs/op
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	     103	  11353875 ns/op	 456.00 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    3829	    310293 ns/op	  252792 B/op	   10376 allocs/op
+BenchmarkEval/loop        	     560	   2156326 ns/op	 2878243 B/op	   99743 allocs/op
+BenchmarkEval/sum         	   12411	     96853 ns/op	  110624 B/op	    3755 allocs/op
+BenchmarkEval/fold        	     886	   1327170 ns/op	 1842218 B/op	   59758 allocs/op
+BenchmarkEval/records     	    4600	    266918 ns/op	  332344 B/op	   10501 allocs/op
+BenchmarkEval/fields      	    2692	    453529 ns/op	  594904 B/op	   19319 allocs/op
+BenchmarkEval/rows        	    1830	    657274 ns/op	  748353 B/op	   28500 allocs/op
+BenchmarkEval/destructure 	    3184	    382193 ns/op	  443352 B/op	   16375 allocs/op
+BenchmarkEval/destructure-closed         	    3220	    333830 ns/op	  379352 B/op	   14375 allocs/op
+BenchmarkEval/tree                       	    3726	    323895 ns/op	  311352 B/op	   12291 allocs/op
+BenchmarkEval/text                       	    5287	    229955 ns/op	 1256688 B/op	    7014 allocs/op
+BenchmarkEval/echo                       	     774	   1434942 ns/op	 4242313 B/op	   48090 allocs/op
+BenchmarkRead                            	   24313	     49429 ns/op	   61990 B/op	     885 allocs/op
+BenchmarkInfer                           	    1250	   1099613 ns/op	 1868688 B/op	   17511 allocs/op
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     200	   5673086 ns/op	 184.89 MB/s	10068048 B/op	      14 allocs/op
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	     102	  11327051 ns/op	 457.08 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    3811	    316161 ns/op	  252792 B/op	   10376 allocs/op
+BenchmarkEval/loop        	     549	   2213275 ns/op	 2878242 B/op	   99743 allocs/op
+BenchmarkEval/sum         	   12424	     96491 ns/op	  110624 B/op	    3755 allocs/op
+BenchmarkEval/fold        	     902	   1407927 ns/op	 1842218 B/op	   59758 allocs/op
+BenchmarkEval/records     	    4525	    280750 ns/op	  332344 B/op	   10501 allocs/op
+BenchmarkEval/fields      	    2623	    459878 ns/op	  594904 B/op	   19319 allocs/op
+BenchmarkEval/rows        	    1803	    661873 ns/op	  748353 B/op	   28500 allocs/op
+BenchmarkEval/destructure 	    3116	    408422 ns/op	  443352 B/op	   16375 allocs/op
+BenchmarkEval/destructure-closed         	    3427	    348294 ns/op	  379352 B/op	   14375 allocs/op
+BenchmarkEval/tree                       	    3394	    339271 ns/op	  311352 B/op	   12291 allocs/op
+BenchmarkEval/text                       	    5322	    229441 ns/op	 1256688 B/op	    7014 allocs/op
+BenchmarkEval/echo                       	     842	   1436702 ns/op	 4242312 B/op	   48090 allocs/op
+BenchmarkRead                            	   24240	     49629 ns/op	   61990 B/op	     885 allocs/op
+BenchmarkInfer                           	    1192	   1041911 ns/op	 1868688 B/op	   17511 allocs/op
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     213	   5484587 ns/op	 191.24 MB/s	10068048 B/op	      14 allocs/op
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	     103	  11432275 ns/op	 452.87 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    3619	    312680 ns/op	  252792 B/op	   10376 allocs/op
+BenchmarkEval/loop        	     550	   2174164 ns/op	 2878243 B/op	   99743 allocs/op
+BenchmarkEval/sum         	   10000	    101941 ns/op	  110624 B/op	    3755 allocs/op
+BenchmarkEval/fold        	     855	   1345461 ns/op	 1842218 B/op	   59758 allocs/op
+BenchmarkEval/records     	    4620	    263643 ns/op	  332344 B/op	   10501 allocs/op
+BenchmarkEval/fields      	    2684	    448345 ns/op	  594904 B/op	   19319 allocs/op
+BenchmarkEval/rows        	    1780	    663309 ns/op	  748353 B/op	   28500 allocs/op
+BenchmarkEval/destructure 	    2947	    387140 ns/op	  443352 B/op	   16375 allocs/op
+BenchmarkEval/destructure-closed         	    3654	    337137 ns/op	  379352 B/op	   14375 allocs/op
+BenchmarkEval/tree                       	    3706	    332077 ns/op	  311352 B/op	   12291 allocs/op
+BenchmarkEval/text                       	    5358	    227416 ns/op	 1256688 B/op	    7014 allocs/op
+BenchmarkEval/echo                       	     816	   1432331 ns/op	 4242312 B/op	   48090 allocs/op
+BenchmarkRead                            	   24199	     49524 ns/op	   61990 B/op	     885 allocs/op
+BenchmarkInfer                           	    1167	   1146545 ns/op	 1868688 B/op	   17511 allocs/op
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     189	   6135770 ns/op	 170.95 MB/s	10068048 B/op	      14 allocs/op
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	     100	  11293568 ns/op	 458.43 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    4002	    307092 ns/op	  252792 B/op	   10376 allocs/op
+BenchmarkEval/loop        	     558	   2175769 ns/op	 2878243 B/op	   99743 allocs/op
+BenchmarkEval/sum         	   12331	     97285 ns/op	  110624 B/op	    3755 allocs/op
+BenchmarkEval/fold        	     907	   1346128 ns/op	 1842218 B/op	   59758 allocs/op
+BenchmarkEval/records     	    4621	    261006 ns/op	  332344 B/op	   10501 allocs/op
+BenchmarkEval/fields      	    2670	    451793 ns/op	  594905 B/op	   19319 allocs/op
+BenchmarkEval/rows        	    1717	    662797 ns/op	  748353 B/op	   28500 allocs/op
+BenchmarkEval/destructure 	    3163	    382616 ns/op	  443352 B/op	   16375 allocs/op
+BenchmarkEval/destructure-closed         	    3606	    333933 ns/op	  379352 B/op	   14375 allocs/op
+BenchmarkEval/tree                       	    3723	    323305 ns/op	  311352 B/op	   12291 allocs/op
+BenchmarkEval/text                       	    5265	    229574 ns/op	 1256688 B/op	    7014 allocs/op
+BenchmarkEval/echo                       	     847	   1421770 ns/op	 4242310 B/op	   48090 allocs/op
+BenchmarkRead                            	   24442	     49769 ns/op	   61990 B/op	     885 allocs/op
+BenchmarkInfer                           	    1161	   1018257 ns/op	 1868688 B/op	   17511 allocs/op
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     216	   5384923 ns/op	 194.78 MB/s	10068048 B/op	      14 allocs/op
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	     104	  11281589 ns/op	 458.92 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    3748	    313753 ns/op	  252792 B/op	   10376 allocs/op
+BenchmarkEval/loop        	     548	   2167356 ns/op	 2878243 B/op	   99743 allocs/op
+BenchmarkEval/sum         	   12027	     99571 ns/op	  110624 B/op	    3755 allocs/op
+BenchmarkEval/fold        	     908	   1338926 ns/op	 1842218 B/op	   59758 allocs/op
+BenchmarkEval/records     	    4616	    259604 ns/op	  332344 B/op	   10501 allocs/op
+BenchmarkEval/fields      	    2700	    453719 ns/op	  594904 B/op	   19319 allocs/op
+BenchmarkEval/rows        	    1803	    658350 ns/op	  748353 B/op	   28500 allocs/op
+BenchmarkEval/destructure 	    3146	    381701 ns/op	  443352 B/op	   16375 allocs/op
+BenchmarkEval/destructure-closed         	    3674	    332367 ns/op	  379352 B/op	   14375 allocs/op
+BenchmarkEval/tree                       	    3658	    326607 ns/op	  311352 B/op	   12291 allocs/op
+BenchmarkEval/text                       	    5299	    230630 ns/op	 1256688 B/op	    7014 allocs/op
+BenchmarkEval/echo                       	     846	   1416670 ns/op	 4242309 B/op	   48090 allocs/op
+BenchmarkRead                            	   24267	     49516 ns/op	   61989 B/op	     885 allocs/op
+BenchmarkInfer                           	    1165	   1035861 ns/op	 1868688 B/op	   17511 allocs/op
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     211	   5425936 ns/op	 193.31 MB/s	10068048 B/op	      14 allocs/op
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	      97	  11574745 ns/op	 447.30 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    3769	    311836 ns/op	  252792 B/op	   10376 allocs/op
+BenchmarkEval/loop        	     546	   2180651 ns/op	 2878242 B/op	   99743 allocs/op
+BenchmarkEval/sum         	   12278	     98885 ns/op	  110624 B/op	    3755 allocs/op
+BenchmarkEval/fold        	     908	   1366658 ns/op	 1842218 B/op	   59758 allocs/op
+BenchmarkEval/records     	    4620	    270682 ns/op	  332344 B/op	   10501 allocs/op
+BenchmarkEval/fields      	    2668	    454505 ns/op	  594904 B/op	   19319 allocs/op
+BenchmarkEval/rows        	    1810	    659231 ns/op	  748353 B/op	   28500 allocs/op
+BenchmarkEval/destructure 	    3103	    386975 ns/op	  443352 B/op	   16375 allocs/op
+BenchmarkEval/destructure-closed         	    3652	    333158 ns/op	  379352 B/op	   14375 allocs/op
+BenchmarkEval/tree                       	    3741	    331034 ns/op	  311352 B/op	   12291 allocs/op
+BenchmarkEval/text                       	    5324	    226549 ns/op	 1256688 B/op	    7014 allocs/op
+BenchmarkEval/echo                       	     837	   1448805 ns/op	 4242311 B/op	   48090 allocs/op
+BenchmarkRead                            	   24202	     49513 ns/op	   61990 B/op	     885 allocs/op
+BenchmarkInfer                           	    1172	   1018951 ns/op	 1868688 B/op	   17511 allocs/op
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     218	   5434324 ns/op	 193.01 MB/s	10068048 B/op	      14 allocs/op
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	     102	  11406961 ns/op	 453.88 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    3540	    324141 ns/op	  252792 B/op	   10376 allocs/op
+BenchmarkEval/loop        	     555	   2152769 ns/op	 2878242 B/op	   99743 allocs/op
+BenchmarkEval/sum         	   12120	     98652 ns/op	  110624 B/op	    3755 allocs/op
+BenchmarkEval/fold        	     915	   1312136 ns/op	 1842218 B/op	   59758 allocs/op
+BenchmarkEval/records     	    4647	    258988 ns/op	  332344 B/op	   10501 allocs/op
+BenchmarkEval/fields      	    2701	    447119 ns/op	  594904 B/op	   19319 allocs/op
+BenchmarkEval/rows        	    1794	    656506 ns/op	  748353 B/op	   28500 allocs/op
+BenchmarkEval/destructure 	    3142	    383908 ns/op	  443352 B/op	   16375 allocs/op
+BenchmarkEval/destructure-closed         	    3645	    344553 ns/op	  379352 B/op	   14375 allocs/op
+BenchmarkEval/tree                       	    3724	    336020 ns/op	  311352 B/op	   12291 allocs/op
+BenchmarkEval/text                       	    5277	    232431 ns/op	 1256688 B/op	    7014 allocs/op
+BenchmarkEval/echo                       	     805	   1506714 ns/op	 4242312 B/op	   48090 allocs/op
+BenchmarkRead                            	   23880	     49954 ns/op	   61990 B/op	     885 allocs/op
+BenchmarkInfer                           	    1186	   1077043 ns/op	 1868688 B/op	   17511 allocs/op
+PASS
+PASS
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     212	   5439786 ns/op	 192.82 MB/s	10068048 B/op	      14 allocs/op
+PASS
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	     103	  11375100 ns/op	 455.15 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+PASS
+PASS

@@ -57,7 +57,7 @@ builtins now return plain values and panic with a `runtimeError`, which
 
 - [x] Intern tags and labels to ids, in a `label.Table` per environment that
       the type registry owns and the runtime shares.
-- [ ] Records as word buffers in label order, tags as `(id, payload)`
+- [x] Records as word buffers in label order, tags as `(id, payload)`
       (SPEC.md section 12, "Compact runtime values").
 - [ ] Compile matches to decision trees (Maranget 2008) with the same
       matrix steps as the exhaustiveness check (types/exhaustive.go), so

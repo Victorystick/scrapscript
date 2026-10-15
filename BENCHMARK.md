@@ -60,3 +60,6 @@ Medians of 10 runs, Apple M3 Pro, `-cpu 1`.
 | `283734e` | No runtime type checks; tail calls run in constant stack | 0.31 ms | 1.31 ms | 1.51 ms | 13.9k | 1.00 ms | 48.8 µs |
 | `f23f0bc` | Static exhaustiveness checks; `Infer` source gains two catch-all arms | 0.28 ms | 1.25 ms | 1.47 ms | 13.9k | 1.02 ms | 48.2 µs |
 | `03895d5` | Tags and labels interned per environment; records −7%, tree −8% vs. an interleaved baseline, others unchanged (this run's absolute times drifted ~3% up) | 0.31 ms | 1.31 ms | 1.48 ms | 13.2k | 1.06 ms | 50.2 µs |
+| `6990e04` | Interleaved baseline for the next two rows; adds the record benchmarks, so the allocation geomean is over a different set than the rows above | 0.31 ms | 1.32 ms | 1.45 ms | 14.6k | 1.04 ms | 50.1 µs |
+| `3ea375b` | Records as value buffers under interned shapes; records −27%, rows −28%, destructure −31%, tree −13% | 0.31 ms | 1.34 ms | 1.43 ms | 14.6k | 1.03 ms | 49.6 µs |
+| `bf7ceaf` | Multi-pattern arms, and functions called with all their arguments at once; loop −49%, echo −38%, fold −32%, text −17%; fib +20%, sum +17%, tree back to the baseline | 0.37 ms | 0.90 ms | 0.89 ms | 11.6k | 1.09 ms | 50.5 µs |
