@@ -170,6 +170,13 @@ func TestCallFailure(t *testing.T) {
 	if _, err := eval.Call(fn, eval.NewVariant(e.Label("b"), nil)); err == nil || !strings.Contains(err.Error(), "no arm matches #b") {
 		t.Errorf("expected no arm to match, got %v", err)
 	}
+	fn, err = e.Eval(read(t, e, `| #a -> #c -> 2`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eval.Call(fn, eval.NewVariant(e.Label("a"), nil), eval.NewVariant(e.Label("d"), nil)); err == nil || !strings.Contains(err.Error(), "no arm matches #a, #d") {
+		t.Errorf("expected no arm to match, got %v", err)
+	}
 }
 
 func must(v eval.Value, err error) eval.Value {

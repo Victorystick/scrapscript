@@ -340,16 +340,12 @@ func (p *Printer) expr(x ast.Node, ctx Context) {
 func (p *Printer) arm(arm ast.Node) {
 	patterns := Context{kind: ctxBinary, min: armPrec, arm: true}
 	p.WriteString("| ")
-	for {
-		pat, body := p.Src.Func(arm)
+	pats, body := p.Src.Arm(arm)
+	for _, pat := range pats {
 		p.Expr(pat, patterns)
 		p.WriteString(" -> ")
-		if p.Src.Kind(body) != ast.Func {
-			p.Expr(body, patterns)
-			return
-		}
-		arm = body
 	}
+	p.Expr(body, patterns)
 }
 
 // Type precedences, loosest first.

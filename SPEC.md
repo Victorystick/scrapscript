@@ -275,9 +275,9 @@ Desugaring:
   argument type open. Exhaustiveness is a typing rule: a scrap that type-checks
   cannot raise a match error. INT, BYTE, TEXT and BYTES patterns always need a
   catch-all arm. The checker closes enums, then, once the whole scrap is
-  inferred, checks every match function against its argument type (Maranget's
-  usefulness, with list patterns split by length) and names a value that no arm
-  matches. A host's call into a scrap doesn't check its arguments, so a value
+  inferred, checks every match function against its argument types (Maranget's
+  usefulness, one column per argument of a multi-pattern arm, with list
+  patterns split by length) and names arguments that no arm matches. A host's call into a scrap doesn't check its arguments, so a value
   from a host that no arm accepts still stops evaluation with an error.
 - Records and variants share one row mechanism (7.3).
 - Int and Float are separate types with no overloading. Type classes are

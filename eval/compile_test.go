@@ -103,14 +103,18 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 		c.uses_(s, u)
 		c.list(s, " ", ")", "", first, second)
 	case opLambda:
-		size, u, arms := c.lambda(n)
+		size, u, arity, arms := c.lambda(n)
 		fmt.Fprintf(s, "(fn/%d", size)
 		c.uses_(s, u)
-		for i := 0; i < len(arms); i += 2 {
-			s.WriteString(" | ")
-			c.dump(s, cnode(arms[i]))
-			s.WriteString(" -> ")
-			c.dump(s, cnode(arms[i+1]))
+		for i := 0; i < len(arms); i += arity + 1 {
+			s.WriteString(" |")
+			for _, pat := range arms[i : i+arity] {
+				s.WriteString(" ")
+				c.dump(s, cnode(pat))
+				s.WriteString(" ->")
+			}
+			s.WriteString(" ")
+			c.dump(s, cnode(arms[i+arity]))
 		}
 		s.WriteString(")")
 	case opWhere:

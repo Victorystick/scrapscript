@@ -34,7 +34,7 @@ var expressions = []struct {
 ; size : tree -> int = | #leaf -> 0 | #node n -> 1 + size n.left + size n.right
 ; tree : type = [#leaf, #node { left : tree, right : tree }]`, `2`},
 	{`take 3 (ones ())
-; take : int -> stream -> list int = | 0 -> _ -> [] | n -> (| #more s -> s.head >+ take (n - 1) (s.tail ()))
+; take : int -> stream -> list int = | 0 -> _ -> [] | n -> #more s -> s.head >+ take (n - 1) (s.tail ())
 ; ones : () -> stream = _ -> #more { head = 1, tail = ones }
 ; stream : type = [#more { head : int, tail : () -> stream }]`, `[ 1, 1, 1 ]`},
 	{`f 2 * 3 ; f = x -> x + 1`, `9`},
@@ -55,6 +55,13 @@ var expressions = []struct {
   | "c" -> 3
   |  x  -> 0`, `2`},
 	{`f 1 2 ; f = a -> b -> a + b`, `3`},
+	// Multi-pattern arms match all their arguments; a later pattern falls
+	// through to the next arm.
+	{`f 5 8 ; f = | 1 -> 1 -> 1 | a -> b -> a + b`, `13`},
+	{`f 1 8 ; f = | 1 -> 1 -> 1 | a -> b -> a + b`, `9`},
+	{`f 1 1 ; f = | 1 -> 1 -> 1 | a -> b -> a + b`, `1`},
+	{`[f #a #c, f #a #d, f #b #c] ; f = | #a -> #c -> 1 | _ -> #d -> 2 | _ -> _ -> 3`, `[ 1, 2, 3 ]`},
+	{`list/map (f 1) [1, 2] ; f = | 1 -> 1 -> 0 | a -> b -> a + b`, `[ 0, 3 ]`},
 	{`f "b" ; f = | "a" -> 1 | "b" -> 2 | "c" -> 3 | x -> 0`, `2`},
 	{`(f >> (x -> x) >> g) 7
 	  ; f =

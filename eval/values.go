@@ -57,11 +57,18 @@ type ScriptFunc struct {
 	prog *program
 	node cnode
 	env  *frame
-	// A composition's functions, in the order they are applied.
-	composed []Value
+	// For a lambda, the arguments it has been applied to, fewer than its
+	// arity. For a composition, its functions, in the order they are
+	// applied. One field serves both to keep ScriptFunc small.
+	args []Value
 	// The hash reference that it was imported by, which it prints as, if it
 	// is the value of a published scrap.
 	ref string
+}
+
+// composition returns true if sf is a composition rather than a lambda.
+func (sf ScriptFunc) composition() bool {
+	return sf.prog.ops[sf.node] == opCompose
 }
 
 func Equals(a, b Value) bool {

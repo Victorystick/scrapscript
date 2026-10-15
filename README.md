@@ -30,24 +30,6 @@ So far it supports
     list text -> int
     ```
 
-## Known bugs
-
-* Only supports pattern matching on the argument immediately following a pipe.
-
-    ```sh
-    f 1 3
-    ; f =
-    | 1 -> 1 -> 1
-    | 1 -> 2 -> 3
-    | 3 -> 5 -> 8
-    | 5 -> 8 -> 12
-    | a -> b -> a + b
-
-    # evaluation error: function parameter must be an identifier
-    #     3: | 1 -> 1 -> 1
-    #               ^
-    ```
-
 ## Missing
 
 * `scrap flat` - due to a lack of details.

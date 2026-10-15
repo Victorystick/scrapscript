@@ -74,11 +74,11 @@ func (b *binding) binder() binder {
 
 // uses returns the index in sf.prog.uses of what sf's code refers to.
 func (sf ScriptFunc) uses() int32 {
-	if sf.composed != nil {
+	if sf.composition() {
 		_, _, u := sf.prog.compose(sf.node)
 		return u
 	}
-	_, u, _ := sf.prog.lambda(sf.node)
+	_, u, _, _ := sf.prog.lambda(sf.node)
 	return u
 }
 
@@ -112,6 +112,11 @@ func (p *valuePrinter) collect(v Value) {
 			p.collect(arg)
 		}
 	case ScriptFunc:
+		if !v.composition() {
+			for _, arg := range v.args {
+				p.collect(arg)
+			}
+		}
 		if v.ref != "" {
 			return
 		}
@@ -300,7 +305,14 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 	case Partial:
 		p.app(s, ctx, v.name, v.args...)
 	case ScriptFunc:
-		if v.ref != "" {
+		if len(v.args) > 0 && !v.composition() {
+			// A function applied to some of its arguments prints as such.
+			fn := v
+			fn.args = nil
+			var head strings.Builder
+			p.value(&head, fn, printer.Arg)
+			p.app(s, ctx, head.String(), v.args...)
+		} else if v.ref != "" {
 			s.WriteString(v.ref)
 		} else if key, ok := home(v); ok {
 			s.WriteString(p.byKey[key].printed)

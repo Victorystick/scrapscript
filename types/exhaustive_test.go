@@ -26,6 +26,11 @@ func TestExhaustive(t *testing.T) {
 		`| [#a] -> 1 | [#b] -> 2 | _ -> 3`,
 		// The annotation closes the enum that the catch-all leaves open.
 		`f ; f : { p : [#a, #b], q : [#c, #d] } -> int = | { p = #a, q = _ } -> 1 | { p = _, q = #c } -> 2 | { p = #b, q = #d } -> 3`,
+		// Multi-pattern arms: one column per argument.
+		`| #true -> #true -> 1 | _ -> _ -> 0`,
+		`| #a -> s -> s | #b -> s -> 0`,
+		`| #a -> #c -> 1 | #a -> #d -> 2 | #b -> #c -> 3 | #b -> #d -> 4`,
+		`| [] -> _ -> 0 | _ -> [] -> 0 | (x >+ _) -> (y >+ _) -> x + y`,
 		// Recursive types.
 		`size ; size : tree -> int = | #leaf -> 0 | #node { left = l, right = r } -> 1 + size l + size r
 ; tree : type = [#leaf, #node { left : tree, right : tree }]`,
@@ -55,6 +60,10 @@ func TestNotExhaustive(t *testing.T) {
 		// The rest is a catch-all for the elements, so their enum stays open.
 		{`| [] -> 0 | [#a] ++ _ -> 1`, `[ _ ] ++ _`},
 		{`| { p = 0 } -> 1`, `{ p = _ }`},
+		{`| #a -> #c -> 1 | #b -> #d -> 2 | #a -> #d -> 3`, `#b, #c`},
+		// The catch-all in the second column leaves its enum open.
+		{`| #a -> #c -> 1 | #a -> #d -> 2 | #b -> _ -> 3`, `#a, _`},
+		{`| [] -> _ -> 0 | _ -> [] -> 0`, `[ _ ] ++ _, [ _ ] ++ _`},
 		// Inner match functions are checked too.
 		{`| #a -> (| 1 -> 1) | #b -> (x -> x)`, `_`},
 		// Annotations close enums that catch-alls leave open, or keep them open.

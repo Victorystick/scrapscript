@@ -3,6 +3,7 @@ package eval
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/Victorystick/scrapscript/label"
 )
@@ -132,7 +133,7 @@ func (p *program) run(n cnode, f *frame) Value {
 		case opCompose:
 			first, second, _ := p.compose(n)
 			fns := []Value{p.run(first, f), p.run(second, f)}
-			return ScriptFunc{prog: p, node: n, env: f, composed: fns}
+			return ScriptFunc{prog: p, node: n, env: f, args: fns}
 
 		case opLambda:
 			return ScriptFunc{prog: p, node: n, env: f}
@@ -211,23 +212,40 @@ func enter(fn, arg Value) (p *program, n cnode, f *frame, v Value) {
 			return nil, none, nil, g.fn(arg)
 		}
 		sf := fn.(ScriptFunc)
-		if sf.composed != nil {
-			arg = apply(sf.composed[0], arg)
-			fn = sf.composed[1]
+		if sf.composition() {
+			arg = apply(sf.args[0], arg)
+			fn = sf.args[1]
 			continue
 		}
 		p = sf.prog
-		size, _, arms := p.lambda(sf.node)
+		size, _, arity, arms := p.lambda(sf.node)
+		var args []Value
+		if arity > 1 {
+			// Each partial application has its own arguments.
+			args = append(sf.args[:len(sf.args):len(sf.args)], arg)
+			if len(args) < arity {
+				sf.args = args
+				return nil, none, nil, sf
+			}
+		}
 		f = &frame{parent: sf.env}
 		if size > 0 {
 			f.slots = make([]Value, size)
 		}
-		for i := 0; i < len(arms); i += 2 {
-			if p.match(cnode(arms[i]), arg, f) {
-				return p, cnode(arms[i+1]), f, nil
+		for i := 0; i < len(arms); i += arity + 1 {
+			if arity == 1 && p.match(cnode(arms[i]), arg, f) ||
+				arity > 1 && p.matchAll(arms[i:i+arity], args, f) {
+				return p, cnode(arms[i+arity]), f, nil
 			}
 		}
-		panic(p.errorf(sf.node, "no arm matches %s", printValue(sf.prog.labels, arg)))
+		if args == nil {
+			args = []Value{arg}
+		}
+		strs := make([]string, len(args))
+		for i, a := range args {
+			strs[i] = printValue(sf.prog.labels, a)
+		}
+		panic(p.errorf(sf.node, "no arm matches %s", strings.Join(strs, ", ")))
 	}
 }
 

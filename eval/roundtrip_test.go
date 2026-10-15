@@ -55,6 +55,16 @@ var printed = []struct{ source, result string }{
 ; f =
   | 0 -> 1
   | n -> n * f (n - 1)`},
+	// A match function applied to some of its arguments prints applied.
+	{`f 1 ; f = | 1 -> 1 -> 1 | a -> b -> a + b`, `f 1
+; f =
+  | 1 -> 1 -> 1
+  | a -> b -> a + b`},
+	{`(| 1 -> b -> b | a -> _ -> a) 2`, `(| 1 -> b -> b | a -> _ -> a) 2`},
+	{`#some (f [1] ; f = | [] -> _ -> 0 | _ -> b -> b)`, `#some (f [ 1 ])
+; f =
+  | [] -> _ -> 0
+  | _ -> b -> b`},
 	// Bindings from different scopes with the same name get primes, which
 	// avoid the names that the code binds.
 	{`{ f = (a -> b -> a) 1, g = (a -> a' -> a) 2 }`, `{ f = b -> a, g = a' -> a'' }

@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Victorystick/scrapscript/ast"
@@ -70,7 +71,7 @@ type context struct {
 	payloads int
 	// The match functions, and their argument types, to check for
 	// exhaustiveness once the whole scrap is inferred.
-	matches []positioned
+	matches []match
 	ex      exhauster
 }
 
@@ -108,7 +109,7 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, imports Imports) (
 	reg.enter()
 	res = context.scrap(se.Expr)
 	for _, m := range context.matches {
-		context.exhaustive(m.node, m.typ)
+		context.exhaustive(m.node, m.args)
 	}
 	reg.exit()
 	reg.generalize(res.Type)
@@ -494,6 +495,13 @@ type arms struct {
 	bound map[string]bool
 }
 
+// A match is a match function and its argument types, one per pattern of
+// an arm.
+type match struct {
+	node ast.Node
+	args []TypeRef
+}
+
 type positioned struct {
 	at   position
 	node ast.Node
@@ -505,14 +513,20 @@ type positioned struct {
 // with a catch-all pattern. So a match function without a catch-all accepts
 // exactly the tags it lists.
 func (c *context) matchFunc(x ast.Node) TypeRef {
-	argTy := c.reg.Var()
+	args := make([]TypeRef, c.src.Arity(x))
+	for i := range args {
+		args[i] = c.reg.Var()
+	}
 	bodyTy := c.reg.Var()
 	var m arms
 	for _, arm := range c.src.Arms(x) {
-		arg, body := c.src.Func(arm)
+		pats, body := c.src.Arm(arm)
 		scope := c.scope
 		m.bound = make(map[string]bool)
-		c.pattern(&m, arg, argTy, "")
+		for i, pat := range pats {
+			// Each argument is a root of its own.
+			c.pattern(&m, pat, args[i], position("").step(strconv.Itoa(i)))
+		}
 		c.ensure(body, bodyTy, c.infer(body))
 		c.scope = scope
 	}
@@ -522,8 +536,12 @@ func (c *context) matchFunc(x ast.Node) TypeRef {
 			c.reg.closeEnum(e.typ)
 		}
 	}
-	c.matches = append(c.matches, positioned{node: x, typ: argTy})
-	return c.reg.Func(argTy, bodyTy)
+	c.matches = append(c.matches, match{node: x, args: args})
+	ty := bodyTy
+	for i := len(args) - 1; i >= 0; i-- {
+		ty = c.reg.Func(args[i], ty)
+	}
+	return ty
 }
 
 func (p position) coveredBy(catchAll []position) bool {

@@ -27,7 +27,8 @@ const (
 	Literal               // Main: the literal, whose token kind is its kind.
 	Binary                // Main: the operator. Lhs, Rhs: the operands.
 	Func                  // Main: '->'. Lhs: the parameter. Rhs: the body.
-	MatchFunc             // Lhs..Rhs: the arms, which are Func nodes.
+	MatchFunc             // Lhs..Rhs: the arms, which are Arm nodes.
+	Arm                   // Main: '|'. Lhs..Rhs: its patterns, one per argument, then its body.
 	Call                  // Lhs: the function. Rhs: the argument.
 	Variant               // Main: the tag after '#'. Lhs: the payload, or None.
 	Record                // Main: '{'. Lhs: the spread record, or None. Rhs: see Record.
@@ -51,6 +52,7 @@ var kindStrings = [...]string{
 	Binary:     "Binary",
 	Func:       "Func",
 	MatchFunc:  "MatchFunc",
+	Arm:        "Arm",
 	Call:       "Call",
 	Variant:    "Variant",
 	Record:     "Record",
@@ -121,8 +123,21 @@ func (se *SourceExpr) Call(n Node) (fn, arg Node) {
 	return Node(d.Lhs), Node(d.Rhs)
 }
 
-// Arms returns a MatchFunc node's arms, which are Func nodes.
+// Arms returns a MatchFunc node's arms, which are Arm nodes. All of them
+// have the same number of patterns.
 func (se *SourceExpr) Arms(n Node) []Node { return se.extra(se.Data[n]) }
+
+// Arm returns an Arm node's patterns, one per argument, and its body.
+func (se *SourceExpr) Arm(n Node) (patterns []Node, body Node) {
+	xs := se.extra(se.Data[n])
+	return xs[:len(xs)-1], xs[len(xs)-1]
+}
+
+// Arity returns the number of arguments that a MatchFunc node takes.
+func (se *SourceExpr) Arity(n Node) int {
+	patterns, _ := se.Arm(se.Arms(n)[0])
+	return len(patterns)
+}
 
 // Enum returns an Enum node's row tail, which may be None, and its Variant
 // nodes. Its Rhs indexes Extra at: the ']' token, the variant count n, then
@@ -217,8 +232,7 @@ func (se *SourceExpr) First(n Node) Tok {
 	case Binary, Func, Call, Where, Access:
 		return se.First(Node(se.Data[n].Lhs))
 	case MatchFunc:
-		arg, _ := se.Func(se.Arms(n)[0])
-		return se.First(arg)
+		return se.First(se.Arms(n)[0])
 	case Variant:
 		// The token before the tag is its '#'.
 		return se.Mains[n] - 1
@@ -233,7 +247,9 @@ func (se *SourceExpr) Last(n Node) Tok {
 		return se.Last(Node(se.Data[n].Rhs))
 	case MatchFunc:
 		arms := se.Arms(n)
-		_, body := se.Func(arms[len(arms)-1])
+		return se.Last(arms[len(arms)-1])
+	case Arm:
+		_, body := se.Arm(n)
 		return se.Last(body)
 	case Forall:
 		return se.Last(Node(se.Data[n].Lhs))

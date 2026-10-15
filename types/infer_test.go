@@ -138,6 +138,11 @@ func TestInfer(t *testing.T) {
 		{`| ns ++ [a, b] -> ns | _ -> []`, `list a -> list a`},
 
 		{`| n >+ ns -> ns | [] -> [] <| [1, 2, 3]`, `list int`},
+		// Multi-pattern arms: one pattern per argument.
+		{`| 1 -> b -> 1 | a -> b -> a + b`, `int -> int -> int`},
+		{`| _ -> [] -> 0 | _ -> x >+ _ -> x`, `a -> list int -> int`},
+		{`| #a -> s -> s | #b -> s -> 0`, `[ #a, #b ] -> int -> int`},
+		{`| 0 -> (x -> x) | _ -> (x -> 0)`, `int -> int -> int`},
 		{`| ns +< n -> ns | [] -> [] <| [1, 2, 3]`, `list int`},
 		{`| ns ++ [2, 3] -> ns | _ -> [] <| [1, 2, 3]`, `list int`},
 		{`| [1, 2] ++ ns -> ns | _ -> [] <| [1, 2, 3]`, `list int`},
@@ -277,6 +282,8 @@ func TestInferFailure(t *testing.T) {
 		{`f -> ({ a = g 1, b = g "" } ; g = x -> f x)`, `cannot unify 'int' with 'text'`},
 		{`x -> z -> { a = [z, [x]], b = [x, [z]] }`, `cannot construct infinite type`},
 		{`x ; x = 1 ; x = 2`, `cannot bind x twice`},
+		{`| a -> a -> 1`, `cannot bind a twice`},
+		{`| 1 -> "a" -> 1 | a -> 1 -> a`, `cannot unify 'text' with 'int'`},
 		{`ignore ; ignore : c -> int = _ -> 1 ; c : type = [#a, #a]`, `cannot define tag #a more than once`},
 		{`ignore ; ignore : { a : int, a : text } -> int = _ -> 1`, `cannot define field a more than once`},
 		// A recursive type recurs within a tag's payload, with the same arguments.

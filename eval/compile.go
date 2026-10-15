@@ -48,7 +48,7 @@ const (
 	opPrepend // a >+ b
 	opConcat  // a ++ b
 	opCompose // A..B: the function applied first, then second, then its uses.
-	opLambda  // A..B: its frame's size, its uses, then a pattern and body per arm.
+	opLambda  // A..B: its frame's size, its uses, its arity n, then n patterns and a body per arm.
 	opWhere   // A..B: the body, then a slot and value per binding, in evaluation order.
 	opRecord  // A..B: the record it is based on or none, its shape or -1 if it has a base, then a key and value per field.
 	opAccess  // A: the record. B: the key, a label.ID.
@@ -141,11 +141,12 @@ func (c *core) range_(n cnode) []int32 {
 	return c.extra[d.a:d.b]
 }
 
-// Lambda returns a lambda's frame size, its uses and its arms, as pairs of
-// pattern and body.
-func (c *core) lambda(n cnode) (size int, u int32, arms []int32) {
+// Lambda returns a lambda's frame size, its uses, its arity, the number of
+// arguments it takes, and its arms, each its patterns, one per argument,
+// and then its body.
+func (c *core) lambda(n cnode) (size int, u int32, arity int, arms []int32) {
 	r := c.range_(n)
-	return int(r[0]), r[1], r[2:]
+	return int(r[0]), r[1], int(r[2]), r[3:]
 }
 
 // Compose returns the functions of a composition, in the order they are
@@ -441,11 +442,8 @@ func (c *compiler) expr(x ast.Node) cnode {
 		}
 		return c.span(opList, xs, x)
 
-	case ast.Func:
-		return c.fn(x, []ast.Node{x})
-
-	case ast.MatchFunc:
-		return c.fn(x, se.Arms(x))
+	case ast.Func, ast.MatchFunc:
+		return c.fn(x)
 
 	case ast.Import:
 		return c.node(opImport, 0, 0, x)
@@ -487,20 +485,33 @@ func (c *compiler) binary(x ast.Node) cnode {
 	return c.node(o, int32(c.expr(left)), int32(c.expr(right)), x)
 }
 
-// fn compiles a function with arms, each a Func node, in a new frame.
-// The arms' slots overlap.
-func (c *compiler) fn(x ast.Node, arms []ast.Node) cnode {
+// fn compiles a function, a Func node or a match function, in a new frame.
+// A Func node is a match function of one arm with one pattern. The arms'
+// slots overlap.
+func (c *compiler) fn(x ast.Node) cnode {
 	u := c.open()
 	level, next, size := c.level, c.next, c.size
 	c.level, c.next, c.size = c.level+1, 0, 0
 
-	xs := []int32{0, u}
+	arms, arity := []ast.Node{x}, 1
+	if c.src.Kind(x) == ast.MatchFunc {
+		arms, arity = c.src.Arms(x), c.src.Arity(x)
+	}
+	xs := []int32{0, u, int32(arity)}
 	for _, a := range arms {
-		pat, body := c.src.Func(a)
+		var pats []ast.Node
+		var body ast.Node
+		if c.src.Kind(a) == ast.Func {
+			var pat ast.Node
+			pat, body = c.src.Func(a)
+			pats = []ast.Node{pat}
+		} else {
+			pats, body = c.src.Arm(a)
+		}
 		c.next = 0
 		scope := len(c.values)
-		p := c.pattern(pat, scope)
-		xs = append(xs, int32(p), int32(c.expr(body)))
+		xs = c.patterns(xs, pats, scope)
+		xs = append(xs, int32(c.expr(body)))
 		c.values = c.values[:scope]
 	}
 	xs[0] = int32(c.size)
@@ -549,7 +560,7 @@ func (c *compiler) group(x ast.Node) cnode {
 			v := c.expr(val)
 			switch c.ops[v] {
 			case opLambda:
-				_, u, _ := c.lambda(v)
+				_, u, _, _ := c.lambda(v)
 				c.uses[u].home = b
 			case opCompose:
 				_, _, u := c.compose(v)

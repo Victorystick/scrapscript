@@ -159,10 +159,20 @@ func (f *freeNames) expr(n Node) {
 		f.expr(Node(d.Lhs))
 		f.expr(Node(d.Rhs))
 	case Func:
-		// A function's parameter, or a match arm's pattern, binds its names.
+		// A function's parameter binds its name.
 		arg, body := se.Func(n)
 		start := len(f.names)
 		f.names = se.patternNames(arg, f.names)
+		f.bind(start)
+		f.expr(body)
+		f.unbind(start)
+	case Arm:
+		// A match arm's patterns bind their names.
+		patterns, body := se.Arm(n)
+		start := len(f.names)
+		for _, pat := range patterns {
+			f.names = se.patternNames(pat, f.names)
+		}
 		f.bind(start)
 		f.expr(body)
 		f.unbind(start)

@@ -52,28 +52,37 @@ const (
 	listCtor
 )
 
-// exhaustive bails if some value of the argument type of the match function
-// x matches none of its arms.
-func (c *context) exhaustive(x ast.Node, argTy TypeRef) {
+// exhaustive bails if some arguments of the types args, one per pattern of
+// an arm, match none of the arms of the match function x.
+func (c *context) exhaustive(x ast.Node, args []TypeRef) {
 	arms := c.src.Arms(x)
 	for _, arm := range arms {
-		if arg, _ := c.src.Func(arm); c.src.Kind(arg) == ast.Ident {
+		pats, _ := c.src.Arm(arm)
+		if !slices.ContainsFunc(pats, func(p ast.Node) bool { return refutable(c.cell(p)) }) {
 			return // a catch-all arm
 		}
 	}
 	e := &c.ex
 	for _, arm := range arms {
-		arg, _ := c.src.Func(arm)
-		e.cells = append(e.cells, arg)
+		pats, _ := c.src.Arm(arm)
+		for _, p := range pats {
+			e.cells = append(e.cells, c.cell(p))
+		}
 	}
-	e.types = append(e.types, argTy)
+	e.types = append(e.types, args...)
 	e.missing = e.missing[:0]
-	missing := c.missingIn(0, len(arms), 1)
+	missing := c.missingIn(0, len(arms), len(args))
 	e.cells, e.types = e.cells[:0], e.types[:0]
 	if missing {
 		slices.Reverse(e.missing)
 		var b strings.Builder
-		c.write(&b, e.missing, false)
+		ks := e.missing
+		for i := range args {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			ks = c.write(&b, ks, false)
+		}
 		c.bail(x, "match is not exhaustive: no arm matches "+b.String())
 	}
 }

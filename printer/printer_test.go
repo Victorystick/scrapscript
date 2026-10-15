@@ -39,8 +39,10 @@ func TestPrint(t *testing.T) {
 	expect(t, `(3 |> (a -> a)) |> (b -> b)`, `3 |> (a -> a) |> b -> b`)
 	expect(t, `(| 0 -> 1 | n -> n) <| 2`, `| 0 -> 1 | n -> n <| 2`)
 	expect(t, `(| 0 -> 1 | n -> n) + 2`, `(| 0 -> 1 | n -> n) + 2`)
-	expect(t, `| [a] ++ rest -> (x -> x) | _ -> (y |> f)`, `| [ a ] ++ rest -> x -> x
+	expect(t, `| [a] ++ rest -> (x -> x) | _ -> (y |> f)`, `| [ a ] ++ rest -> (x -> x)
 | _ -> (y |> f)`)
+	expect(t, `| #a -> x -> x | _ -> _ -> 0`, `| #a -> x -> x
+| _ -> _ -> 0`)
 	expect(t, `#some (#some 1)`, `#some (#some 1)`)
 	expect(t, `(f x).a`, `(f x).a`)
 	expect(t, `{ a = (x ; x = 1) }`, `{ a = x ; x = 1 }`)

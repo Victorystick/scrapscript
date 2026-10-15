@@ -53,6 +53,14 @@ func (p *parser) span() token.Span {
 	return p.tokens.Span(p.src, p.i)
 }
 
+// spanFrom returns the span from the token start to the last one consumed.
+func (p *parser) spanFrom(start ast.Tok) token.Span {
+	return token.Span{
+		Start: p.tokens.Span(p.src, int(start)).Start,
+		End:   p.tokens.Span(p.src, p.i-1).End,
+	}
+}
+
 // at returns the index of the current token.
 func (p *parser) at() ast.Tok {
 	return ast.Tok(p.i)
@@ -577,7 +585,8 @@ func (p *parser) parseList() ast.Node {
 // ones, pipes and composition, end the match function: `| … <| x` applies it.
 var armPrec = token.LT.Precedence()
 
-// parseMatchFuncExpr parses a match function's arms:
+// parseMatchFuncExpr parses a match function's arms, which must all have
+// the same number of patterns:
 //
 //	arm = "|" pattern { "->" pattern } "->" arm-body
 func (p *parser) parseMatchFuncExpr() ast.Node {
@@ -586,26 +595,52 @@ func (p *parser) parseMatchFuncExpr() ast.Node {
 	}
 	top := len(p.scratch)
 
+	arity := 0
 	for p.tok == token.PIPE {
-		p.next()
-		p.scratch = append(p.scratch, p.parseArm(p.parseBinary(armPrec, true)))
+		bar := p.at()
+		arm, n := p.parseArm()
+		if arity == 0 {
+			arity = n
+		} else if n != arity {
+			panic(p.source.Error(p.spanFrom(bar),
+				fmt.Sprintf("this arm has %s, but the first arm has %d", plural(n, "pattern"), arity)))
+		}
+		p.scratch = append(p.scratch, arm)
 	}
 
 	lhs, rhs := p.flush(top)
 	return p.add(ast.MatchFunc, 0, lhs, rhs)
 }
 
-// parseArm parses the rest of a match arm after its pattern x. What follows
-// an arrow is another pattern if an arrow follows it, or else the arm's body.
-func (p *parser) parseArm(x ast.Node) ast.Node {
-	p.expect(token.ARROW)
-	arrow := p.at()
+// parseArm parses a match arm, and returns it and its number of patterns.
+// What follows an arrow is another pattern if an arrow follows it, or else
+// the arm's body.
+func (p *parser) parseArm() (ast.Node, int) {
+	bar := p.at()
 	p.next()
-	body := p.parseBinary(armPrec, true)
-	if p.tok == token.ARROW {
-		body = p.parseArm(body)
+	top := len(p.scratch)
+	x := p.parseBinary(armPrec, true)
+	for {
+		p.scratch = append(p.scratch, x)
+		p.expect(token.ARROW)
+		p.next()
+		x = p.parseBinary(armPrec, true)
+		if p.tok != token.ARROW {
+			break
+		}
 	}
-	return p.add(ast.Func, arrow, uint32(x), uint32(body))
+	n := len(p.scratch) - top
+	p.scratch = append(p.scratch, x)
+	lhs, rhs := p.flush(top)
+	return p.add(ast.Arm, bar, lhs, rhs), n
+}
+
+// plural returns n and the noun, in the plural unless n is 1.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // tagTok consumes a '#' and the tag after it, and returns the tag's token.

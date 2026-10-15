@@ -75,13 +75,15 @@ builtins now return plain values and panic with a `runtimeError`, which
       here"), several diagnostics per scrap instead of bailing at the first,
       and no ANSI colours in the error itself, only in the CLI's rendering
       (token.Error bakes them into Error()).
-- [ ] Multi-pattern arms (SPEC.md section 3) are rejected:
-      `f 5 8 ; f = | 1 -> 1 -> 1 | a -> b -> a + b` fails with "function
-      parameter must be an identifier". The parser reads the operand after
-      `->` as a lambda; the checker and the core take one pattern per arm, so
-      a later pattern can't fall through to the next arm. The function must
-      take all its arguments before matching any arm, and a partly applied
-      one must print.
+- [x] Multi-pattern arms (SPEC.md section 3): an arm has one pattern per
+      argument, and a match function collects all its arguments before
+      matching any arm, so a later pattern falls through to the next arm.
+- [ ] Functions with an arity: merge lambda chains `a -> b -> body` into
+      one function and frame, compile `f a b` to one call of two arguments
+      (eval/apply, Marlow and Peyton Jones 2004), with partial and extra
+      arguments handled at runtime, so that a call with all its arguments
+      makes no intermediate closures and calls builtins and host functions
+      once.
 
 ## 8. Printing closures
 

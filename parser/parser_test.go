@@ -167,6 +167,28 @@ func TestMatchFunc(t *testing.T) {
 			writeParseError(t, src, err)
 		}
 	}
+
+	// An arm takes one pattern per argument; a lambda in its body needs
+	// parentheses.
+	arities := []struct {
+		src   string
+		arity int
+	}{
+		{`| a -> a`, 1},
+		{`| 1 -> b -> 1 | a -> b -> a + b`, 2},
+		{`| #a -> _ -> [] ++ c -> c | _ -> _ -> _ -> ""`, 3},
+		{`| 0 -> (x -> x)`, 1},
+	}
+	for _, ex := range arities {
+		se, err := ParseExpr(ex.src)
+		if err != nil {
+			writeParseError(t, ex.src, err)
+			continue
+		}
+		if got := se.Arity(se.Expr); got != ex.arity {
+			t.Errorf("%s: expected arity %d, got %d", ex.src, ex.arity, got)
+		}
+	}
 }
 
 func TestParses(t *testing.T) {
@@ -231,6 +253,8 @@ func TestParseError(t *testing.T) {
 		{`a < b < c`, `Comparisons cannot be chained.`},
 		{`f x -> x`, `function parameter must be an identifier`},
 		{`#a 1 2`, `Expected EOF got INT`},
+		{`| 1 -> 2 -> 3 | a -> a`, `this arm has 1 pattern, but the first arm has 2`},
+		{`| a -> a | 1 -> 2 -> 3`, `this arm has 2 patterns, but the first arm has 1`},
 	}
 
 	for _, example := range examples {
