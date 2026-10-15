@@ -162,7 +162,7 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 		} else {
 			c.list(s, "(#"+c.labels.Name(label.ID(d.a))+" ", ")", "", cnode(d.b))
 		}
-	case patBind:
+	case patBind, patArg:
 		fmt.Fprintf(s, ">%d", d.a)
 	case patWild:
 		s.WriteString("_")
@@ -262,11 +262,11 @@ func TestCompile(t *testing.T) {
 		{`x -> (y ; y = x)`, `(fn/2 | >0 -> (@1 ; >1 @0))`, 0},
 		// The arms of a match share slots; the frame is the largest arm.
 		{`| #a x -> x | #b { p = y, q = z } -> y + z`,
-			`(fn/3 | (#a >1) -> @1 | (#b { p = >1, q = >2 }) -> (+ @1 @2))`, 0},
+			`(fn/2 | (#a >0) -> @0 | (#b { p = >0, q = >1 }) -> (+ @0 @1))`, 0},
 		// A where in an arm takes slots after the arm's pattern; the next arm
 		// reuses them.
 		{`| #a x -> (y ; y = x) | #b z -> z`,
-			`(fn/3 | (#a >1) -> (@2 ; >2 @1) | (#b >1) -> @1)`, 0},
+			`(fn/2 | (#a >0) -> (@1 ; >1 @0) | (#b >0) -> @0)`, 0},
 		// An inner function's free names are free in the outer one too,
 		// one frame further out; names bound inside it are not.
 		{`(a -> (g ; g = b -> a + b + n)) ; n = 1`,
@@ -286,9 +286,12 @@ func TestCompile(t *testing.T) {
 			`(fn/1 ^list/map | >0 -> (list/map (fn/1 | >0 -> @0) @0))`, 0},
 		// Patterns.
 		{`| [] -> 0 | [a, _] -> a | h >+ t -> h | i +< l -> l`,
-			`(fn/3 | [] -> 0 | [>1, _] -> @1 | (>+ >1 >2) -> @1 | (+< >1 >2) -> @2)`, 0},
+			`(fn/2 | [] -> 0 | [>0, _] -> @0 | (>+ >0 >1) -> @0 | (+< >0 >1) -> @1)`, 0},
+		// A function of more than one argument keeps them in its first
+		// slots, where names bind them.
+		{`| #a -> n -> n | _ -> [x] -> x`, `(fn/3 | #a -> >1 -> @1 | _ -> [>2] -> @2)`, 0},
 		{`| [a] ++ r -> a | r ++ [a] -> a | { ..r, a = x } -> x`,
-			`(fn/3 | (++ [>1] >2) -> @1 | (++ >1 [>2]) -> @2 | { a = >1 ..>2 } -> @1)`, 0},
+			`(fn/2 | (++ [>0] >1) -> @0 | (++ >0 [>1]) -> @1 | { a = >0 ..>1 } -> @0)`, 0},
 		// Values.
 		{`{ ..r, a = 1 }.a ; r = { a = 2 }`, `({ a = 1 ..@0 }.a ; >0 { a = 2 })`, 1},
 		{`$"lib.scrap"`, `$"lib.scrap"`, 0},

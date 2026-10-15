@@ -264,7 +264,21 @@ func enter(fn, arg Value) (p *program, n cnode, f *frame, v Value) {
 			fn = sf.args[1]
 			continue
 		}
-		size, _, arity, _ := sf.prog.lambda(sf.node)
+		size, _, arity, arms := sf.prog.lambda(sf.node)
+		if arity == 1 {
+			// The common case: match arg as it is, without storing it.
+			p = sf.prog
+			f = &frame{parent: sf.env}
+			if size > 0 {
+				f.slots = make([]Value, size)
+			}
+			for i := 0; i < len(arms); i += 2 {
+				if p.match(cnode(arms[i]), arg, f) {
+					return p, cnode(arms[i+1]), f, nil
+				}
+			}
+			panic(p.errorf(sf.node, "no arm matches %s", printValue(p.labels, arg)))
+		}
 		if len(sf.args)+1 < arity {
 			sf.args = append(sf.args[:len(sf.args):len(sf.args)], arg)
 			return nil, none, nil, sf
@@ -286,7 +300,7 @@ func enterN(fn Value, args []Value) (p *program, n cnode, f *frame, v Value) {
 			return nil, none, nil, g.call(args)
 		}
 	case ScriptFunc:
-		if len(g.args) == 0 && !g.composition() {
+		if len(g.args) == 0 && len(args) > 1 && !g.composition() {
 			if size, _, arity, _ := g.prog.lambda(g.node); arity == len(args) {
 				f = g.frame(size)
 				copy(f.slots, args)
@@ -301,13 +315,15 @@ func enterN(fn Value, args []Value) (p *program, n cnode, f *frame, v Value) {
 	return enter(fn, args[last])
 }
 
-// frame returns a new frame of size slots for a call of the lambda sf.
+// frame returns a new frame of size slots for a call of the lambda sf,
+// which takes more than one argument.
 func (sf ScriptFunc) frame(size int) *frame {
 	return &frame{parent: sf.env, slots: make([]Value, size)}
 }
 
 // arm returns the body of the first arm of the lambda sf that matches its
-// arguments, the first slots of f, binding the arm's names in f.
+// arguments, the first slots of f, binding the arm's names in f. sf takes
+// more than one argument.
 func (p *program) arm(sf ScriptFunc, f *frame) cnode {
 	_, _, arity, arms := p.lambda(sf.node)
 	args := f.slots[:arity]
@@ -331,6 +347,9 @@ func (p *program) match(n cnode, v Value, f *frame) bool {
 	switch p.ops[n] {
 	case patBind:
 		f.slots[d.a] = v
+		return true
+
+	case patArg:
 		return true
 
 	case patWild:
