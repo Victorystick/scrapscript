@@ -186,7 +186,7 @@ func (c *context) tag(row TypeRef) (ctor, TypeRef, bool) {
 	if l.kind != extendKind {
 		return ctor{}, row, false
 	}
-	return ctor{kind: tagCtor, label: c.reg.labelName(l.aux), typ: l.a}, l.b, true
+	return ctor{kind: tagCtor, label: c.reg.labels.Name(l.label()), typ: l.a}, l.b, true
 }
 
 // split returns true if some value made with the constructor k matches no
@@ -258,7 +258,7 @@ func (c *context) args(p ast.Node, k ctor) bool {
 
 	case recordCtor:
 		for row := c.reg.Resolve(c.reg.at(k.typ).a); c.reg.at(row).kind == extendKind; row = c.reg.Resolve(c.reg.at(row).b) {
-			e.cells = append(e.cells, c.field(p, c.reg.labelName(c.reg.at(row).aux)))
+			e.cells = append(e.cells, c.field(p, c.reg.labels.Name(c.reg.at(row).label())))
 		}
 		return true
 
@@ -440,7 +440,7 @@ func (c *context) write(b *strings.Builder, ks []ctor, arg bool) []ctor {
 		var fields []string
 		for row := c.reg.Resolve(c.reg.at(k.typ).a); c.reg.at(row).kind == extendKind; row = c.reg.Resolve(c.reg.at(row).b) {
 			var f strings.Builder
-			f.WriteString(c.reg.labelName(c.reg.at(row).aux) + " = ")
+			f.WriteString(c.reg.labels.Name(c.reg.at(row).label()) + " = ")
 			ks = c.write(&f, ks, false)
 			fields = append(fields, f.String())
 		}

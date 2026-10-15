@@ -215,8 +215,8 @@ func TestUnifyRows(t *testing.T) {
 
 	// A row can't contain itself.
 	r := reg.Var()
-	z := reg.add(node{kind: recordKind, a: reg.extend(reg.intern("a"), IntRef, r)})
-	w := reg.add(node{kind: recordKind, a: reg.extend(reg.intern("b"), IntRef, r)})
+	z := reg.add(node{kind: recordKind, a: reg.extend(reg.labels.Of("a"), IntRef, r)})
+	w := reg.add(node{kind: recordKind, a: reg.extend(reg.labels.Of("b"), IntRef, r)})
 	Neq(t, reg.Unify(z, w), nil)
 }
 

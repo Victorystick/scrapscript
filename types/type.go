@@ -38,6 +38,16 @@ type node struct {
 	a, b TypeRef
 }
 
+// label returns the label of an extend node.
+func (n node) label() label.ID {
+	return label.ID(n.aux)
+}
+
+// name returns the name of a rigid node.
+func (n node) name() label.ID {
+	return label.ID(n.a)
+}
+
 // The fixed refs of the primitive types and the empty row.
 const (
 	NoType TypeRef = iota
@@ -72,8 +82,7 @@ var primitiveNames = [...]string{
 // above the current level are local to it, and are generalized.
 type Registry struct {
 	nodes []node
-	// The names of row labels and of rigid variables. Nodes hold their IDs
-	// as uint32.
+	// The names of row labels and of rigid variables.
 	labels label.Table
 	level  uint32
 	// While unifying, the nodes overwritten so far and their old contents,
@@ -85,7 +94,7 @@ type Registry struct {
 	// as spans of lackLabels. Index 0 is the empty set. Sets are never
 	// changed, only added.
 	lackSets   []span
-	lackLabels []uint32
+	lackLabels []label.ID
 
 	// The names of the types that aliases denote, which they print by.
 	names map[TypeRef]typeName
@@ -190,15 +199,6 @@ func (r *Registry) add(n node) TypeRef {
 	return TypeRef(len(r.nodes) - 1)
 }
 
-func (r *Registry) intern(name string) uint32 {
-	return uint32(r.labels.Of(name))
-}
-
-// labelName returns the name of an interned label.
-func (r *Registry) labelName(l uint32) string {
-	return r.labels.Name(label.ID(l))
-}
-
 // Labels returns the table that the registry interns labels in, which
 // values of its types share.
 func (r *Registry) Labels() *label.Table {
@@ -233,20 +233,20 @@ func (r *Registry) Enum(tags map[string]TypeRef) TypeRef {
 
 func (r *Registry) row(labels map[string]TypeRef, tail TypeRef) TypeRef {
 	for _, l := range slices.Sorted(maps.Keys(labels)) {
-		tail = r.extend(r.intern(l), labels[l], tail)
+		tail = r.extend(r.labels.Of(l), labels[l], tail)
 	}
 	return tail
 }
 
-// extend returns the row rest extended with label, which the variable that
-// ends rest then lacks: a row has each label at most once.
-func (r *Registry) extend(label uint32, typ, rest TypeRef) TypeRef {
-	r.lack(r.rowTail(rest), label)
-	return r.add(node{kind: extendKind, aux: label, a: typ, b: rest})
+// extend returns the row rest extended with the label l, which the variable
+// that ends rest then lacks: a row has each label at most once.
+func (r *Registry) extend(l label.ID, typ, rest TypeRef) TypeRef {
+	r.lack(r.rowTail(rest), l)
+	return r.add(node{kind: extendKind, aux: uint32(l), a: typ, b: rest})
 }
 
 // lacks returns the labels that the row variable v lacks.
-func (r *Registry) lacks(v TypeRef) []uint32 {
+func (r *Registry) lacks(v TypeRef) []label.ID {
 	n := r.at(v)
 	i := n.a
 	switch n.kind {
@@ -265,7 +265,7 @@ func (r *Registry) lacks(v TypeRef) []uint32 {
 
 // lack adds labels to those that the row variable v lacks. Other types are
 // left as they are.
-func (r *Registry) lack(v TypeRef, labels ...uint32) {
+func (r *Registry) lack(v TypeRef, labels ...label.ID) {
 	n := r.at(v)
 	if len(labels) == 0 || n.kind != varKind && n.kind != genKind && n.kind != rigidKind {
 		return
@@ -297,19 +297,19 @@ func (r *Registry) lack(v TypeRef, labels ...uint32) {
 }
 
 // A duplicate is the error of a row that would have its label twice.
-type duplicate uint32
+type duplicate struct{ l label.ID }
 
 func (duplicate) Error() string { return "duplicate label" }
 
 // inherit makes the row t lack labels, as the variable bound to it does.
-func (r *Registry) inherit(labels []uint32, t TypeRef) error {
+func (r *Registry) inherit(labels []label.ID, t TypeRef) error {
 	for {
 		t = r.Resolve(t)
 		n := r.at(t)
 		switch n.kind {
 		case extendKind:
-			if slices.Contains(labels, n.aux) {
-				return duplicate(n.aux)
+			if slices.Contains(labels, n.label()) {
+				return duplicate{n.label()}
 			}
 			t = n.b
 			continue
@@ -317,7 +317,7 @@ func (r *Registry) inherit(labels []uint32, t TypeRef) error {
 			// A rigid row may have any label that it doesn't lack.
 			for _, l := range labels {
 				if !slices.Contains(r.lacks(t), l) {
-					return duplicate(l)
+					return duplicate{l}
 				}
 			}
 		case varKind, genKind:
@@ -335,7 +335,7 @@ func (r *Registry) Var() TypeRef {
 // rigid returns a new rigid type variable named name, which stands for a type
 // that an annotation leaves to its user, so it is equal only to itself.
 func (r *Registry) rigid(name string) TypeRef {
-	return r.add(node{kind: rigidKind, aux: r.level, a: TypeRef(r.intern(name))})
+	return r.add(node{kind: rigidKind, aux: r.level, a: TypeRef(r.labels.Of(name))})
 }
 
 // Gen returns a new generalized type variable, for building type schemes.
@@ -478,7 +478,7 @@ func (in *instantiator) copy(ref TypeRef) TypeRef {
 			return ref
 		}
 		if n.kind == extendKind {
-			return r.extend(n.aux, a, b)
+			return r.extend(n.label(), a, b)
 		}
 		n.a, n.b = a, b
 		c := r.add(n)
@@ -543,11 +543,11 @@ func (r *Registry) rowError(a, b TypeRef, err error) error {
 		return r.errorf("cannot construct infinite type '%s' = '%s'", a, b)
 	}
 	if d, ok := err.(duplicate); ok {
-		label := r.labelName(uint32(d))
+		name := r.labels.Name(d.l)
 		if r.at(r.Resolve(a)).kind == enumKind {
-			label = "#" + label
+			name = "#" + name
 		}
-		return r.errorf("cannot unify '%s' with '%s', which would have "+label+" twice", a, b)
+		return r.errorf("cannot unify '%s' with '%s', which would have "+name+" twice", a, b)
 	}
 	return err
 }
@@ -679,7 +679,7 @@ func (r *Registry) unifyRows(a, b TypeRef) error {
 	// rest, the rows can only be equal if they are infinite.
 	tail := r.rowTail(na.b)
 	openTail := r.at(tail).kind == varKind
-	typ, rest, err := r.rewrite(b, na.aux)
+	typ, rest, err := r.rewrite(b, na.label())
 	if err != nil {
 		return err
 	}
@@ -692,25 +692,25 @@ func (r *Registry) unifyRows(a, b TypeRef) error {
 	return r.unifyRows(na.b, rest)
 }
 
-// rewrite finds label in row, returning its type and the rest of the row.
-// If the row is open and lacks the label, its tail is extended with it.
-func (r *Registry) rewrite(row TypeRef, label uint32) (typ, rest TypeRef, err error) {
+// rewrite finds the label l in row, returning its type and the rest of the
+// row. If the row is open and lacks l, its tail is extended with it.
+func (r *Registry) rewrite(row TypeRef, l label.ID) (typ, rest TypeRef, err error) {
 	row = r.Resolve(row)
 	n := r.at(row)
 	switch n.kind {
 	case extendKind:
-		if n.aux == label {
+		if n.label() == l {
 			return n.a, n.b, nil
 		}
-		typ, rest, err = r.rewrite(n.b, label)
+		typ, rest, err = r.rewrite(n.b, l)
 		if err != nil {
 			return
 		}
-		return typ, r.extend(n.aux, n.a, rest), nil
+		return typ, r.extend(n.label(), n.a, rest), nil
 	case varKind:
 		lacks := r.lacks(row)
-		if slices.Contains(lacks, label) {
-			return 0, 0, duplicate(label)
+		if slices.Contains(lacks, l) {
+			return 0, 0, duplicate{l}
 		}
 		// The new variables live as long as the row's, and the rest lacks
 		// what it does.
@@ -719,7 +719,7 @@ func (r *Registry) rewrite(row TypeRef, label uint32) (typ, rest TypeRef, err er
 		typ, rest = r.Var(), r.Var()
 		r.level = level
 		r.lack(rest, lacks...)
-		r.link(row, r.extend(label, typ, rest))
+		r.link(row, r.extend(l, typ, rest))
 		return typ, rest, nil
 	}
 	return 0, 0, errMissingLabel
@@ -942,7 +942,7 @@ func (s *stringer) reserveBody(ref TypeRef) {
 		if s.taken == nil {
 			s.taken = make(map[string]bool)
 		}
-		s.taken[s.reg.labelName(uint32(n.a))] = true
+		s.taken[s.reg.labels.Name(n.name())] = true
 	case enumKind:
 		if slices.Contains(s.path, ref) {
 			return
@@ -1009,7 +1009,7 @@ func (s *stringer) writeBody(ref TypeRef, nesting int) {
 	case varKind, genKind:
 		s.variable(ref)
 	case rigidKind:
-		s.WriteString(s.reg.labelName(uint32(n.a)))
+		s.WriteString(s.reg.labels.Name(n.name()))
 	case listKind:
 		if nesting >= atomLevel {
 			s.WriteByte('(')
@@ -1098,7 +1098,7 @@ func (r *Registry) entries(row TypeRef) ([]rowEntry, TypeRef) {
 		if n.kind != extendKind {
 			break
 		}
-		entries = append(entries, rowEntry{r.labelName(n.aux), n.a})
+		entries = append(entries, rowEntry{r.labels.Name(n.label()), n.a})
 		row = n.b
 	}
 	slices.SortFunc(entries, func(a, b rowEntry) int { return strings.Compare(a.label, b.label) })

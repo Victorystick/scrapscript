@@ -138,7 +138,7 @@ func (c *context) infer(x ast.Node) TypeRef {
 	case ast.Access:
 		rec, key := c.src.Access(x)
 		field := c.reg.Var()
-		row := c.reg.extend(c.reg.intern(c.src.TokenText(key)), field, c.reg.Var())
+		row := c.reg.extend(c.reg.labels.Of(c.src.TokenText(key)), field, c.reg.Var())
 		c.ensure(rec, c.infer(rec), c.reg.add(node{kind: recordKind, a: row}))
 		return field
 	case ast.Variant:
@@ -147,7 +147,7 @@ func (c *context) infer(x ast.Node) TypeRef {
 		if payload != ast.None {
 			typ = c.infer(payload)
 		}
-		row := c.reg.extend(c.reg.intern(c.src.TokenText(tag)), typ, c.reg.Var())
+		row := c.reg.extend(c.reg.labels.Of(c.src.TokenText(tag)), typ, c.reg.Var())
 		return c.reg.add(node{kind: enumKind, a: row})
 	case ast.Enum:
 		c.bail(x, "cannot use a type as a value")
@@ -424,7 +424,7 @@ func (c *context) record(x ast.Node) TypeRef {
 		row := c.reg.Var()
 		for i := range fields.Len() {
 			k, v := c.src.TokenText(fields.Key(i)), fields.Value(i)
-			row = c.reg.extend(c.reg.intern(k), c.infer(v), row)
+			row = c.reg.extend(c.reg.labels.Of(k), c.infer(v), row)
 		}
 		c.ensure(x, restTy, c.reg.add(node{kind: recordKind, a: row}))
 		return restTy
@@ -567,7 +567,7 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 		if payload != ast.None {
 			typ = c.reg.Var()
 		}
-		row := c.reg.extend(c.reg.intern(tag), typ, c.reg.Var())
+		row := c.reg.extend(c.reg.labels.Of(tag), typ, c.reg.Var())
 		c.ensure(x, ty, c.reg.add(node{kind: enumKind, a: row}))
 		m.enums = append(m.enums, positioned{at: at, typ: ty})
 		if payload != ast.None {
@@ -585,7 +585,7 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 		types := make([]TypeRef, fields.Len())
 		for i := range fields.Len() {
 			types[i] = c.reg.Var()
-			row = c.reg.extend(c.reg.intern(c.src.TokenText(fields.Key(i))), types[i], row)
+			row = c.reg.extend(c.reg.labels.Of(c.src.TokenText(fields.Key(i))), types[i], row)
 		}
 		c.ensure(x, ty, c.reg.add(node{kind: recordKind, a: row}))
 		for i := range fields.Len() {
