@@ -125,7 +125,8 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	define("bytes/to-utf8-text", reg.Func(types.BytesRef, types.TextRef), func(v Value) Value {
 		bytes := v.(Bytes)
 		if !utf8.Valid(bytes) {
-			panic(fail("bytes/to-utf8-text: %s is not valid UTF-8", bytes))
+			// Bytes print without labels, so without a table.
+			panic(fail("bytes/to-utf8-text: %s is not valid UTF-8", printValue(nil, bytes)))
 		}
 		return Text(bytes)
 	})

@@ -87,7 +87,7 @@ func evaluate(args []string) {
 		val = must(env.Eval(scrap))
 	}
 
-	fmt.Println(env.Scrap(val))
+	fmt.Println(env.Print(val))
 }
 
 func inferType(args []string) {

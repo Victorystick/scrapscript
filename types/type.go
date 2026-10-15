@@ -5,6 +5,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/Victorystick/scrapscript/label"
 )
 
 // TypeRef references a type node within a Registry.
@@ -69,9 +71,10 @@ var primitiveNames = [...]string{
 // the where-binding it was created in. When a binding is done, the variables
 // above the current level are local to it, and are generalized.
 type Registry struct {
-	nodes  []node
-	labels []string
-	label  map[string]uint32
+	nodes []node
+	// The names of row labels and of rigid variables. Nodes hold their IDs
+	// as uint32.
+	labels label.Table
 	level  uint32
 	// While unifying, the nodes overwritten so far and their old contents,
 	// so that a failed unification can be undone.
@@ -187,17 +190,19 @@ func (r *Registry) add(n node) TypeRef {
 	return TypeRef(len(r.nodes) - 1)
 }
 
-func (r *Registry) intern(label string) uint32 {
-	if i, ok := r.label[label]; ok {
-		return i
-	}
-	if r.label == nil {
-		r.label = make(map[string]uint32)
-	}
-	i := uint32(len(r.labels))
-	r.labels = append(r.labels, label)
-	r.label[label] = i
-	return i
+func (r *Registry) intern(name string) uint32 {
+	return uint32(r.labels.Of(name))
+}
+
+// labelName returns the name of an interned label.
+func (r *Registry) labelName(l uint32) string {
+	return r.labels.Name(label.ID(l))
+}
+
+// Labels returns the table that the registry interns labels in, which
+// values of its types share.
+func (r *Registry) Labels() *label.Table {
+	return &r.labels
 }
 
 // Size returns the number of nodes in the registry, for debugging.
@@ -538,7 +543,7 @@ func (r *Registry) rowError(a, b TypeRef, err error) error {
 		return r.errorf("cannot construct infinite type '%s' = '%s'", a, b)
 	}
 	if d, ok := err.(duplicate); ok {
-		label := r.labels[d]
+		label := r.labelName(uint32(d))
 		if r.at(r.Resolve(a)).kind == enumKind {
 			label = "#" + label
 		}
@@ -937,7 +942,7 @@ func (s *stringer) reserveBody(ref TypeRef) {
 		if s.taken == nil {
 			s.taken = make(map[string]bool)
 		}
-		s.taken[s.reg.labels[n.a]] = true
+		s.taken[s.reg.labelName(uint32(n.a))] = true
 	case enumKind:
 		if slices.Contains(s.path, ref) {
 			return
@@ -1004,7 +1009,7 @@ func (s *stringer) writeBody(ref TypeRef, nesting int) {
 	case varKind, genKind:
 		s.variable(ref)
 	case rigidKind:
-		s.WriteString(s.reg.labels[n.a])
+		s.WriteString(s.reg.labelName(uint32(n.a)))
 	case listKind:
 		if nesting >= atomLevel {
 			s.WriteByte('(')
@@ -1093,7 +1098,7 @@ func (r *Registry) entries(row TypeRef) ([]rowEntry, TypeRef) {
 		if n.kind != extendKind {
 			break
 		}
-		entries = append(entries, rowEntry{r.labels[n.aux], n.a})
+		entries = append(entries, rowEntry{r.labelName(n.aux), n.a})
 		row = n.b
 	}
 	slices.SortFunc(entries, func(a, b rowEntry) int { return strings.Compare(a.label, b.label) })

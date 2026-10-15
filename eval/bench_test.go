@@ -108,7 +108,7 @@ func BenchmarkEval(b *testing.B) {
 			if _, err := e.infer(scrap); err != nil {
 				b.Fatal(err)
 			}
-			c, err := compile(&scrap.expr, e.vars)
+			c, err := compile(&scrap.expr, e.vars, e.reg.Labels())
 			if err != nil {
 				b.Fatal(err)
 			}

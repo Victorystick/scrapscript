@@ -74,14 +74,16 @@ func TestBindings(t *testing.T) {
 
 // TestToValue converts Go values to values, and back.
 func TestToValue(t *testing.T) {
+	env := eval.NewEnvironment()
+	l := newLabels(env)
 	tree := NewTreeNode(TreeNodePayload{Left: NewTreeLeaf(), Value: 7, Right: NewTreeLeaf()})
-	if got := tree.toValue().String(); got != `#node { left = #leaf, right = #leaf, value = 7 }` {
+	if got := env.Print(tree.toValue(l)); got != `#node { left = #leaf, right = #leaf, value = 7 }` {
 		t.Errorf("unexpected value: %s", got)
 	}
-	if back := treeFromValue(tree.toValue()); back.Node().Value != 7 {
+	if back := treeFromValue(l, tree.toValue(l)); back.Node().Value != 7 {
 		t.Errorf("unexpected tree: %+v", back)
 	}
-	r := NewReplyRange("x").toValue().String()
+	r := env.Print(NewReplyRange("x").toValue(l))
 	if r != `#range "x"` {
 		t.Errorf("unexpected value: %s", r)
 	}

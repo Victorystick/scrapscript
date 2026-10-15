@@ -7,6 +7,7 @@ import (
 
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/host"
+	"github.com/Victorystick/scrapscript/label"
 )
 
 // Interface is the platform's interface, $source:e1072de4b1d032677a4ecf3cdec910255c45502e912ecd8086ee2ac3b4270cd3, and the scraps it refers to.
@@ -54,7 +55,8 @@ func Load(env *eval.Environment, app *eval.Scrap) (Api, error) {
 	if err != nil {
 		return zero, err
 	}
-	return apiFromValue(v), nil
+	l := newLabels(env)
+	return apiFromValue(l, v), nil
 }
 
 // C is a value of the type parameter c, which only scripts can inspect.
@@ -72,11 +74,11 @@ type Api struct {
 	Unit   struct{}
 }
 
-func apiFromValue(v eval.Value) Api {
+func apiFromValue(l *labels, v eval.Value) Api {
 	r := v.(eval.Record)
 	return Api{
-		Data: bytes.Clone([]byte(r.Get("data").(eval.Bytes))),
-		Flag: byte(r.Get("flag").(eval.Byte)),
+		Data: bytes.Clone([]byte(r.Get(l.data).(eval.Bytes))),
+		Flag: byte(r.Get(l.flag).(eval.Byte)),
 		Handle: func(fn eval.Value) func(C, string) (Reply, error) {
 			return func(a0 C, a1 string) (Reply, error) {
 				v, err := eval.Call(fn, a0.v, eval.Text(a1))
@@ -84,9 +86,9 @@ func apiFromValue(v eval.Value) Api {
 					var zero Reply
 					return zero, err
 				}
-				return replyFromValue(v), nil
+				return replyFromValue(l, v), nil
 			}
-		}(r.Get("handle")),
+		}(r.Get(l.handle)),
 		Helper: func(fn eval.Value) func(func(int64, int64) (int64, error)) (int64, error) {
 			return func(a0 func(int64, int64) (int64, error)) (int64, error) {
 				v, err := eval.Call(fn, eval.NewFunc("apiHelperArg0", 2, func(args []eval.Value) (eval.Value, error) {
@@ -102,27 +104,27 @@ func apiFromValue(v eval.Value) Api {
 				}
 				return int64(v.(eval.Int)), nil
 			}
-		}(r.Get("helper")),
-		Init:  C{r.Get("init")},
-		Ratio: float64(r.Get("ratio").(eval.Float)),
-		Tags:  host.ListFrom(r.Get("tags"), func(v eval.Value) string { return string(v.(eval.Text)) }),
-		Tree:  treeFromValue(r.Get("tree")),
+		}(r.Get(l.helper)),
+		Init:  C{r.Get(l.init)},
+		Ratio: float64(r.Get(l.ratio).(eval.Float)),
+		Tags:  host.ListFrom(r.Get(l.tags), func(v eval.Value) string { return string(v.(eval.Text)) }),
+		Tree:  treeFromValue(l, r.Get(l.tree)),
 		Unit:  struct{}{},
 	}
 }
 
-func (x Api) toValue() eval.Value {
+func (x Api) toValue(l *labels) eval.Value {
 	return eval.NewRecord(
-		eval.Field{Label: "data", Value: eval.Bytes(bytes.Clone(x.Data))},
-		eval.Field{Label: "flag", Value: eval.Byte(x.Flag)},
-		eval.Field{Label: "handle", Value: eval.NewFunc("apiHandle", 2, func(args []eval.Value) (eval.Value, error) {
+		eval.Field{Label: l.data, Value: eval.Bytes(bytes.Clone(x.Data))},
+		eval.Field{Label: l.flag, Value: eval.Byte(x.Flag)},
+		eval.Field{Label: l.handle, Value: eval.NewFunc("apiHandle", 2, func(args []eval.Value) (eval.Value, error) {
 			r, err := x.Handle(C{args[0]}, string(args[1].(eval.Text)))
 			if err != nil {
 				return nil, err
 			}
-			return r.toValue(), nil
+			return r.toValue(l), nil
 		})},
-		eval.Field{Label: "helper", Value: eval.NewFunc("apiHelper", 1, func(args []eval.Value) (eval.Value, error) {
+		eval.Field{Label: l.helper, Value: eval.NewFunc("apiHelper", 1, func(args []eval.Value) (eval.Value, error) {
 			r, err := x.Helper(func(fn eval.Value) func(int64, int64) (int64, error) {
 				return func(a0 int64, a1 int64) (int64, error) {
 					v, err := eval.Call(fn, eval.Int(a0), eval.Int(a1))
@@ -138,11 +140,11 @@ func (x Api) toValue() eval.Value {
 			}
 			return eval.Int(r), nil
 		})},
-		eval.Field{Label: "init", Value: x.Init.v},
-		eval.Field{Label: "ratio", Value: eval.Float(x.Ratio)},
-		eval.Field{Label: "tags", Value: host.ListTo(x.Tags, func(x string) eval.Value { return eval.Text(x) })},
-		eval.Field{Label: "tree", Value: x.Tree.toValue()},
-		eval.Field{Label: "unit", Value: eval.Hole{}},
+		eval.Field{Label: l.init, Value: x.Init.v},
+		eval.Field{Label: l.ratio, Value: eval.Float(x.Ratio)},
+		eval.Field{Label: l.tags, Value: host.ListTo(x.Tags, func(x string) eval.Value { return eval.Text(x) })},
+		eval.Field{Label: l.tree, Value: x.Tree.toValue(l)},
+		eval.Field{Label: l.unit, Value: eval.Hole{}},
 	)
 }
 
@@ -201,29 +203,29 @@ func (x Reply) Respond() ReplyRespondPayload {
 	return *x.respond
 }
 
-func replyFromValue(v eval.Value) Reply {
+func replyFromValue(l *labels, v eval.Value) Reply {
 	t := v.(eval.Variant)
 	switch t.Tag() {
-	case "fetch":
-		return NewReplyFetch(replyFetchPayloadFromValue(t.Payload()))
-	case "range":
+	case l.fetch:
+		return NewReplyFetch(replyFetchPayloadFromValue(l, t.Payload()))
+	case l.range_:
 		return NewReplyRange(string(t.Payload().(eval.Text)))
-	case "respond":
-		return NewReplyRespond(replyRespondPayloadFromValue(t.Payload()))
+	case l.respond:
+		return NewReplyRespond(replyRespondPayloadFromValue(l, t.Payload()))
 	}
-	panic("Reply: unknown tag #" + t.Tag())
+	panic("Reply: unknown tag")
 }
 
-func (x Reply) toValue() eval.Value {
+func (x Reply) toValue(l *labels) eval.Value {
 	switch x.tag {
 	case ReplyFetch:
-		return eval.NewVariant("fetch", (*x.fetch).toValue())
+		return eval.NewVariant(l.fetch, (*x.fetch).toValue(l))
 	case ReplyRange:
-		return eval.NewVariant("range", eval.Text(x.range_))
+		return eval.NewVariant(l.range_, eval.Text(x.range_))
 	case ReplyRespond:
-		return eval.NewVariant("respond", (*x.respond).toValue())
+		return eval.NewVariant(l.respond, (*x.respond).toValue(l))
 	}
-	return eval.NewVariant(replyTags[x.tag], nil)
+	panic("Reply: invalid tag")
 }
 
 type ReplyFetchPayload struct {
@@ -231,7 +233,7 @@ type ReplyFetchPayload struct {
 	Url  string
 }
 
-func replyFetchPayloadFromValue(v eval.Value) ReplyFetchPayload {
+func replyFetchPayloadFromValue(l *labels, v eval.Value) ReplyFetchPayload {
 	r := v.(eval.Record)
 	return ReplyFetchPayload{
 		Then: func(fn eval.Value) func(string) (Reply, error) {
@@ -241,23 +243,23 @@ func replyFetchPayloadFromValue(v eval.Value) ReplyFetchPayload {
 					var zero Reply
 					return zero, err
 				}
-				return replyFromValue(v), nil
+				return replyFromValue(l, v), nil
 			}
-		}(r.Get("then")),
-		Url: string(r.Get("url").(eval.Text)),
+		}(r.Get(l.then)),
+		Url: string(r.Get(l.url).(eval.Text)),
 	}
 }
 
-func (x ReplyFetchPayload) toValue() eval.Value {
+func (x ReplyFetchPayload) toValue(l *labels) eval.Value {
 	return eval.NewRecord(
-		eval.Field{Label: "then", Value: eval.NewFunc("replyFetchPayloadThen", 1, func(args []eval.Value) (eval.Value, error) {
+		eval.Field{Label: l.then, Value: eval.NewFunc("replyFetchPayloadThen", 1, func(args []eval.Value) (eval.Value, error) {
 			r, err := x.Then(string(args[0].(eval.Text)))
 			if err != nil {
 				return nil, err
 			}
-			return r.toValue(), nil
+			return r.toValue(l), nil
 		})},
-		eval.Field{Label: "url", Value: eval.Text(x.Url)},
+		eval.Field{Label: l.url, Value: eval.Text(x.Url)},
 	)
 }
 
@@ -266,18 +268,18 @@ type ReplyRespondPayload struct {
 	Status int64
 }
 
-func replyRespondPayloadFromValue(v eval.Value) ReplyRespondPayload {
+func replyRespondPayloadFromValue(l *labels, v eval.Value) ReplyRespondPayload {
 	r := v.(eval.Record)
 	return ReplyRespondPayload{
-		Body:   bytes.Clone([]byte(r.Get("body").(eval.Bytes))),
-		Status: int64(r.Get("status").(eval.Int)),
+		Body:   bytes.Clone([]byte(r.Get(l.body).(eval.Bytes))),
+		Status: int64(r.Get(l.status).(eval.Int)),
 	}
 }
 
-func (x ReplyRespondPayload) toValue() eval.Value {
+func (x ReplyRespondPayload) toValue(l *labels) eval.Value {
 	return eval.NewRecord(
-		eval.Field{Label: "body", Value: eval.Bytes(bytes.Clone(x.Body))},
-		eval.Field{Label: "status", Value: eval.Int(x.Status)},
+		eval.Field{Label: l.body, Value: eval.Bytes(bytes.Clone(x.Body))},
+		eval.Field{Label: l.status, Value: eval.Int(x.Status)},
 	)
 }
 
@@ -318,23 +320,25 @@ func (x Tree) Node() TreeNodePayload {
 	return *x.node
 }
 
-func treeFromValue(v eval.Value) Tree {
+func treeFromValue(l *labels, v eval.Value) Tree {
 	t := v.(eval.Variant)
 	switch t.Tag() {
-	case "leaf":
+	case l.leaf:
 		return NewTreeLeaf()
-	case "node":
-		return NewTreeNode(treeNodePayloadFromValue(t.Payload()))
+	case l.node:
+		return NewTreeNode(treeNodePayloadFromValue(l, t.Payload()))
 	}
-	panic("Tree: unknown tag #" + t.Tag())
+	panic("Tree: unknown tag")
 }
 
-func (x Tree) toValue() eval.Value {
+func (x Tree) toValue(l *labels) eval.Value {
 	switch x.tag {
+	case TreeLeaf:
+		return eval.NewVariant(l.leaf, nil)
 	case TreeNode:
-		return eval.NewVariant("node", (*x.node).toValue())
+		return eval.NewVariant(l.node, (*x.node).toValue(l))
 	}
-	return eval.NewVariant(treeTags[x.tag], nil)
+	panic("Tree: invalid tag")
 }
 
 type TreeNodePayload struct {
@@ -343,19 +347,71 @@ type TreeNodePayload struct {
 	Value int64
 }
 
-func treeNodePayloadFromValue(v eval.Value) TreeNodePayload {
+func treeNodePayloadFromValue(l *labels, v eval.Value) TreeNodePayload {
 	r := v.(eval.Record)
 	return TreeNodePayload{
-		Left:  treeFromValue(r.Get("left")),
-		Right: treeFromValue(r.Get("right")),
-		Value: int64(r.Get("value").(eval.Int)),
+		Left:  treeFromValue(l, r.Get(l.left)),
+		Right: treeFromValue(l, r.Get(l.right)),
+		Value: int64(r.Get(l.value).(eval.Int)),
 	}
 }
 
-func (x TreeNodePayload) toValue() eval.Value {
+func (x TreeNodePayload) toValue(l *labels) eval.Value {
 	return eval.NewRecord(
-		eval.Field{Label: "left", Value: x.Left.toValue()},
-		eval.Field{Label: "right", Value: x.Right.toValue()},
-		eval.Field{Label: "value", Value: eval.Int(x.Value)},
+		eval.Field{Label: l.left, Value: x.Left.toValue(l)},
+		eval.Field{Label: l.right, Value: x.Right.toValue(l)},
+		eval.Field{Label: l.value, Value: eval.Int(x.Value)},
 	)
+}
+
+// labels are the IDs of the interface's record labels and tags in the
+// environment that Load checked the script in, which values hold.
+type labels struct {
+	body    label.ID
+	data    label.ID
+	fetch   label.ID
+	flag    label.ID
+	handle  label.ID
+	helper  label.ID
+	init    label.ID
+	leaf    label.ID
+	left    label.ID
+	node    label.ID
+	range_  label.ID
+	ratio   label.ID
+	respond label.ID
+	right   label.ID
+	status  label.ID
+	tags    label.ID
+	then    label.ID
+	tree    label.ID
+	unit    label.ID
+	url     label.ID
+	value   label.ID
+}
+
+func newLabels(env *eval.Environment) *labels {
+	return &labels{
+		body:    env.Label("body"),
+		data:    env.Label("data"),
+		fetch:   env.Label("fetch"),
+		flag:    env.Label("flag"),
+		handle:  env.Label("handle"),
+		helper:  env.Label("helper"),
+		init:    env.Label("init"),
+		leaf:    env.Label("leaf"),
+		left:    env.Label("left"),
+		node:    env.Label("node"),
+		range_:  env.Label("range"),
+		ratio:   env.Label("ratio"),
+		respond: env.Label("respond"),
+		right:   env.Label("right"),
+		status:  env.Label("status"),
+		tags:    env.Label("tags"),
+		then:    env.Label("then"),
+		tree:    env.Label("tree"),
+		unit:    env.Label("unit"),
+		url:     env.Label("url"),
+		value:   env.Label("value"),
+	}
 }

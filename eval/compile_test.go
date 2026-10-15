@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/parser"
 	"github.com/Victorystick/scrapscript/types"
 )
@@ -83,7 +84,7 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 	d := c.data[n]
 	switch o := c.ops[n]; o {
 	case opConst, patLiteral:
-		s.WriteString(c.consts[d.a].String())
+		s.WriteString(printValue(c.labels, c.consts[d.a]))
 	case opLocal:
 		if d.a == 0 {
 			fmt.Fprintf(s, "@%d", d.b)
@@ -128,7 +129,7 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 			if i > 0 {
 				s.WriteString(",")
 			}
-			fmt.Fprintf(s, " %s = ", c.strings[fields[i]])
+			fmt.Fprintf(s, " %s = ", c.labels.Name(label.ID(fields[i])))
 			c.dump(s, cnode(fields[i+1]))
 		}
 		if rest != none {
@@ -138,14 +139,14 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 		s.WriteString(" }")
 	case opAccess:
 		c.dump(s, cnode(d.a))
-		s.WriteString("." + c.strings[d.b])
+		s.WriteString("." + c.labels.Name(label.ID(d.b)))
 	case opList, patList:
 		c.list(s, "[", "]", ", ", nodes(c.range_(n))...)
 	case opVariant, patVariant:
 		if cnode(d.b) == none {
-			s.WriteString("#" + c.strings[d.a])
+			s.WriteString("#" + c.labels.Name(label.ID(d.a)))
 		} else {
-			c.list(s, "(#"+c.strings[d.a]+" ", ")", "", cnode(d.b))
+			c.list(s, "(#"+c.labels.Name(label.ID(d.a))+" ", ")", "", cnode(d.b))
 		}
 	case patBind:
 		fmt.Fprintf(s, ">%d", d.a)
@@ -218,7 +219,7 @@ func compileString(t *testing.T, source string) *core {
 	}
 	var reg types.Registry
 	_, globals := bindBuiltIns(&reg)
-	c, err := compile(&se, globals)
+	c, err := compile(&se, globals, reg.Labels())
 	if err != nil {
 		t.Fatalf("compile %q: %v", source, err)
 	}
@@ -332,7 +333,7 @@ func TestCompileErrors(t *testing.T) {
 		}
 		var reg types.Registry
 		_, globals := bindBuiltIns(&reg)
-		_, err = compile(&se, globals)
+		_, err = compile(&se, globals, reg.Labels())
 		if err == nil || !strings.Contains(err.Error(), tt.err) {
 			t.Errorf("%s: got %v, want %q", tt.source, err, tt.err)
 		}

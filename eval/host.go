@@ -3,6 +3,7 @@ package eval
 import (
 	"fmt"
 
+	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/types"
 )
 
@@ -12,15 +13,18 @@ import (
 // them again. The types of the values it passes in must agree with the
 // interface; the evaluator trusts them as it trusts the checker.
 
+// Labels and tags are IDs in the environment's table; Environment.Label
+// returns them by name.
+
 // A Field is a record field, for NewRecord.
 type Field struct {
-	Label string
+	Label label.ID
 	Value Value
 }
 
 // NewRecord returns a record of the fields.
 func NewRecord(fields ...Field) Record {
-	values := make(map[string]Value, len(fields))
+	values := make(map[label.ID]Value, len(fields))
 	for _, f := range fields {
 		values[f.Label] = f.Value
 	}
@@ -28,8 +32,8 @@ func NewRecord(fields ...Field) Record {
 }
 
 // Get returns the value of a record's field, or nil if it has none.
-func (r Record) Get(label string) Value {
-	return r.values[label]
+func (r Record) Get(l label.ID) Value {
+	return r.values[l]
 }
 
 // NewList returns a list of the elements, which it takes ownership of.
@@ -45,12 +49,12 @@ func (l List) Elements() []Value {
 
 // NewVariant returns the tag with a payload, or without one if payload is
 // nil.
-func NewVariant(tag string, payload Value) Variant {
+func NewVariant(tag label.ID, payload Value) Variant {
 	return Variant{tag, payload}
 }
 
 // Tag returns a variant's tag.
-func (v Variant) Tag() string {
+func (v Variant) Tag() label.ID {
 	return v.tag
 }
 

@@ -55,7 +55,8 @@ builtins now return plain values and panic with a `runtimeError`, which
 
 ## 6. Values are maps and strings
 
-- [ ] Intern tags and labels to global ids, shared with the type registry.
+- [x] Intern tags and labels to ids, in a `label.Table` per environment that
+      the type registry owns and the runtime shares.
 - [ ] Records as word buffers in label order, tags as `(id, payload)`
       (SPEC.md section 12, "Compact runtime values").
 - [ ] Compile matches to decision trees (Maranget 2008) with the same

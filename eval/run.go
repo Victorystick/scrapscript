@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+
+	"github.com/Victorystick/scrapscript/label"
 )
 
 // A program is a compiled scrap, ready to run.
@@ -138,20 +140,20 @@ func (p *program) run(n cnode, f *frame) Value {
 
 		case opRecord:
 			rest, fields := p.record(n)
-			var values map[string]Value
+			var values map[label.ID]Value
 			if rest == none {
-				values = make(map[string]Value, len(fields)/2)
+				values = make(map[label.ID]Value, len(fields)/2)
 			} else {
 				// A record based on another.
 				values = maps.Clone(p.run(rest, f).(Record).values)
 			}
 			for i := 0; i < len(fields); i += 2 {
-				values[p.strings[fields[i]]] = p.run(cnode(fields[i+1]), f)
+				values[label.ID(fields[i])] = p.run(cnode(fields[i+1]), f)
 			}
 			return Record{values}
 
 		case opAccess:
-			return p.run(cnode(d.a), f).(Record).values[p.strings[d.b]]
+			return p.run(cnode(d.a), f).(Record).values[label.ID(d.b)]
 
 		case opList:
 			elems := p.range_(n)
@@ -162,7 +164,7 @@ func (p *program) run(n cnode, f *frame) Value {
 			return List{values}
 
 		case opVariant:
-			v := Variant{tag: p.strings[d.a]}
+			v := Variant{tag: label.ID(d.a)}
 			if cnode(d.b) != none {
 				v.value = p.run(cnode(d.b), f)
 			}
@@ -222,7 +224,7 @@ func enter(fn, arg Value) (p *program, n cnode, f *frame, v Value) {
 				return p, cnode(arms[i+1]), f, nil
 			}
 		}
-		panic(p.errorf(sf.node, "no arm matches %s", arg))
+		panic(p.errorf(sf.node, "no arm matches %s", printValue(sf.prog.labels, arg)))
 	}
 }
 
@@ -244,7 +246,7 @@ func (p *program) match(n cnode, v Value, f *frame) bool {
 
 	case patVariant:
 		t, ok := v.(Variant)
-		if !ok || t.tag != p.strings[d.a] {
+		if !ok || t.tag != label.ID(d.a) {
 			return false
 		}
 		if cnode(d.b) == none {
@@ -264,7 +266,7 @@ func (p *program) match(n cnode, v Value, f *frame) bool {
 		}
 		rest, fields := p.record(n)
 		for i := 0; i < len(fields); i += 2 {
-			val, ok := r.values[p.strings[fields[i]]]
+			val, ok := r.values[label.ID(fields[i])]
 			if !ok || !p.match(cnode(fields[i+1]), val, f) {
 				return false
 			}
@@ -274,7 +276,7 @@ func (p *program) match(n cnode, v Value, f *frame) bool {
 		}
 		values := maps.Clone(r.values)
 		for i := 0; i < len(fields); i += 2 {
-			delete(values, p.strings[fields[i]])
+			delete(values, label.ID(fields[i]))
 		}
 		return p.match(rest, Record{values}, f)
 

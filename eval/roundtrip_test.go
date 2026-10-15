@@ -107,16 +107,18 @@ func TestRoundTrip(t *testing.T) {
 // roundTrip evaluates source, then evaluates the printed result again. It
 // returns both printed results, or the first error.
 func roundTrip(source string) (first, second string, err error) {
-	val, err := eval(NewEnvironment(), source)
+	env := NewEnvironment()
+	val, err := eval(env, source)
 	if err != nil {
 		return "", "", err
 	}
-	first = val.String()
-	val, err = eval(NewEnvironment(), first)
+	first = env.Print(val)
+	env = NewEnvironment()
+	val, err = eval(env, first)
 	if err != nil {
 		return first, "", err
 	}
-	return first, val.String(), nil
+	return first, env.Print(val), nil
 }
 
 func TestPrintedImports(t *testing.T) {
@@ -135,8 +137,8 @@ func TestPrintedImports(t *testing.T) {
 		val, err := eval(env, ex.source)
 		if err != nil {
 			t.Errorf("%s: %v", ex.source, err)
-		} else if val.String() != ex.result {
-			t.Errorf("%s: expected %q, got %q", ex.source, ex.result, val)
+		} else if got := env.Print(val); got != ex.result {
+			t.Errorf("%s: expected %q, got %q", ex.source, ex.result, got)
 		}
 	}
 }

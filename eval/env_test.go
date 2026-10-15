@@ -114,8 +114,8 @@ func TestPathImports(t *testing.T) {
 		val, err := eval(env, ex.source)
 		if err != nil {
 			t.Errorf("%s: %v", ex.source, err)
-		} else if val.String() != ex.result {
-			t.Errorf("%s: expected %s, got %s", ex.source, ex.result, val)
+		} else if got := env.Print(val); got != ex.result {
+			t.Errorf("%s: expected %s, got %s", ex.source, ex.result, got)
 		}
 	}
 }
@@ -229,8 +229,8 @@ func TestApply(t *testing.T) {
 			}
 		case err != nil:
 			t.Errorf("%s <| %s: %v", ex.fn, ex.arg, err)
-		case val.String() != ex.result:
-			t.Errorf("%s <| %s: got %s, want %s", ex.fn, ex.arg, val, ex.result)
+		case env.Print(val) != ex.result:
+			t.Errorf("%s <| %s: got %s, want %s", ex.fn, ex.arg, env.Print(val), ex.result)
 		}
 	}
 }

@@ -5,6 +5,7 @@ package main
 import (
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/host"
+	"github.com/Victorystick/scrapscript/label"
 )
 
 // Interface is the platform's interface, $source:849e426be10d4955c969e7ece9acc1e21072e073965970a2fd0519bf076a683f, and the scraps it refers to.
@@ -31,7 +32,8 @@ func Load(env *eval.Environment, app *eval.Scrap) (Program, error) {
 	if err != nil {
 		return zero, err
 	}
-	return programFromValue(v), nil
+	l := newLabels(env)
+	return programFromValue(l, v), nil
 }
 
 // S is a value of the type parameter s, which only scripts can inspect.
@@ -42,32 +44,32 @@ type Program struct {
 	Step func(Event, S) (Turn, error)
 }
 
-func programFromValue(v eval.Value) Program {
+func programFromValue(l *labels, v eval.Value) Program {
 	r := v.(eval.Record)
 	return Program{
-		Init: turnFromValue(r.Get("init")),
+		Init: turnFromValue(l, r.Get(l.init)),
 		Step: func(fn eval.Value) func(Event, S) (Turn, error) {
 			return func(a0 Event, a1 S) (Turn, error) {
-				v, err := eval.Call(fn, a0.toValue(), a1.v)
+				v, err := eval.Call(fn, a0.toValue(l), a1.v)
 				if err != nil {
 					var zero Turn
 					return zero, err
 				}
-				return turnFromValue(v), nil
+				return turnFromValue(l, v), nil
 			}
-		}(r.Get("step")),
+		}(r.Get(l.step)),
 	}
 }
 
-func (x Program) toValue() eval.Value {
+func (x Program) toValue(l *labels) eval.Value {
 	return eval.NewRecord(
-		eval.Field{Label: "init", Value: x.Init.toValue()},
-		eval.Field{Label: "step", Value: eval.NewFunc("programStep", 2, func(args []eval.Value) (eval.Value, error) {
-			r, err := x.Step(eventFromValue(args[0]), S{args[1]})
+		eval.Field{Label: l.init, Value: x.Init.toValue(l)},
+		eval.Field{Label: l.step, Value: eval.NewFunc("programStep", 2, func(args []eval.Value) (eval.Value, error) {
+			r, err := x.Step(eventFromValue(l, args[0]), S{args[1]})
 			if err != nil {
 				return nil, err
 			}
-			return r.toValue(), nil
+			return r.toValue(l), nil
 		})},
 	)
 }
@@ -78,20 +80,20 @@ type Turn struct {
 	State S
 }
 
-func turnFromValue(v eval.Value) Turn {
+func turnFromValue(l *labels, v eval.Value) Turn {
 	r := v.(eval.Record)
 	return Turn{
-		Next:  nextActionFromValue(r.Get("next")),
-		Out:   string(r.Get("out").(eval.Text)),
-		State: S{r.Get("state")},
+		Next:  nextActionFromValue(l, r.Get(l.next)),
+		Out:   string(r.Get(l.out).(eval.Text)),
+		State: S{r.Get(l.state)},
 	}
 }
 
-func (x Turn) toValue() eval.Value {
+func (x Turn) toValue(l *labels) eval.Value {
 	return eval.NewRecord(
-		eval.Field{Label: "next", Value: x.Next.toValue()},
-		eval.Field{Label: "out", Value: eval.Text(x.Out)},
-		eval.Field{Label: "state", Value: x.State.v},
+		eval.Field{Label: l.next, Value: x.Next.toValue(l)},
+		eval.Field{Label: l.out, Value: eval.Text(x.Out)},
+		eval.Field{Label: l.state, Value: x.State.v},
 	)
 }
 
@@ -132,23 +134,25 @@ func (x NextAction) Exit() int64 {
 
 func NewNextActionReadLine() NextAction { return NextAction{tag: NextActionReadLine} }
 
-func nextActionFromValue(v eval.Value) NextAction {
+func nextActionFromValue(l *labels, v eval.Value) NextAction {
 	t := v.(eval.Variant)
 	switch t.Tag() {
-	case "exit":
+	case l.exit:
 		return NewNextActionExit(int64(t.Payload().(eval.Int)))
-	case "read-line":
+	case l.readLine:
 		return NewNextActionReadLine()
 	}
-	panic("NextAction: unknown tag #" + t.Tag())
+	panic("NextAction: unknown tag")
 }
 
-func (x NextAction) toValue() eval.Value {
+func (x NextAction) toValue(l *labels) eval.Value {
 	switch x.tag {
 	case NextActionExit:
-		return eval.NewVariant("exit", eval.Int(x.exit))
+		return eval.NewVariant(l.exit, eval.Int(x.exit))
+	case NextActionReadLine:
+		return eval.NewVariant(l.readLine, nil)
 	}
-	return eval.NewVariant(nextActionTags[x.tag], nil)
+	panic("NextAction: invalid tag")
 }
 
 type EventTag uint8
@@ -188,21 +192,51 @@ func (x Event) Line() string {
 	return x.line
 }
 
-func eventFromValue(v eval.Value) Event {
+func eventFromValue(l *labels, v eval.Value) Event {
 	t := v.(eval.Variant)
 	switch t.Tag() {
-	case "eof":
+	case l.eof:
 		return NewEventEof()
-	case "line":
+	case l.line:
 		return NewEventLine(string(t.Payload().(eval.Text)))
 	}
-	panic("Event: unknown tag #" + t.Tag())
+	panic("Event: unknown tag")
 }
 
-func (x Event) toValue() eval.Value {
+func (x Event) toValue(l *labels) eval.Value {
 	switch x.tag {
+	case EventEof:
+		return eval.NewVariant(l.eof, nil)
 	case EventLine:
-		return eval.NewVariant("line", eval.Text(x.line))
+		return eval.NewVariant(l.line, eval.Text(x.line))
 	}
-	return eval.NewVariant(eventTags[x.tag], nil)
+	panic("Event: invalid tag")
+}
+
+// labels are the IDs of the interface's record labels and tags in the
+// environment that Load checked the script in, which values hold.
+type labels struct {
+	eof      label.ID
+	exit     label.ID
+	init     label.ID
+	line     label.ID
+	next     label.ID
+	out      label.ID
+	readLine label.ID
+	state    label.ID
+	step     label.ID
+}
+
+func newLabels(env *eval.Environment) *labels {
+	return &labels{
+		eof:      env.Label("eof"),
+		exit:     env.Label("exit"),
+		init:     env.Label("init"),
+		line:     env.Label("line"),
+		next:     env.Label("next"),
+		out:      env.Label("out"),
+		readLine: env.Label("read-line"),
+		state:    env.Label("state"),
+		step:     env.Label("step"),
+	}
 }

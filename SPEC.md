@@ -660,12 +660,12 @@ always gives the same hashes.
   made abstract, and when two such records' types are equal. Type scraps (7.6)
   are the interim mechanism.
 - **Compact runtime values.** Names exist only in source, types and printing;
-  at runtime, values are words. Not started; the evaluator walks the tree with
-  string-keyed maps. The design:
+  at runtime, values are words. Started: variables are frame slots, and tags
+  and labels are interned IDs, but records are still maps. The design:
   - Variables resolve to frame slots (section 5's `Var(index)`), so a frame is
     a buffer of words and binding a pattern writes into it.
   - Tags and labels are interned to integers by a table that the runtime and
-    the type checker share. `#foo 5` is two words, `(tagOf("foo"), 5)`; a tag
+    the type checker share, one per environment (package `label`). `#foo 5` is two words, `(tagOf("foo"), 5)`; a tag
     without a payload needs only its id. A match switches on the id. Ids are
     global rather than dense per enum, because rows let one value flow
     through enums with different tag sets.
@@ -681,8 +681,9 @@ always gives the same hashes.
   - Spreads `{ ..r, a = 1 }` build a new buffer, under the new shape when one
     is added.
   - Printing, equality and the flat encoding map ids back to names through the
-    table. Ids are per process and never part of a scrap's identity (section
-    9).
+    table. Ids are per environment and never part of a scrap's identity
+    (section 9); a host gets them by name, as generated bindings do once
+    when they load a script.
   - Uniform words need boxing for TEXT, BYTES, lists and closures: tagged
     immediates and a custom heap, which suits a
     WebAssembly backend better than Go interfaces. So this is likely a

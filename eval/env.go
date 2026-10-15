@@ -7,6 +7,7 @@ import (
 	"path"
 
 	"github.com/Victorystick/scrapscript/ast"
+	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/parser"
 	"github.com/Victorystick/scrapscript/token"
 	"github.com/Victorystick/scrapscript/types"
@@ -257,7 +258,7 @@ func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
 		return nil, fmt.Errorf("cannot evaluate a type")
 	}
 	if s.value == nil {
-		c, err := compile(&s.expr, e.vars)
+		c, err := compile(&s.expr, e.vars, e.reg.Labels())
 		if err != nil {
 			return nil, err
 		}
@@ -321,9 +322,16 @@ func (e *Environment) Infer(s *Scrap) (string, error) {
 	return e.reg.Describe(res), nil
 }
 
-// Scrap renders a Value as self-contained scrapscript program.
-func (e *Environment) Scrap(value Value) string {
-	return value.String()
+// Print returns a scrap that evaluates to v, a value of this environment,
+// and prints the same.
+func (e *Environment) Print(v Value) string {
+	return printValue(e.reg.Labels(), v)
+}
+
+// Label returns the ID of the record label or enum tag name in this
+// environment, for building and reading its values.
+func (e *Environment) Label(name string) label.ID {
+	return e.reg.Labels().Of(name)
 }
 
 func (e *Environment) Push(s *Scrap) (string, error) {

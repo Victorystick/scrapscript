@@ -8,12 +8,13 @@ import (
 	"strings"
 
 	"github.com/Victorystick/scrapscript/ast"
+	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/printer"
 	"github.com/Victorystick/scrapscript/scanner"
 )
 
-// Print returns a scrap that evaluates to v and prints the same, as SPEC.md
-// section 10, rule 6, requires.
+// printValue returns a scrap that evaluates to v and prints the same, as SPEC.md
+// section 10, rule 6, requires, with the names of labels in labels.
 //
 // A function prints as its code, with the bindings that the code refers to
 // in a where-clause after the value. Those are printed the same way, so
@@ -24,8 +25,9 @@ import (
 //
 // The bindings come from many scopes, but print as one where-group, so a
 // name that is already taken gets primes: a, a', a”.
-func Print(v Value) string {
+func printValue(labels *label.Table, v Value) string {
 	p := valuePrinter{
+		labels: labels,
 		byKey:  make(map[bindingKey]*binding),
 		refs:   make(map[srcNode]*binding),
 		names:  make(map[string]bool),
@@ -57,6 +59,7 @@ type srcNode struct {
 }
 
 type valuePrinter struct {
+	labels   *label.Table
 	bindings []*binding // in the order that they are found
 	byKey    map[bindingKey]*binding
 	// The bindings that the free Ident nodes of printed code refer to.
@@ -92,7 +95,7 @@ func home(sf ScriptFunc) (bindingKey, bool) {
 func (p *valuePrinter) collect(v Value) {
 	switch v := v.(type) {
 	case Record:
-		for _, key := range slices.Sorted(maps.Keys(v.values)) {
+		for _, key := range p.keys(v) {
 			p.collect(v.values[key])
 		}
 	case List:
@@ -266,11 +269,11 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 			return
 		}
 		s.WriteString("{ ")
-		for i, key := range slices.Sorted(maps.Keys(v.values)) {
+		for i, key := range p.keys(v) {
 			if i > 0 {
 				s.WriteString(", ")
 			}
-			s.WriteString(key)
+			s.WriteString(p.labels.Name(key))
 			s.WriteString(" = ")
 			p.value(s, v.values[key], printer.Expr)
 		}
@@ -290,10 +293,10 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 		s.WriteString(" ]")
 	case Variant:
 		if v.value == nil {
-			s.WriteString("#" + v.tag)
+			s.WriteString("#" + p.labels.Name(v.tag))
 			return
 		}
-		p.app(s, ctx, "#"+v.tag, v.value)
+		p.app(s, ctx, "#"+p.labels.Name(v.tag), v.value)
 	case BuiltInFunc:
 		s.WriteString(v.name)
 	case Partial:
@@ -309,6 +312,11 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 			s.WriteString(pr.String())
 		}
 	}
+}
+
+// keys returns a record's keys, in order by name.
+func (p *valuePrinter) keys(r Record) []label.ID {
+	return slices.SortedFunc(maps.Keys(r.values), p.labels.Compare)
 }
 
 // app prints head applied to args, in parentheses if ctx is an argument.

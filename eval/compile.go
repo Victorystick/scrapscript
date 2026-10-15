@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Victorystick/scrapscript/ast"
+	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/token"
 )
 
@@ -49,15 +50,15 @@ const (
 	opLambda  // A..B: its frame's size, its uses, then a pattern and body per arm.
 	opWhere   // A..B: the body, then a slot and value per binding, in evaluation order.
 	opRecord  // A..B: the record it is based on or none, then a key and value per field.
-	opAccess  // A: the record. B: the key, an index in strings.
+	opAccess  // A: the record. B: the key, a label.ID.
 	opList    // A..B: the elements.
-	opVariant // A: the tag, an index in strings. B: the payload, or none.
+	opVariant // A: the tag, a label.ID. B: the payload, or none.
 
 	// Patterns.
 	patBind    // A: the slot it binds.
 	patWild    // _
 	patLiteral // A: the index of the value in consts.
-	patVariant // A: the tag, an index in strings. B: the payload, or none.
+	patVariant // A: the tag, a label.ID. B: the payload, or none.
 	patRecord  // A..B: the rest or none, then a key and pattern per field.
 	patList    // A..B: the elements.
 	patCons    // head >+ tail. A: head. B: tail.
@@ -85,12 +86,12 @@ type core struct {
 	// Not per node; nodes refer to these by index.
 
 	// The children of nodes with more than two, as ranges A..B: cnodes,
-	// slots, string and uses indices, by op.
+	// slots, label IDs and uses indices, by op.
 	extra []int32
 	// The values of literals and builtins, decoded once.
 	consts []Value
-	// Tags and record keys, each once.
-	strings []string
+	// The table that tags and record keys are interned in.
+	labels *label.Table
 
 	// For printing closures, not for evaluating them. A lambda's or
 	// composition's uses is what its code refers to; a binder is a name that
@@ -171,12 +172,12 @@ func (c *core) elems(n cnode) (rest cnode, elems []int32) {
 }
 
 // compile lowers se, which must have been type-checked. Free names that it
-// doesn't bind refer to globals.
-func compile(se *ast.SourceExpr, globals Vars) (*core, error) {
+// doesn't bind refer to globals. Tags and record keys are interned in
+// labels.
+func compile(se *ast.SourceExpr, globals Vars, labels *label.Table) (*core, error) {
 	c := compiler{
-		core:     core{src: se},
+		core:     core{src: se, labels: labels},
 		globals:  globals,
-		interned: make(map[string]int32),
 		builtins: make(map[string]int32),
 	}
 	c.node(opNone, 0, 0, ast.None)
@@ -190,8 +191,7 @@ func compile(se *ast.SourceExpr, globals Vars) (*core, error) {
 
 type compiler struct {
 	core
-	globals  Vars
-	interned map[string]int32
+	globals Vars
 	// The index in consts of each builtin referred to.
 	builtins map[string]int32
 	err      error
@@ -265,14 +265,9 @@ func (c *compiler) builtin(x ast.Node, name string) int32 {
 	return i
 }
 
-func (c *compiler) string(s string) int32 {
-	i, ok := c.interned[s]
-	if !ok {
-		i = int32(len(c.strings))
-		c.strings = append(c.strings, s)
-		c.interned[s] = i
-	}
-	return i
+// label returns the ID of the tag or record key t.
+func (c *compiler) label(t ast.Tok) int32 {
+	return int32(c.labels.Of(c.name(t)))
 }
 
 // open starts collecting what code in the current frame refers to into a
@@ -381,7 +376,7 @@ func (c *compiler) expr(x ast.Node) cnode {
 		if payload != ast.None {
 			p = c.expr(payload)
 		}
-		return c.node(opVariant, c.string(c.name(tag)), int32(p), x)
+		return c.node(opVariant, c.label(tag), int32(p), x)
 
 	case ast.Record:
 		rest, fields := se.Record(x)
@@ -391,13 +386,13 @@ func (c *compiler) expr(x ast.Node) cnode {
 		}
 		xs := []int32{int32(r)}
 		for i := range fields.Len() {
-			xs = append(xs, c.string(c.name(fields.Key(i))), int32(c.expr(fields.Value(i))))
+			xs = append(xs, c.label(fields.Key(i)), int32(c.expr(fields.Value(i))))
 		}
 		return c.span(opRecord, xs, x)
 
 	case ast.Access:
 		rec, key := se.Access(x)
-		return c.node(opAccess, int32(c.expr(rec)), c.string(c.name(key)), x)
+		return c.node(opAccess, int32(c.expr(rec)), c.label(key), x)
 
 	case ast.List:
 		elems := se.List(x)
@@ -564,13 +559,13 @@ func (c *compiler) pattern(x ast.Node, scope int) cnode {
 		if payload != ast.None {
 			p = c.pattern(payload, scope)
 		}
-		return c.node(patVariant, c.string(c.name(tag)), int32(p), x)
+		return c.node(patVariant, c.label(tag), int32(p), x)
 
 	case ast.Record:
 		rest, fields := se.Record(x)
 		xs := []int32{0}
 		for i := range fields.Len() {
-			xs = append(xs, c.string(c.name(fields.Key(i))), int32(c.pattern(fields.Value(i), scope)))
+			xs = append(xs, c.label(fields.Key(i)), int32(c.pattern(fields.Value(i), scope)))
 		}
 		if rest != ast.None {
 			xs[0] = int32(c.pattern(rest, scope))

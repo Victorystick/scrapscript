@@ -73,23 +73,23 @@ func TestRunProgram(t *testing.T) {
 		t.Fatal(err)
 	}
 	prog := v.(eval.Record)
-	turn := prog.Get("init").(eval.Record)
+	turn := prog.Get(e.Label("init")).(eval.Record)
 	var out strings.Builder
 	input := []string{"a", "b"}
 	for {
-		out.WriteString(string(turn.Get("out").(eval.Text)))
-		next := turn.Get("next").(eval.Variant)
-		if next.Tag() == "exit" {
+		out.WriteString(string(turn.Get(e.Label("out")).(eval.Text)))
+		next := turn.Get(e.Label("next")).(eval.Variant)
+		if next.Tag() == e.Label("exit") {
 			if status := next.Payload().(eval.Int); status != 2 {
 				t.Errorf("expected status 2, got %d", status)
 			}
 			break
 		}
-		event := eval.NewVariant("eof", nil)
+		event := eval.NewVariant(e.Label("eof"), nil)
 		if len(input) > 0 {
-			event, input = eval.NewVariant("line", eval.Text(input[0])), input[1:]
+			event, input = eval.NewVariant(e.Label("line"), eval.Text(input[0])), input[1:]
 		}
-		res, err := eval.Call(prog.Get("step"), event, turn.Get("state"))
+		res, err := eval.Call(prog.Get(e.Label("step")), event, turn.Get(e.Label("state")))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -114,10 +114,10 @@ func TestHostFunc(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := v.String(); got != `[ 3, 13, 14 ]` {
+	if got := e.Print(v); got != `[ 3, 13, 14 ]` {
 		t.Errorf("expected [ 3, 13, 14 ], got %s", got)
 	}
-	if got := eval.NewVariant("f", must(eval.Call(add, eval.Int(1)))).String(); got != `#f (add 1)` {
+	if got := e.Print(eval.NewVariant(e.Label("f"), must(eval.Call(add, eval.Int(1))))); got != `#f (add 1)` {
 		t.Errorf("expected a partial host function to print as #f (add 1), got %s", got)
 	}
 
@@ -130,11 +130,12 @@ func TestHostFunc(t *testing.T) {
 }
 
 func TestCallFailure(t *testing.T) {
-	fn, err := environment().Eval(read(t, environment(), `| #a -> 2`))
+	e := environment()
+	fn, err := e.Eval(read(t, e, `| #a -> 2`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eval.Call(fn, eval.NewVariant("b", nil)); err == nil || !strings.Contains(err.Error(), "no arm matches #b") {
+	if _, err := eval.Call(fn, eval.NewVariant(e.Label("b"), nil)); err == nil || !strings.Contains(err.Error(), "no arm matches #b") {
 		t.Errorf("expected no arm to match, got %v", err)
 	}
 }

@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"maps"
 	"slices"
+
+	"github.com/Victorystick/scrapscript/label"
 )
 
 // Values
 
+// A Value is the result of an evaluation. Records and variants hold labels
+// as IDs in their environment's table, so they print through it, with
+// Environment.Print.
 type Value interface {
-	String() string
 	eq(other Value) bool
 }
 
@@ -21,7 +25,7 @@ type Byte byte
 type Bytes []byte
 
 type Record struct {
-	values map[string]Value
+	values map[label.ID]Value
 }
 
 type List struct {
@@ -29,7 +33,7 @@ type List struct {
 }
 
 type Variant struct {
-	tag   string
+	tag   label.ID
 	value Value
 }
 
@@ -133,25 +137,9 @@ func (bf BuiltInFunc) eq(other Value) bool {
 // Functions are equal if they print the same.
 func (p Partial) eq(other Value) bool {
 	o, ok := other.(Partial)
-	return ok && p.String() == o.String()
+	return ok && p.name == o.name && slices.EqualFunc(p.args, o.args, Equals)
 }
 func (sf ScriptFunc) eq(other Value) bool {
 	o, ok := other.(ScriptFunc)
-	return ok && sf.String() == o.String()
+	return ok && printValue(sf.prog.labels, sf) == printValue(o.prog.labels, o)
 }
-
-// String returns a value as a scrap that evaluates to the same value; see
-// print.go.
-
-func (h Hole) String() string         { return Print(h) }
-func (i Int) String() string          { return Print(i) }
-func (f Float) String() string        { return Print(f) }
-func (t Text) String() string         { return Print(t) }
-func (b Byte) String() string         { return Print(b) }
-func (bs Bytes) String() string       { return Print(bs) }
-func (r Record) String() string       { return Print(r) }
-func (l List) String() string         { return Print(l) }
-func (v Variant) String() string      { return Print(v) }
-func (bf BuiltInFunc) String() string { return Print(bf) }
-func (p Partial) String() string      { return Print(p) }
-func (sf ScriptFunc) String() string  { return Print(sf) }

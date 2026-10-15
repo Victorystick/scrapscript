@@ -120,7 +120,7 @@ func TestScrapItentity(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		} else {
-			rep := env.Scrap(val)
+			rep := env.Print(val)
 			if scrap != rep {
 				t.Errorf("Expected: %#v, got: %#v", scrap, rep)
 			}
@@ -269,23 +269,25 @@ func eval(e *Environment, source string) (Value, error) {
 // result with a target string; optionally with some additional variables
 // in scope.
 func evalString(t *testing.T, source, expected string) {
-	val, err := eval(NewEnvironment(), source)
+	env := NewEnvironment()
+	val, err := eval(env, source)
 
 	if err != nil {
 		t.Error(err)
 	} else {
-		if val.String() != expected {
-			t.Errorf("Expected: %#v, got: %#v", expected, val.String())
+		if got := env.Print(val); got != expected {
+			t.Errorf("Expected: %#v, got: %#v", expected, got)
 		}
 	}
 }
 
 // Evaluates to a comparable value
 func evalFailure(t *testing.T, source string, expected string) {
-	val, err := eval(NewEnvironment(), source)
+	env := NewEnvironment()
+	val, err := eval(env, source)
 
 	if err == nil {
-		t.Errorf("%s - should fail but got %s", source, val)
+		t.Errorf("%s - should fail but got %s", source, env.Print(val))
 	} else {
 		if !strings.Contains(err.Error(), expected) {
 			t.Errorf("Expected '%s' in error:\n%s", expected, err.Error())
@@ -304,8 +306,8 @@ func TestEvalImport(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	} else {
-		if val.String() != "4" {
-			t.Errorf("Expected: %#v, got: %#v", "4", val.String())
+		if got := env.Print(val); got != "4" {
+			t.Errorf("Expected: %#v, got: %#v", "4", got)
 		}
 	}
 }
@@ -324,8 +326,8 @@ func TestImportType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if val.String() != "1" {
-		t.Errorf("Expected 1, got %s", val)
+	if got := env.Print(val); got != "1" {
+		t.Errorf("Expected 1, got %s", got)
 	}
 
 	// The type scrap itself has no value.
