@@ -76,7 +76,7 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	accum := reg.Func(a, reg.Func(b, a))
 	define3("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), func(acc, fn, list Value) Value {
 		for _, v := range list.(List).elements {
-			acc = call(fn, acc, v)
+			acc = call2(fn, acc, v)
 		}
 		return acc
 	})
@@ -96,7 +96,7 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	define2("list/sort", reg.Func(reg.Func(a, reg.Func(a, order())), reg.Func(aList, aList)), func(fn, list Value) Value {
 		elems := slices.Clone(list.(List).elements)
 		slices.SortStableFunc(elems, func(x, y Value) int {
-			switch call(fn, x, y).(Variant).tag {
+			switch call2(fn, x, y).(Variant).tag {
 			case ltID:
 				return -1
 			case gtID:

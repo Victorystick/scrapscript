@@ -262,6 +262,26 @@ func call(fn Value, args ...Value) Value {
 	return p.run(n, f)
 }
 
+// call2 is call for two arguments, which a builtin or a script function
+// that takes exactly two gets without a slice.
+func call2(fn, a, b Value) Value {
+	switch g := fn.(type) {
+	case BuiltInFunc:
+		if g.two != nil {
+			return g.two(a, b)
+		}
+	case ScriptFunc:
+		if len(g.args) == 0 && !g.composition() {
+			if size, _, arity, _ := g.prog.lambda(g.node); arity == 2 {
+				f := g.frame(size)
+				f.slots[0], f.slots[1] = a, b
+				return g.prog.run(g.prog.arm(g, f), f)
+			}
+		}
+	}
+	return call(fn, a, b)
+}
+
 // enter starts calling fn with arg. A builtin returns its result v, as
 // does a function that takes more arguments, with arg added to the ones it
 // has. Otherwise, enter returns the body n of a script function's first
