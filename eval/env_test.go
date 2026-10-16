@@ -21,6 +21,15 @@ func TestInferBuiltin(t *testing.T) {
 		{`bytes/to-utf8-text`, `bytes -> text`},
 		{`bytes/from-utf8-text`, `text -> bytes`},
 
+		// int
+		{`int/cmp`, `int -> int -> [ #eq, #gt, #lt ]`},
+		{`int/div`, `int -> int -> [ #none, #some int ]`},
+		{`int/to-text`, `int -> text`},
+		{`text/cmp`, `text -> text -> [ #eq, #gt, #lt ]`},
+		{`text/split`, `text -> text -> list text`},
+		{`text/to-int`, `text -> [ #none, #some int ]`},
+		{`list/sort`, `(a -> a -> [ #eq, #gt, #lt ]) -> list a -> list a`},
+
 		// list
 		{`list/length`, `list a -> int`},
 		{`list/map`, `(a -> b) -> list a -> list b`},

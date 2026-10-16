@@ -1,0 +1,89 @@
+-- access-log: reads lines of "METHOD PATH STATUS MILLIS" and, at the end of
+-- the input, prints per path its requests, server errors (5xx), and mean and
+-- maximum latency, busiest first. Malformed lines are counted apart.
+
+{ init = { state = { paths = #leaf, bad = 0 }, out = "", next = #read-line }
+, step = | #line line -> s -> { state = add line s, out = "", next = #read-line }
+         | #eof       -> s -> { state = s, out = report s, next = #exit 0 }
+}
+
+; add = line -> s -> text/split " " line |>
+    | [_, path, status, ms] -> count s path (text/to-int status) (text/to-int ms)
+    | _                     -> { ..s, bad = s.bad + 1 }
+
+; count = s -> path ->
+    | #some status -> #some ms -> { ..s, paths = upsert path (hit status ms) s.paths }
+    | _            -> _        -> { ..s, bad = s.bad + 1 }
+
+; hit = status -> ms ->
+    | #none   -> { requests = 1, errors = error status, total = ms, max = ms }
+    | #some t -> { requests = t.requests + 1, errors = t.errors + error status, total = t.total + ms, max = larger t.max ms }
+
+; error = status -> int/cmp status 499 |> | #gt -> 1 | _ -> 0
+
+; larger = a -> b -> int/cmp a b |> | #lt -> b | _ -> a
+
+-- The report.
+
+; report = s -> header ++ text/join "" (list/map row (list/sort busier (entries [] s.paths))) ++ footer s.bad
+
+; header = "  reqs   5xx  mean   max path\n"
+
+; busier = a -> b -> int/cmp b.stat.requests a.stat.requests |> | #eq -> text/cmp a.path b.path | o -> o
+
+; row = e -> text/join " " [num e.stat.requests, num e.stat.errors, mean e.stat, num e.stat.max, e.path] ++ "\n"
+
+; mean = t -> int/div t.total t.requests |> | #some m -> num m | #none -> pad "-"
+
+; num = n -> pad (int/to-text n)
+
+; pad = t -> text/repeat (larger 0 (5 - text/length t)) " " ++ t
+
+; footer = | 0 -> "" | n -> int/to-text n ++ " malformed\n"
+
+-- An AVL tree of stats by path.
+
+; tree : type = [#leaf, #node { key : text, value : stat, left : tree, right : tree, height : int }]
+
+; stat : type = { requests : int, errors : int, total : int, max : int }
+
+; entry : type = { path : text, stat : stat }
+
+; upsert : text -> ([#some stat, #none] -> stat) -> tree -> tree = key -> f ->
+    | #leaf   -> node key (f #none) #leaf #leaf
+    | #node n -> (text/cmp key n.key |>
+        | #lt -> balance n.key n.value (upsert key f n.left) n.right
+        | #gt -> balance n.key n.value n.left (upsert key f n.right)
+        | #eq -> #node { ..n, value = f (#some n.value) })
+
+; entries : list entry -> tree -> list entry = acc ->
+    | #leaf   -> acc
+    | #node n -> entries ({ path = n.key, stat = n.value } >+ entries acc n.right) n.left
+
+; height : tree -> int = | #leaf -> 0 | #node n -> n.height
+
+; node : text -> stat -> tree -> tree -> tree = key -> value -> left -> right ->
+    #node { key = key, value = value, left = left, right = right, height = 1 + larger (height left) (height right) }
+
+; balance = key -> value -> left -> right -> lean key value left right (height left - height right)
+
+; lean = key -> value -> left -> right ->
+    | 2  -> left-heavy key value right left
+    | -2 -> right-heavy key value left right
+    | _  -> node key value left right
+
+; left-heavy : text -> stat -> tree -> tree -> tree = key -> value -> right ->
+    | #node l -> (int/cmp (height l.left) (height l.right) |>
+        | #lt -> (l.right |>
+            | #node m -> node m.key m.value (node l.key l.value l.left m.left) (node key value m.right right)
+            | #leaf   -> node key value (node l.key l.value l.left l.right) right)
+        | _   -> node l.key l.value l.left (node key value l.right right))
+    | #leaf   -> node key value #leaf right
+
+; right-heavy : text -> stat -> tree -> tree -> tree = key -> value -> left ->
+    | #node r -> (int/cmp (height r.right) (height r.left) |>
+        | #lt -> (r.left |>
+            | #node m -> node m.key m.value (node key value left m.left) (node r.key r.value m.right r.right)
+            | #leaf   -> node key value left (node r.key r.value r.left r.right))
+        | _   -> node r.key r.value (node key value left r.left) r.right)
+    | #leaf   -> node key value left #leaf

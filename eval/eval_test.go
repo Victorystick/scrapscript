@@ -235,6 +235,23 @@ var exp2str = []struct{ source, result string }{
 	{`[ 4 + 2, 5 - 1 ]`, "[ 6, 4 ]"},
 	{`[ 1, 4 ] |> | [1,3] -> "three" |[_,4] -> "four" | _ -> "other"`, `"four"`},
 
+	{`[int/cmp 1 2, int/cmp 2 2, int/cmp 3 2]`, `[ #lt, #eq, #gt ]`},
+	{`[int/div 7 2, int/div -7 2, int/div 1 0]`, `[ #some 3, #some -3, #none ]`},
+	{`int/to-text -42 ++ "!"`, `"-42!"`},
+	{`[text/cmp "a" "b", text/cmp "b" "b", text/cmp "b" "a"]`, `[ #lt, #eq, #gt ]`},
+	{`text/split " " "GET /a 200"`, `[ "GET", "/a", "200" ]`},
+	{`text/split "," ""`, `[ "" ]`},
+	{`list/map text/to-int ["12", "-3", "x", ""]`, `[ #some 12, #some -3, #none, #none ]`},
+	{`list/sort int/cmp [3, 1, 2]`, `[ 1, 2, 3 ]`},
+	// Stable: equal elements keep their order.
+	{`list/sort (a -> b -> int/cmp a.k b.k) [{ k = 2, v = 1 }, { k = 1, v = 2 }, { k = 2, v = 3 }]`,
+		`[ { k = 1, v = 2 }, { k = 2, v = 1 }, { k = 2, v = 3 } ]`},
+	{`[max [], max [3, -1, 7, 2]]
+	; max : list int -> [#some int, #none] =
+	  | []      -> #none
+	  | x >+ xs -> #some (list/fold x bigger xs)
+	; bigger = a -> b -> int/cmp a b |> | #lt -> b | _ -> a`, `[ #none, #some 7 ]`},
+
 	// Generates a list of numbers from 0 to n inclusive.
 	{`seq 4 ; seq = | 0 -> [0] | n -> seq (n - 1) +< n`, `[ 0, 1, 2, 3, 4 ]`},
 
