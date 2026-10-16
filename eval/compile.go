@@ -50,6 +50,7 @@ const (
 	opConcat  // a ++ b
 	opCompose // A..B: the function applied first, then second, then its uses.
 	opLambda  // A..B: its frame's size, its uses, its arity n, then n patterns and a body per arm. If n > 1, its frame's first n slots are its arguments.
+	opMatch   // A..B: the value matched, then a pattern and a body per arm. Its patterns bind slots of the current frame.
 	opWhere   // A..B: the body, then a slot and value per binding, in evaluation order.
 	opRecord  // A..B: the record it is based on or none, its shape or -1 if it has a base, then a key and value per field.
 	opAccess  // A: the record. B: the key, a label.ID.
@@ -497,6 +498,9 @@ func (c *compiler) call(x, fn, arg ast.Node) cnode {
 		args = append(args, a)
 	}
 	if len(args) == 1 {
+		if arms := c.arms(fn); arms != nil {
+			return c.match(fn, arg, arms)
+		}
 		return c.node(opCall, int32(c.expr(fn)), int32(c.expr(arg)), x)
 	}
 	xs := []int32{int32(c.expr(fn))}
@@ -504,6 +508,50 @@ func (c *compiler) call(x, fn, arg ast.Node) cnode {
 		xs = append(xs, int32(c.expr(args[i])))
 	}
 	return c.span(opCallN, xs, x)
+}
+
+// arms returns the arms of fn, as pairs of pattern and body, if it is a
+// function literal of one argument: a match function of one argument, or a
+// Func node whose body is neither.
+func (c *compiler) arms(fn ast.Node) []ast.Node {
+	switch c.src.Kind(fn) {
+	case ast.Func:
+		param, body := c.src.Func(fn)
+		if k := c.src.Kind(body); k == ast.Func || k == ast.MatchFunc {
+			return nil
+		}
+		return []ast.Node{param, body}
+	case ast.MatchFunc:
+		if c.src.Arity(fn) != 1 {
+			return nil
+		}
+		var arms []ast.Node
+		for _, a := range c.src.Arms(fn) {
+			pats, body := c.src.Arm(a)
+			arms = append(arms, pats[0], body)
+		}
+		return arms
+	}
+	return nil
+}
+
+// match compiles a function literal fn of one argument, applied to arg, as
+// a match in the current frame, which makes neither a closure nor a frame.
+// arms are fn's patterns and bodies. The arms' slots overlap, but not with
+// the slots of what follows the match, which closures made in an arm may
+// still read.
+func (c *compiler) match(fn, arg ast.Node, arms []ast.Node) cnode {
+	xs := []int32{int32(c.expr(arg))}
+	start, end := c.next, c.next
+	for i := 0; i < len(arms); i += 2 {
+		c.next = start
+		scope := len(c.values)
+		xs = append(xs, int32(c.pattern(arms[i], scope)), int32(c.expr(arms[i+1])))
+		c.values = c.values[:scope]
+		end = max(end, c.next)
+	}
+	c.next = end
+	return c.span(opMatch, xs, fn)
 }
 
 // fn compiles a function, a Func node or a match function, in a new frame,

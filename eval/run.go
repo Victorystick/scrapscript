@@ -93,6 +93,19 @@ func (p *program) run(n cnode, f *frame) Value {
 				return v
 			}
 
+		case opMatch:
+			r := p.range_(n)
+			v := p.run(cnode(r[0]), f)
+			arms := r[1:]
+			i := 0
+			for i < len(arms) && !p.match(cnode(arms[i]), v, f) {
+				i += 2
+			}
+			if i == len(arms) {
+				panic(p.errorf(n, "no arm matches %s", printValue(p.labels, v)))
+			}
+			n = cnode(arms[i+1])
+
 		case opWhere:
 			body, binds := p.where(n)
 			for i := 0; i < len(binds); i += 2 {

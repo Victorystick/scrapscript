@@ -123,6 +123,17 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 			c.dump(s, cnode(arms[i+arity]))
 		}
 		s.WriteString(")")
+	case opMatch:
+		r := c.range_(n)
+		s.WriteString("(match ")
+		c.dump(s, cnode(r[0]))
+		for i := 1; i < len(r); i += 2 {
+			s.WriteString(" | ")
+			c.dump(s, cnode(r[i]))
+			s.WriteString(" -> ")
+			c.dump(s, cnode(r[i+1]))
+		}
+		s.WriteString(")")
 	case opWhere:
 		body, binds := c.where(n)
 		s.WriteString("(")
@@ -292,6 +303,18 @@ func TestCompile(t *testing.T) {
 		{`| #a -> n -> n | _ -> [x] -> x`, `(fn/3 | #a -> >1 -> @1 | _ -> [>2] -> @2)`, 0},
 		{`| [a] ++ r -> a | r ++ [a] -> a | { ..r, a = x } -> x`,
 			`(fn/2 | (++ [>0] >1) -> @0 | (++ >0 [>1]) -> @1 | { a = >0 ..>1 } -> @0)`, 0},
+		// A function literal of one argument applied directly is a match in
+		// the current frame, without a closure or a frame of its own.
+		{`x -> x |> | #a y -> y | #b -> 0`, `(fn/2 | >0 -> (match @0 | (#a >1) -> @1 | #b -> 0))`, 0},
+		{`1 |> y -> y`, `(match 1 | >0 -> @0)`, 1},
+		// Its arms share slots, but what follows it doesn't, since a closure
+		// made in an arm reads them later.
+		{`x -> [(x |> | #a y -> y | _ -> 0), (x |> z -> z)]`,
+			`(fn/3 | >0 -> [(match @0 | (#a >1) -> @1 | _ -> 0), (match @0 | >2 -> @2)])`, 0},
+		{`1 |> y -> (g ; g = z -> y + z)`,
+			`(match 1 | >0 -> (@1 ; >1 (fn/1 ^y@0.0 home=g | >0 -> (+ @1.0 @0))))`, 2},
+		// A function of more arguments is still called.
+		{`1 |> | a -> b -> a`, `((fn/2 | >0 -> >1 -> @0) 1)`, 0},
 		// Values.
 		{`{ ..r, a = 1 }.a ; r = { a = 2 }`, `({ a = 1 ..@0 }.a ; >0 { a = 2 })`, 1},
 		{`$"lib.scrap"`, `$"lib.scrap"`, 0},
