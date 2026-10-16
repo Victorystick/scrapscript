@@ -49,8 +49,31 @@ builtins now return plain values and panic with a `runtimeError`, which
 
 - [x] Capture only the slots a closure uses, not the `*context` chain, while
       still printing with its captured bindings.
-- [ ] Frames as windows on one value stack per evaluation, not a heap slice
-      per call; tail calls reuse the window.
+- [x] ~~Frames as windows on a value stack instead of a heap slice per
+      call~~: tried two ways in October 2026 and dropped, since neither was
+      faster than a heap slice per call. Both halved allocations
+      (AccessLog 1.07M -> ~0.5M per run, Eval fib 5210 -> 43), but
+      allocation was only about a quarter of AccessLog's CPU time, and
+      the savings went to new costs:
+      - A chunked stack per environment (clox style): +3% on AccessLog.
+        The chunks are long-lived heap memory, so while the GC marks,
+        every slot write takes a write barrier that also records the old
+        value; clearing freed windows doubles those (`clear` takes a bulk
+        barrier with an object lookup: +7%). Push/pop bookkeeping on top.
+      - Frames in a `[8]Value` buffer in the Go frame of the call that
+        owns them (87% of AccessLog's calls need <= 4 slots, all <= 6):
+        no barriers on the stack and no clearing, but Go zeroes the
+        buffer on every entry to `run`, which is once per node (0.9 s of
+        11 s), and copies 6-word frame structs. Splitting `run` so only
+        calling code has a buffer added a Go call per node instead. Even
+        with the operand fast path, AccessLog was level with heap frames.
+        `enter` must not return slots of its caller's buffer: it and
+        `run` call each other, so Go moves the buffer to the heap.
+
+      What costs now is per-node overhead: `run` has a ~1.5 KB Go frame
+      and is called for every subexpression. Reading slot operands
+      without calling `run` saved 6%. Next to try: compiling the core to
+      Go closures instead of interpreting it.
 - [ ] Explore lambda set inference (as in Roc): the checker tracks which
       closures can reach each function type, so calls compile to a switch
       over known closures instead of an indirect call. Likely a lot of work.

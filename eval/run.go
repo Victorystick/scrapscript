@@ -58,6 +58,24 @@ func (p *program) eval() (v Value, err error) {
 	return p.run(p.root, frame{slots: make([]Value, p.top)}), nil
 }
 
+// value evaluates the operand n in f. Most operands read a slot, which
+// it does without a call of run, whose Go frame is large. It is just
+// within Go's inlining budget: reading captures or constants too, or
+// passing f by value, puts it over.
+func (p *program) value(n cnode, f *frame) Value {
+	if p.ops[n] == opLocal {
+		return f.slots[p.data[n].a]
+	}
+	return p.runAt(n, f)
+}
+
+// runAt is run, for value to call without copying f where it is inlined.
+//
+//go:noinline
+func (p *program) runAt(n cnode, f *frame) Value {
+	return p.run(n, *f)
+}
+
 // run evaluates the expression n in the frame f.
 //
 // Calls in tail position don't grow the Go stack: a call, a where's body
@@ -68,8 +86,8 @@ func (p *program) run(n cnode, f frame) Value {
 		d := p.data[n]
 		switch p.ops[n] {
 		case opCall:
-			fn := p.run(cnode(d.a), f)
-			arg := p.run(cnode(d.b), f)
+			fn := p.value(cnode(d.a), &f)
+			arg := p.value(cnode(d.b), &f)
 			var v Value
 			p, n, f, v = enter(fn, arg)
 			if v != nil {
@@ -78,19 +96,19 @@ func (p *program) run(n cnode, f frame) Value {
 
 		case opCallN:
 			r := p.range_(n)
-			fn := p.run(cnode(r[0]), f)
+			fn := p.value(cnode(r[0]), &f)
 			argNodes := r[1:]
 			// A builtin that takes exactly these arguments gets them as Go
 			// arguments.
 			if g, ok := fn.(BuiltInFunc); ok && g.arity == len(argNodes) {
 				switch {
 				case g.two != nil:
-					a := p.run(cnode(argNodes[0]), f)
-					return g.two(a, p.run(cnode(argNodes[1]), f))
+					a := p.value(cnode(argNodes[0]), &f)
+					return g.two(a, p.value(cnode(argNodes[1]), &f))
 				case g.three != nil:
-					a := p.run(cnode(argNodes[0]), f)
-					b := p.run(cnode(argNodes[1]), f)
-					return g.three(a, b, p.run(cnode(argNodes[2]), f))
+					a := p.value(cnode(argNodes[0]), &f)
+					b := p.value(cnode(argNodes[1]), &f)
+					return g.three(a, b, p.value(cnode(argNodes[2]), &f))
 				}
 			}
 			// A script function that takes exactly these arguments gets
@@ -99,7 +117,7 @@ func (p *program) run(n cnode, f frame) Value {
 				if size, _, arity, _ := sf.prog.lambda(sf.node); arity == len(argNodes) {
 					g := sf.frame(size)
 					for i, x := range argNodes {
-						g.slots[i] = p.run(cnode(x), f)
+						g.slots[i] = p.value(cnode(x), &f)
 					}
 					p, f = sf.prog, g
 					n = p.arm(sf, f)
@@ -108,7 +126,7 @@ func (p *program) run(n cnode, f frame) Value {
 			}
 			args := make([]Value, len(argNodes))
 			for i, x := range argNodes {
-				args[i] = p.run(cnode(x), f)
+				args[i] = p.value(cnode(x), &f)
 			}
 			var v Value
 			p, n, f, v = enterN(fn, args)
@@ -118,7 +136,7 @@ func (p *program) run(n cnode, f frame) Value {
 
 		case opMatch:
 			r := p.range_(n)
-			v := p.run(cnode(r[0]), f)
+			v := p.value(cnode(r[0]), &f)
 			arms := r[1:]
 			i := 0
 			for i < len(arms) && !p.match(cnode(arms[i]), v, f.slots) {
@@ -138,7 +156,7 @@ func (p *program) run(n cnode, f frame) Value {
 					f.slots[-1-s] = ScriptFunc{prog: p, node: l, caps: make([]Value, len(p.captures(l)))}
 					continue
 				}
-				f.slots[binds[i]] = p.run(cnode(binds[i+1]), f)
+				f.slots[binds[i]] = p.value(cnode(binds[i+1]), &f)
 			}
 			n = body
 
@@ -161,8 +179,8 @@ func (p *program) run(n cnode, f frame) Value {
 		// The checker guarantees the operands' types. Overloaded operators still
 		// choose by the left operand at runtime, until types reach the core.
 		case opAdd, opSub, opMul:
-			l := p.run(cnode(d.a), f)
-			r := p.run(cnode(d.b), f)
+			l := p.value(cnode(d.a), &f)
+			r := p.value(cnode(d.b), &f)
 			if l, ok := l.(Int); ok {
 				return arith(p.ops[n], l, r.(Int))
 			}
@@ -172,8 +190,8 @@ func (p *program) run(n cnode, f frame) Value {
 		// append must copy rather than write into spare capacity that other
 		// values share.
 		case opAppend:
-			l := p.run(cnode(d.a), f)
-			r := p.run(cnode(d.b), f)
+			l := p.value(cnode(d.a), &f)
+			r := p.value(cnode(d.b), &f)
 			if l, ok := l.(Bytes); ok {
 				return append(slices.Clip(l), byte(r.(Byte)))
 			}
@@ -181,16 +199,16 @@ func (p *program) run(n cnode, f frame) Value {
 			return List{append(slices.Clip(ls), r)}
 
 		case opPrepend:
-			r := p.run(cnode(d.b), f)
-			l := p.run(cnode(d.a), f)
+			r := p.value(cnode(d.b), &f)
+			l := p.value(cnode(d.a), &f)
 			if r, ok := r.(Bytes); ok {
 				return append(Bytes{byte(l.(Byte))}, r...)
 			}
 			return List{append([]Value{l}, r.(List).elements...)}
 
 		case opConcat:
-			l := p.run(cnode(d.a), f)
-			r := p.run(cnode(d.b), f)
+			l := p.value(cnode(d.a), &f)
+			r := p.value(cnode(d.b), &f)
 			switch l := l.(type) {
 			case Bytes:
 				return append(slices.Clip(l), r.(Bytes)...)
@@ -201,7 +219,7 @@ func (p *program) run(n cnode, f frame) Value {
 
 		case opCompose:
 			first, second, _ := p.compose(n)
-			fns := []Value{p.run(first, f), p.run(second, f)}
+			fns := []Value{p.value(first, &f), p.value(second, &f)}
 			return ScriptFunc{prog: p, node: n, caps: fns}
 
 		case opLambda:
@@ -225,34 +243,34 @@ func (p *program) run(n cnode, f frame) Value {
 			if base == none {
 				values := make([]Value, len(fields)/2)
 				for i := 0; i < len(fields); i += 2 {
-					values[fields[i]] = p.run(cnode(fields[i+1]), f)
+					values[fields[i]] = p.value(cnode(fields[i+1]), &f)
 				}
 				return Record{s, values}
 			}
 			// A record based on another, with some of its fields updated.
-			r := p.run(base, f).(Record)
+			r := p.value(base, &f).(Record)
 			values := slices.Clone(r.values)
 			for i := 0; i < len(fields); i += 2 {
-				values[r.shape.index(label.ID(fields[i]))] = p.run(cnode(fields[i+1]), f)
+				values[r.shape.index(label.ID(fields[i]))] = p.value(cnode(fields[i+1]), &f)
 			}
 			return Record{r.shape, values}
 
 		case opAccess:
-			r := p.run(cnode(d.a), f).(Record)
+			r := p.value(cnode(d.a), &f).(Record)
 			return r.values[r.shape.index(label.ID(d.b))]
 
 		case opList:
 			elems := p.range_(n)
 			values := make([]Value, len(elems))
 			for i, x := range elems {
-				values[i] = p.run(cnode(x), f)
+				values[i] = p.value(cnode(x), &f)
 			}
 			return List{values}
 
 		case opVariant:
 			v := Variant{tag: label.ID(d.a)}
 			if cnode(d.b) != none {
-				v.value = p.run(cnode(d.b), f)
+				v.value = p.value(cnode(d.b), &f)
 			}
 			return v
 
