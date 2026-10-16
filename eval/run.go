@@ -12,6 +12,7 @@ import (
 type program struct {
 	*core
 	evalImport EvalImport
+	compiled
 }
 
 // A frame holds the slots of one call of a function, or of the top level,
@@ -55,7 +56,23 @@ func (f frame) capture(caps []Value, from []int32) {
 // eval runs the program in a new top frame.
 func (p *program) eval() (v Value, err error) {
 	defer catch(&err)
-	return p.run(p.root, frame{slots: make([]Value, p.top)}), nil
+	return p.runBody(p.root, frame{slots: make([]Value, p.top)}), nil
+}
+
+// runBody evaluates n, a function's body or the root, in f.
+func (p *program) runBody(n cnode, f frame) Value {
+	if closures {
+		return trampoline(p.body(n), f)
+	}
+	return p.run(n, f)
+}
+
+// matches matches v against the pattern n of a lambda's arm.
+func (p *program) matches(n cnode, v Value, f []Value) bool {
+	if closures {
+		return p.pat(n)(v, f)
+	}
+	return p.match(n, v, f)
 }
 
 // value evaluates the operand n in f. Most operands read a slot, which
@@ -296,7 +313,7 @@ func apply(fn, arg Value) Value {
 	if v != nil {
 		return v
 	}
-	return p.run(n, f)
+	return p.runBody(n, f)
 }
 
 // call calls the function fn with args, one or more, whether it takes as
@@ -306,7 +323,7 @@ func call(fn Value, args ...Value) Value {
 	if v != nil {
 		return v
 	}
-	return p.run(n, f)
+	return p.runBody(n, f)
 }
 
 // call2 is call for two arguments, which a builtin or a script function
@@ -319,10 +336,18 @@ func call2(fn, a, b Value) Value {
 		}
 	case ScriptFunc:
 		if len(g.args) == 0 && !g.composition() {
+			if closures {
+				if l := g.prog.lam(g.node); l.arity == 2 {
+					f := g.frame(l.size)
+					f.slots[0], f.slots[1] = a, b
+					return trampoline(l.enterN(g, f), f)
+				}
+				break
+			}
 			if size, _, arity, _ := g.prog.lambda(g.node); arity == 2 {
 				f := g.frame(size)
 				f.slots[0], f.slots[1] = a, b
-				return g.prog.run(g.prog.arm(g, f), f)
+				return g.prog.runBody(g.prog.arm(g, f), f)
 			}
 		}
 	}
@@ -366,7 +391,7 @@ func enter(fn, arg Value) (p *program, n cnode, f frame, v Value) {
 				f.slots = make([]Value, size)
 			}
 			for i := 0; i < len(arms); i += 2 {
-				if p.match(cnode(arms[i]), arg, f.slots) {
+				if p.matches(cnode(arms[i]), arg, f.slots) {
 					return p, cnode(arms[i+1]), f, nil
 				}
 			}
@@ -421,7 +446,7 @@ func (p *program) arm(sf ScriptFunc, f frame) cnode {
 	_, _, arity, arms := p.lambda(sf.node)
 	args := f.slots[:arity]
 	for i := 0; i < len(arms); i += arity + 1 {
-		if p.matchAll(arms[i:i+arity], args, f.slots) {
+		if p.matchArm(arms[i:i+arity], args, f.slots) {
 			return cnode(arms[i+arity])
 		}
 	}
@@ -529,6 +554,16 @@ func (p *program) match(n cnode, v Value, f []Value) bool {
 			p.matchAll(elems, l.elements[split:], f)
 	}
 	return false
+}
+
+// matchArm matches each argument against the pattern of an arm at the same index.
+func (p *program) matchArm(pats []int32, vs []Value, f []Value) bool {
+	for i, x := range pats {
+		if !p.matches(cnode(x), vs[i], f) {
+			return false
+		}
+	}
+	return true
 }
 
 // matchAll matches each value against the pattern at the same index.

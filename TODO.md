@@ -27,7 +27,8 @@ multi-pattern arms, where-groups and pattern operators separately.
 
 ## 3. Types are dropped before evaluation
 
-- [ ] Carry the checker's types into the IR.
+- [ ] Carry the checker's types into the IR. Next up: it is evaluator
+      independent, and decides closures against `run` (section 5).
 - [ ] Choose `++` (list, text or bytes) statically instead of by the runtime
       value.
 - [ ] Use them to specialise functions per record shape (SPEC.md section 12).
@@ -72,8 +73,16 @@ builtins now return plain values and panic with a `runtimeError`, which
 
       What costs now is per-node overhead: `run` has a ~1.5 KB Go frame
       and is called for every subexpression. Reading slot operands
-      without calling `run` saved 6%. Next to try: compiling the core to
-      Go closures instead of interpreting it.
+      without calling `run` saved 6%.
+- [ ] Decide between `run` and the core compiled to Go closures
+      (eval/closures.go, built with `-tags closures`). Untyped, closures
+      beat `run` by 4% on AccessLog: dispatch was not the cost, decoding
+      each lambda on every call was, which a compiled table of arms per
+      lambda removes. fib is still 9% slower (`apply`/`enter` decode the
+      lambda; a non-tail call takes two hops). Next: types in core
+      (section 3), then specialise in closures only (int arithmetic,
+      access on a known shape, jump tables on closed enums) and compare.
+      Without the tag, `run` is as fast as before the prototype.
 - [ ] Explore lambda set inference (as in Roc): the checker tracks which
       closures can reach each function type, so calls compile to a switch
       over known closures instead of an indirect call. Likely a lot of work.
