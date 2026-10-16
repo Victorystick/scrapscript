@@ -20,6 +20,11 @@ import (
 // slot is written once, except that the arms of a match share slots: only
 // one arm's names are bound at a time.
 //
+// Closures are flat: a lambda copies the values of the names it uses from
+// outside it into its captures when it is made, since values never
+// change. Code reads a name either from a slot of its own frame or from a
+// capture of the function that it runs in.
+//
 // Like the AST, the core is stored as parallel arrays indexed by cnode.
 
 // cnode is the index of a node in a core.
@@ -38,7 +43,8 @@ const (
 
 	// Expressions.
 	opConst   // A: the index of a literal or builtin in consts.
-	opLocal   // A: the depth of the frame, how many out from the current one. B: the slot.
+	opLocal   // A: the slot in the current frame.
+	opCapture // A: the index of the capture of the running function.
 	opImport  // The value of the scrap that the AST node refers to.
 	opCall    // A: the function. B: the argument.
 	opCallN   // A..B: the function, then two or more arguments.
@@ -49,9 +55,10 @@ const (
 	opPrepend // a >+ b
 	opConcat  // a ++ b
 	opCompose // A..B: the function applied first, then second, then its uses.
-	opLambda  // A..B: its frame's size, its uses, its arity n, then n patterns and a body per arm. If n > 1, its frame's first n slots are its arguments.
+	opLambda  // A..B: its frame's size, its uses, its arity n, its number of captures k, then k captures, then n patterns and a body per arm. If n > 1, its frame's first n slots are its arguments.
 	opMatch   // A..B: the value matched, then a pattern and a body per arm. Its patterns bind slots of the current frame.
-	opWhere   // A..B: the body, then a slot and value per binding, in evaluation order.
+	opWhere   // A..B: the body, then a slot and value per binding, in evaluation order, with recursive ones' closures made first.
+	opFill    // A: a lambda. B: the slot of the closure made for it before, whose captures it fills in.
 	opRecord  // A..B: the record it is based on or none, its shape or -1 if it has a base, then a key and value per field.
 	opAccess  // A: the record. B: the key, a label.ID.
 	opList    // A..B: the elements.
@@ -123,18 +130,18 @@ type binder struct {
 	types int32
 }
 
-// A ref is what an Ident node in printed code refers to: a binder of a
-// frame, depth frames out from the one the code is in, or a builtin if b is
-// -1.
+// A ref is what an Ident node in printed code refers to: a binder, or a
+// builtin if b is -1. In a lambda's code, a value binder's value is the
+// lambda's capture cap; otherwise cap is -1.
 type ref struct {
 	ident ast.Node
-	depth int
 	b     int32
+	cap   int32
 }
 
 // uses records what code that prints as part of a value refers to.
 type uses struct {
-	free  []ref    // its free names, from the frame it is in
+	free  []ref    // its free names, from outside the code
 	names []string // every name in it, bound or free
 	home  int32    // the binder whose value it is, which it prints as, or -1
 }
@@ -149,7 +156,15 @@ func (c *core) range_(n cnode) []int32 {
 // and then its body.
 func (c *core) lambda(n cnode) (size int, u int32, arity int, arms []int32) {
 	r := c.range_(n)
-	return int(r[0]), r[1], int(r[2]), r[3:]
+	return int(r[0]), r[1], int(r[2]), r[4+r[3]:]
+}
+
+// Captures returns what a lambda captures when it is made, in the order of
+// its captures: a slot s of the frame it is made in as s, or capture i of
+// the function it is made in as -1-i.
+func (c *core) captures(n cnode) []int32 {
+	r := c.range_(n)
+	return r[4 : 4+r[3]]
 }
 
 // Compose returns the functions of a composition, in the order they are
@@ -160,7 +175,10 @@ func (c *core) compose(n cnode) (first, second cnode, u int32) {
 }
 
 // Where returns a where's body, and its bindings as pairs of slot and
-// value.
+// value. The bindings of a recursive component are functions that may
+// capture each other, so before them come pairs of -1 minus a slot and a
+// lambda: a closure of that lambda, whose captures its binding's value
+// fills in later, with opFill.
 func (c *core) where(n cnode) (body cnode, binds []int32) {
 	r := c.range_(n)
 	return cnode(r[0]), r[1:]
@@ -202,6 +220,7 @@ func compile(se *ast.SourceExpr, globals Vars, shapes *shapeTable) (*core, error
 		builtins: make(map[string]int32),
 	}
 	c.node(opNone, 0, 0, ast.None)
+	c.fns = [][]capture{nil}
 	c.root = c.expr(se.Expr)
 	if c.err != nil {
 		return nil, c.err
@@ -220,6 +239,8 @@ type compiler struct {
 	// The frame being compiled: how deeply it is nested, its next free
 	// slot and its size so far.
 	level, next, size int
+	// The captures of the function of each frame being compiled, by level.
+	fns [][]capture
 
 	// The names in scope, innermost last, of values and of types.
 	values, types []entry
@@ -233,12 +254,20 @@ type entry struct {
 	b     int32 // the binder, or -1 for a type variable
 }
 
+// A capture is a binder that a function captures, and what it captures it
+// from, as captures says.
+type capture struct {
+	b, from int32
+}
+
 // A root is printed code being compiled, which collects into uses[u].
 type root struct {
 	u int32
 	// The frame it is in, and the number of names in scope outside it.
 	level         int
 	values, types int
+	// Whether it is a lambda, whose frame is one level further in.
+	lambda bool
 }
 
 func (c *compiler) error(n ast.Node, msg string) {
@@ -310,11 +339,12 @@ func (c *compiler) shape(fields ast.Fields) (int32, []int32) {
 }
 
 // open starts collecting what code in the current frame refers to into a
-// new uses, returning its index; close stops it.
-func (c *compiler) open() int32 {
+// new uses, returning its index; close stops it. lambda says whether the
+// code is a lambda.
+func (c *compiler) open(lambda bool) int32 {
 	u := int32(len(c.uses))
 	c.uses = append(c.uses, uses{home: -1})
-	c.roots = append(c.roots, root{u, c.level, len(c.values), len(c.types)})
+	c.roots = append(c.roots, root{u, c.level, len(c.values), len(c.types), lambda})
 	return u
 }
 
@@ -339,12 +369,33 @@ func (c *compiler) refer(x ast.Node, scope []entry, i int, types bool) {
 		}
 		u := &c.uses[r.u]
 		if i < 0 {
-			u.free = append(u.free, ref{x, 0, -1})
+			u.free = append(u.free, ref{x, -1, -1})
 		} else if i < mark {
 			e := scope[i]
-			u.free = append(u.free, ref{x, r.level - e.level, e.b})
+			cap := int32(-1)
+			if r.lambda && !types {
+				cap = c.capture(r.level+1, e)
+			}
+			u.free = append(u.free, ref{x, e.b, cap})
 		}
 	}
+}
+
+// capture returns the index of the capture of e by the function of the
+// frame at level, which e is bound outside of, adding it to the functions
+// between them the first time.
+func (c *compiler) capture(level int, e entry) int32 {
+	for i, x := range c.fns[level] {
+		if x.b == e.b {
+			return int32(i)
+		}
+	}
+	from := int32(c.binders[e.b].slot)
+	if e.level < level-1 {
+		from = -1 - c.capture(level-1, e)
+	}
+	c.fns[level] = append(c.fns[level], capture{e.b, from})
+	return int32(len(c.fns[level]) - 1)
 }
 
 func lookup(scope []entry, name string) int {
@@ -397,7 +448,10 @@ func (c *compiler) expr(x ast.Node) cnode {
 			return c.node(opConst, c.builtin(x, name), 0, x)
 		}
 		e := c.values[i]
-		return c.node(opLocal, int32(c.level-e.level), int32(c.binders[e.b].slot), x)
+		if e.level < c.level {
+			return c.node(opCapture, c.capture(c.level, e), 0, x)
+		}
+		return c.node(opLocal, int32(c.binders[e.b].slot), 0, x)
 
 	case ast.Binary:
 		return c.binary(x)
@@ -476,9 +530,11 @@ func (c *compiler) binary(x ast.Node) cnode {
 		if op == token.LCOMP {
 			left, right = right, left
 		}
-		u := c.open()
+		// A composition prints as its functions, so its uses has only its
+		// home.
+		u := int32(len(c.uses))
+		c.uses = append(c.uses, uses{home: -1})
 		first, second := c.expr(left), c.expr(right)
-		c.close()
 		return c.span(opCompose, []int32{int32(first), int32(second), u}, x)
 	}
 	o, ok := binaryOps[op]
@@ -560,9 +616,10 @@ func (c *compiler) match(fn, arg ast.Node, arms []ast.Node) cnode {
 // in a match function, its arguments too. A Func node is a match function
 // of one arm with one pattern. The arms' slots overlap.
 func (c *compiler) fn(x ast.Node) cnode {
-	u := c.open()
+	u := c.open(true)
 	level, next, size := c.level, c.next, c.size
 	c.level, c.next, c.size = c.level+1, 0, 0
+	c.fns = append(c.fns[:c.level], nil)
 
 	var params []ast.Node
 	body := x
@@ -586,7 +643,7 @@ func (c *compiler) fn(x ast.Node) cnode {
 	}
 	c.size = args
 
-	xs := []int32{0, u, int32(arity)}
+	var xs []int32
 	for _, a := range arms {
 		c.next = args
 		scope := len(c.values)
@@ -607,11 +664,15 @@ func (c *compiler) fn(x ast.Node) cnode {
 		xs = append(xs, int32(c.expr(body)))
 		c.values = c.values[:scope]
 	}
-	xs[0] = int32(c.size)
+	caps := c.fns[c.level]
+	head := []int32{int32(c.size), u, int32(arity), int32(len(caps))}
+	for _, x := range caps {
+		head = append(head, x.from)
+	}
 
 	c.level, c.next, c.size = level, next, size
 	c.close()
-	return c.span(opLambda, xs, x)
+	return c.span(opLambda, append(head, xs...), x)
 }
 
 // group compiles a where-group, whose bindings are mutually recursive, in
@@ -634,7 +695,7 @@ func (c *compiler) group(x ast.Node) cnode {
 	for _, w := range binds {
 		_, _, typ, val := se.Where(w)
 		b := byNode[w]
-		u := c.open()
+		u := c.open(false)
 		if typ != ast.None {
 			c.typ(typ)
 		}
@@ -647,6 +708,7 @@ func (c *compiler) group(x ast.Node) cnode {
 
 	xs := []int32{0}
 	for _, comp := range se.Components(binds, nil) {
+		var made []int32
 		for _, w := range comp.Binds {
 			_, _, _, val := se.Where(w)
 			b := byNode[w]
@@ -659,7 +721,18 @@ func (c *compiler) group(x ast.Node) cnode {
 				_, _, u := c.compose(v)
 				c.uses[u].home = b
 			}
-			xs = append(xs, int32(c.binders[b].slot), int32(v))
+			slot := int32(c.binders[b].slot)
+			if comp.Recursive {
+				var l cnode
+				v, l = c.fill(v, slot)
+				made = append(made, -1-slot, int32(l))
+			}
+			xs = append(xs, slot, int32(v))
+		}
+		if made != nil {
+			// The closures go before the bindings, which capture them.
+			start := len(xs) - 2*len(comp.Binds)
+			xs = slices.Insert(xs, start, made...)
 		}
 	}
 	xs[0] = int32(c.expr(body))
@@ -668,8 +741,19 @@ func (c *compiler) group(x ast.Node) cnode {
 	return c.span(opWhere, xs, x)
 }
 
-// pattern compiles a pattern, binding its names in the current frame.
-// Names in c.values from scope onwards are bound by the same pattern.
+// fill makes the value v of a recursive binding in slot fill in the
+// closure made for it before, instead of making one, and returns it and
+// its lambda. The checker only lets functions be recursive, so the value
+// is a lambda, perhaps as the body of a where.
+func (c *compiler) fill(v cnode, slot int32) (cnode, cnode) {
+	if c.ops[v] == opWhere {
+		body, l := c.fill(cnode(c.extra[c.data[v].a]), slot)
+		c.extra[c.data[v].a] = int32(body)
+		return v, l
+	}
+	return c.node(opFill, int32(v), slot, c.at[v]), v
+}
+
 // param compiles the pattern x of argument i of a function of arity
 // arguments. If it takes more than one, they are in its first slots, and a
 // name binds the argument's own slot.
@@ -685,6 +769,8 @@ func (c *compiler) param(x ast.Node, i, arity, scope int) cnode {
 	return c.node(patArg, int32(i), 0, x)
 }
 
+// pattern compiles a pattern, binding its names in the current frame.
+// Names in c.values from scope onwards are bound by the same pattern.
 func (c *compiler) pattern(x ast.Node, scope int) cnode {
 	se := c.src
 	switch se.Kind(x) {

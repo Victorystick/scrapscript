@@ -15,10 +15,9 @@ type program struct {
 }
 
 // A frame holds the slots of one call of a function, or of the top level,
-// and the frame that the function was made in.
+// and the captures of the function.
 type frame struct {
-	slots  []Value
-	parent *frame
+	slots, caps []Value
 }
 
 // A runtimeError is a failure during evaluation. It unwinds to the edge of
@@ -42,10 +41,21 @@ func catch(err *error) {
 	}
 }
 
+// capture copies what a lambda captures, from, out of f into caps.
+func (f frame) capture(caps []Value, from []int32) {
+	for i, x := range from {
+		if x >= 0 {
+			caps[i] = f.slots[x]
+		} else {
+			caps[i] = f.caps[-1-x]
+		}
+	}
+}
+
 // eval runs the program in a new top frame.
 func (p *program) eval() (v Value, err error) {
 	defer catch(&err)
-	return p.run(p.root, &frame{slots: make([]Value, p.top)}), nil
+	return p.run(p.root, frame{slots: make([]Value, p.top)}), nil
 }
 
 // run evaluates the expression n in the frame f.
@@ -53,7 +63,7 @@ func (p *program) eval() (v Value, err error) {
 // Calls in tail position don't grow the Go stack: a call, a where's body
 // and a matching arm's body continue the loop in place of the expression,
 // so a function that calls itself last runs in constant stack.
-func (p *program) run(n cnode, f *frame) Value {
+func (p *program) run(n cnode, f frame) Value {
 	for {
 		d := p.data[n]
 		switch p.ops[n] {
@@ -111,7 +121,7 @@ func (p *program) run(n cnode, f *frame) Value {
 			v := p.run(cnode(r[0]), f)
 			arms := r[1:]
 			i := 0
-			for i < len(arms) && !p.match(cnode(arms[i]), v, f) {
+			for i < len(arms) && !p.match(cnode(arms[i]), v, f.slots) {
 				i += 2
 			}
 			if i == len(arms) {
@@ -122,6 +132,12 @@ func (p *program) run(n cnode, f *frame) Value {
 		case opWhere:
 			body, binds := p.where(n)
 			for i := 0; i < len(binds); i += 2 {
+				if s := binds[i]; s < 0 {
+					// A closure of a recursive binding, before its captures.
+					l := cnode(binds[i+1])
+					f.slots[-1-s] = ScriptFunc{prog: p, node: l, caps: make([]Value, len(p.captures(l)))}
+					continue
+				}
 				f.slots[binds[i]] = p.run(cnode(binds[i+1]), f)
 			}
 			n = body
@@ -130,10 +146,10 @@ func (p *program) run(n cnode, f *frame) Value {
 			return p.consts[d.a]
 
 		case opLocal:
-			for range d.a {
-				f = f.parent
-			}
-			return f.slots[d.b]
+			return f.slots[d.a]
+
+		case opCapture:
+			return f.caps[d.a]
 
 		case opImport:
 			v, err := p.evalImport(p.at[n])
@@ -186,10 +202,23 @@ func (p *program) run(n cnode, f *frame) Value {
 		case opCompose:
 			first, second, _ := p.compose(n)
 			fns := []Value{p.run(first, f), p.run(second, f)}
-			return ScriptFunc{prog: p, node: n, env: f, args: fns}
+			return ScriptFunc{prog: p, node: n, caps: fns}
 
 		case opLambda:
-			return ScriptFunc{prog: p, node: n, env: f}
+			from := p.captures(n)
+			if len(from) == 0 {
+				return ScriptFunc{prog: p, node: n}
+			}
+			sf := ScriptFunc{prog: p, node: n, caps: make([]Value, len(from))}
+			f.capture(sf.caps, from)
+			return sf
+
+		case opFill:
+			// Copies of the closure share its captures, so this fills them
+			// in for the ones that the binding's value has captured.
+			sf := f.slots[d.b].(ScriptFunc)
+			f.capture(sf.caps, p.captures(cnode(d.a)))
+			return sf
 
 		case opRecord:
 			base, s, fields := p.record(n)
@@ -288,38 +317,38 @@ func call2(fn, a, b Value) Value {
 // arm that matches all its arguments, in a new frame f, for its program p
 // to evaluate. A composition applies its first function and enters its
 // second.
-func enter(fn, arg Value) (p *program, n cnode, f *frame, v Value) {
+func enter(fn, arg Value) (p *program, n cnode, f frame, v Value) {
 	for {
 		switch g := fn.(type) {
 		case BuiltInFunc:
 			if g.arity == 1 {
-				return nil, none, nil, g.one(arg)
+				return nil, none, f, g.one(arg)
 			}
-			return nil, none, nil, Partial{g, []Value{arg}}
+			return nil, none, f, Partial{g, []Value{arg}}
 		case Partial:
 			// Each partial application has its own arguments.
 			args := append(g.args[:len(g.args):len(g.args)], arg)
 			if len(args) == g.fn.arity {
-				return nil, none, nil, g.fn.invoke(args)
+				return nil, none, f, g.fn.invoke(args)
 			}
-			return nil, none, nil, Partial{g.fn, args}
+			return nil, none, f, Partial{g.fn, args}
 		}
 		sf := fn.(ScriptFunc)
 		if sf.composition() {
-			arg = apply(sf.args[0], arg)
-			fn = sf.args[1]
+			arg = apply(sf.caps[0], arg)
+			fn = sf.caps[1]
 			continue
 		}
 		size, _, arity, arms := sf.prog.lambda(sf.node)
 		if arity == 1 {
 			// The common case: match arg as it is, without storing it.
 			p = sf.prog
-			f = &frame{parent: sf.env}
+			f = frame{caps: sf.caps}
 			if size > 0 {
 				f.slots = make([]Value, size)
 			}
 			for i := 0; i < len(arms); i += 2 {
-				if p.match(cnode(arms[i]), arg, f) {
+				if p.match(cnode(arms[i]), arg, f.slots) {
 					return p, cnode(arms[i+1]), f, nil
 				}
 			}
@@ -327,7 +356,7 @@ func enter(fn, arg Value) (p *program, n cnode, f *frame, v Value) {
 		}
 		if len(sf.args)+1 < arity {
 			sf.args = append(sf.args[:len(sf.args):len(sf.args)], arg)
-			return nil, none, nil, sf
+			return nil, none, f, sf
 		}
 		f = sf.frame(size)
 		copy(f.slots, sf.args)
@@ -339,11 +368,11 @@ func enter(fn, arg Value) (p *program, n cnode, f *frame, v Value) {
 // enterN is enter for one or more arguments args at once. A function that
 // takes exactly as many is called with all of them, without applying it to
 // one at a time.
-func enterN(fn Value, args []Value) (p *program, n cnode, f *frame, v Value) {
+func enterN(fn Value, args []Value) (p *program, n cnode, f frame, v Value) {
 	switch g := fn.(type) {
 	case BuiltInFunc:
 		if g.arity == len(args) && g.arity > 1 {
-			return nil, none, nil, g.invoke(args)
+			return nil, none, f, g.invoke(args)
 		}
 	case ScriptFunc:
 		if len(g.args) == 0 && len(args) > 1 && !g.composition() {
@@ -363,18 +392,18 @@ func enterN(fn Value, args []Value) (p *program, n cnode, f *frame, v Value) {
 
 // frame returns a new frame of size slots for a call of the lambda sf,
 // which takes more than one argument.
-func (sf ScriptFunc) frame(size int) *frame {
-	return &frame{parent: sf.env, slots: make([]Value, size)}
+func (sf ScriptFunc) frame(size int) frame {
+	return frame{slots: make([]Value, size), caps: sf.caps}
 }
 
 // arm returns the body of the first arm of the lambda sf that matches its
 // arguments, the first slots of f, binding the arm's names in f. sf takes
 // more than one argument.
-func (p *program) arm(sf ScriptFunc, f *frame) cnode {
+func (p *program) arm(sf ScriptFunc, f frame) cnode {
 	_, _, arity, arms := p.lambda(sf.node)
 	args := f.slots[:arity]
 	for i := 0; i < len(arms); i += arity + 1 {
-		if p.matchAll(arms[i:i+arity], args, f) {
+		if p.matchAll(arms[i:i+arity], args, f.slots) {
 			return cnode(arms[i+arity])
 		}
 	}
@@ -386,13 +415,13 @@ func (p *program) arm(sf ScriptFunc, f *frame) cnode {
 }
 
 // match matches v against the pattern n, writing the names it binds into
-// f. An arm that fails may have written some of its slots; the next arm
-// overwrites the ones it uses.
-func (p *program) match(n cnode, v Value, f *frame) bool {
+// the slots f. An arm that fails may have written some of its slots; the
+// next arm overwrites the ones it uses.
+func (p *program) match(n cnode, v Value, f []Value) bool {
 	d := p.data[n]
 	switch p.ops[n] {
 	case patBind:
-		f.slots[d.a] = v
+		f[d.a] = v
 		return true
 
 	case patArg:
@@ -485,7 +514,7 @@ func (p *program) match(n cnode, v Value, f *frame) bool {
 }
 
 // matchAll matches each value against the pattern at the same index.
-func (p *program) matchAll(pats []int32, vs []Value, f *frame) bool {
+func (p *program) matchAll(pats []int32, vs []Value, f []Value) bool {
 	for i, x := range pats {
 		if !p.match(cnode(x), vs[i], f) {
 			return false

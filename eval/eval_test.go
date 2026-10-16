@@ -86,6 +86,9 @@ var expressions = []struct {
 	{`(f << g) 3 ; f = x -> x * 2 ; g = x -> x + 1`, `8`},
 	{`(f >> g) 3 ; f = x -> x * 2 ; g = x -> x + 1`, `7`},
 	{`3 |> f << g ; f = x -> [x] ; g = x -> x + 1`, `[ 4 ]`},
+	// Closures in a recursive function's where capture it before it is done.
+	{`f 3 ; f = (| 0 -> 0 | n -> g (n - 1) ; g = m -> f m)`, `0`},
+	{`f 3 ; f = (| 0 -> 0 | n -> r.k (n - 1) ; r = { k = m -> f m })`, `0`},
 	{`(x -> x) (y -> y)`, `y -> y`},
 	{`#just 2 |> | #just 2 -> "two" | #just _ -> "other" | #no -> "x"`, `"two"`},
 	// {`| "hey" -> ""

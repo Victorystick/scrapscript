@@ -68,14 +68,16 @@ type Partial struct {
 }
 
 // A user-defined function: a lambda or composition node of a program,
-// closed over the frame it was made in.
+// with what it captured when it was made.
 type ScriptFunc struct {
 	prog *program
 	node cnode
-	env  *frame
+	// For a lambda, the values of the names it uses from outside it, in
+	// the order of its captures. For a composition, its functions, in the
+	// order they are applied.
+	caps []Value
 	// For a lambda, the arguments it has been applied to, fewer than its
-	// arity. For a composition, its functions, in the order they are
-	// applied. One field serves both to keep ScriptFunc small.
+	// arity.
 	args []Value
 	// The hash reference that it was imported by, which it prints as, if it
 	// is the value of a published scrap.

@@ -18,8 +18,7 @@ import (
 //
 //	1, "a", list/length  a constant: a literal or a builtin, as it prints
 //	@s                   reads slot s of the current frame
-//	@d.s                 reads slot s of the frame d out from the current
-//	                     one: @1.0 is slot 0 of the frame around it
+//	&i                   reads capture i of the running function
 //	(f x)                a call; pipes are calls too
 //	(+ a b)              an operator: + - * +< >+ ++
 //	{ k = v ..r }        a record, based on r if ..r is there
@@ -29,10 +28,16 @@ import (
 //	(body ; >s v ; …)    a where: each binding writes the value v into slot
 //	                     s of the current frame, in evaluation order, then
 //	                     body is evaluated
+//	… ; >s new           before a recursive component's bindings, makes
+//	                     a closure in slot s without its captures
+//	(fill @s l)          fills in the captures of the closure in slot s,
+//	                     made for the lambda l, and is that closure
 //	(>> uses f g)        a composition, f applied first; << is flipped
-//	(fn/n uses | p -> b | …)
-//	                     a lambda whose frame has n slots, and its arms: a
-//	                     pattern and a body each; a Func node has one arm
+//	(fn/n [c, …] uses | p -> b | …)
+//	                     a lambda whose frame has n slots, what it captures
+//	                     when it is made (@s or &i, read where it is made),
+//	                     and its arms: a pattern and a body each; a Func
+//	                     node has one arm
 //
 // Patterns:
 //
@@ -53,25 +58,21 @@ import (
 // it as a value. It lists its free names, once per occurrence in source
 // order, and then its home:
 //
-//	^name@d.s            a value binder named name, in slot s of the frame
-//	                     d out from the one the closure is made in. A
-//	                     lambda's body runs in its own frame, one further
-//	                     in, so a read of the same name there is one
-//	                     deeper: in (fn/1 ^n@0.1 | >0 -> @1.1), ^n@0.1 and
-//	                     @1.1 are the same n. A composition has no frame,
-//	                     so its reads have the same depth
-//	^name@d              a sort binding, which has no slot; these are only
+//	^name&i              a value binder named name, which is the lambda's
+//	                     capture i
+//	^name:               a sort binding, which has no value; these are only
 //	                     in annotations and types
 //	^name                a builtin
 //	home=f               the where-binding f whose value it is, if it is one,
 //	                     which it prints as
 //
 // Names bound within the code, by its own patterns or where-groups, are not
-// free and aren't listed. For example:
+// free and aren't listed. A composition prints as its functions, so it
+// lists only its home. For example:
 //
-//	f = x -> x + n ; n = 1   (fn/1 ^n@0.1 home=f | >0 -> (+ @0 @1.1))
+//	f = x -> x + n ; n = 1   (fn/1 [@1] ^n&0 home=f | >0 -> (+ @0 &0))
 //	f = x -> x               (fn/1 home=f | >0 -> @0)
-//	(x -> x + n) ; n = 1     (fn/1 ^n@0.0 | >0 -> (+ @0 @1.0))
+//	(x -> x + n) ; n = 1     (fn/1 [@0] ^n&0 | >0 -> (+ @0 &0))
 
 var opStrings = map[op]string{
 	opAdd: "+", opSub: "-", opMul: "*",
@@ -86,11 +87,9 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 	case opConst, patLiteral:
 		s.WriteString(printValue(c.labels, c.consts[d.a]))
 	case opLocal:
-		if d.a == 0 {
-			fmt.Fprintf(s, "@%d", d.b)
-		} else {
-			fmt.Fprintf(s, "@%d.%d", d.a, d.b)
-		}
+		fmt.Fprintf(s, "@%d", d.a)
+	case opCapture:
+		fmt.Fprintf(s, "&%d", d.a)
 	case opImport:
 		s.WriteString(c.src.NodeText(c.at[n]))
 	case opCall:
@@ -111,6 +110,16 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 	case opLambda:
 		size, u, arity, arms := c.lambda(n)
 		fmt.Fprintf(s, "(fn/%d", size)
+		if caps := c.captures(n); len(caps) > 0 {
+			s.WriteString(" [")
+			for i, x := range caps {
+				if i > 0 {
+					s.WriteString(", ")
+				}
+				from(s, x)
+			}
+			s.WriteString("]")
+		}
 		c.uses_(s, u)
 		for i := 0; i < len(arms); i += arity + 1 {
 			s.WriteString(" |")
@@ -139,6 +148,10 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 		s.WriteString("(")
 		c.dump(s, body)
 		for i := 0; i < len(binds); i += 2 {
+			if binds[i] < 0 {
+				fmt.Fprintf(s, " ; >%d new", -1-binds[i])
+				continue
+			}
 			fmt.Fprintf(s, " ; >%d ", binds[i])
 			c.dump(s, cnode(binds[i+1]))
 		}
@@ -162,6 +175,10 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 			c.dump(s, rest)
 		}
 		s.WriteString(" }")
+	case opFill:
+		fmt.Fprintf(s, "(fill @%d ", d.b)
+		c.dump(s, cnode(d.a))
+		s.WriteString(")")
 	case opAccess:
 		c.dump(s, cnode(d.a))
 		s.WriteString("." + c.labels.Name(label.ID(d.b)))
@@ -196,6 +213,15 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 	}
 }
 
+// from writes what a lambda captures, as captures returns it.
+func from(s *strings.Builder, x int32) {
+	if x >= 0 {
+		fmt.Fprintf(s, "@%d", x)
+	} else {
+		fmt.Fprintf(s, "&%d", -1-x)
+	}
+}
+
 func nodes(xs []int32) []cnode {
 	ns := make([]cnode, len(xs))
 	for i, x := range xs {
@@ -225,10 +251,10 @@ func (c *core) uses_(s *strings.Builder, u int32) {
 	for _, r := range us.free {
 		if r.b < 0 {
 			s.WriteString(" ^" + c.src.NodeText(r.ident))
-		} else if b := c.binders[r.b]; b.slot < 0 {
-			fmt.Fprintf(s, " ^%s@%d", b.name, r.depth)
+		} else if b := c.binders[r.b]; r.cap < 0 {
+			fmt.Fprintf(s, " ^%s:", b.name)
 		} else {
-			fmt.Fprintf(s, " ^%s@%d.%d", b.name, r.depth, b.slot)
+			fmt.Fprintf(s, " ^%s&%d", b.name, r.cap)
 		}
 	}
 	if us.home >= 0 {
@@ -265,10 +291,17 @@ func TestCompile(t *testing.T) {
 		{`b ; b = a ; a = 1`, `(@0 ; >1 1 ; >0 @1)`, 2},
 		// A function has its own frame; the outer one is one out.
 		{`f 2 ; f = x -> x + n ; n = 1`,
-			`((@0 2) ; >1 1 ; >0 (fn/1 ^n@0.1 home=f | >0 -> (+ @0 @1.1)))`, 2},
-		// Recursion refers to the frame the function is made in.
+			`((@0 2) ; >1 1 ; >0 (fn/1 [@1] ^n&0 home=f | >0 -> (+ @0 &0)))`, 2},
+		// A recursive function captures itself once it is made.
 		{`f ; f = | 0 -> 1 | n -> n * f (n - 1)`,
-			`(@0 ; >0 (fn/1 ^f@0.0 home=f | 0 -> 1 | >0 -> (* @0 (@1.0 (- @0 1)))))`, 1},
+			`(@0 ; >0 new ; >0 (fill @0 (fn/1 [@0] ^f&0 home=f | 0 -> 1 | >0 -> (* @0 (&0 (- @0 1))))))`, 1},
+		// Mutually recursive ones capture each other.
+		{`even ; even = | 0 -> #t | n -> odd (n - 1) ; odd = | 0 -> #f | n -> even (n - 1)`,
+			`(@0 ; >0 new ; >1 new ; >0 (fill @0 (fn/1 [@1] ^odd&0 home=even | 0 -> #t | >0 -> (&0 (- @0 1)))) ; >1 (fill @1 (fn/1 [@0] ^even&0 home=odd | 0 -> #f | >0 -> (&0 (- @0 1)))))`, 2},
+		// A recursive function's closure is made before its where, whose
+		// closures may capture it.
+		{`f ; f = (x -> g x ; g = y -> f y)`,
+			`(@0 ; >0 new ; >0 ((fill @0 (fn/1 [@1] ^g&0 | >0 -> (&0 @0))) ; >1 (fn/1 [@0] ^f&0 home=g | >0 -> (&0 @0))))`, 2},
 		// A where in a function body takes slots in the function's frame.
 		{`x -> (y ; y = x)`, `(fn/2 | >0 -> (@1 ; >1 @0))`, 0},
 		// The arms of a match share slots; the frame is the largest arm.
@@ -278,20 +311,20 @@ func TestCompile(t *testing.T) {
 		// reuses them.
 		{`| #a x -> (y ; y = x) | #b z -> z`,
 			`(fn/2 | (#a >0) -> (@1 ; >1 @0) | (#b >0) -> @0)`, 0},
-		// An inner function's free names are free in the outer one too,
-		// one frame further out; names bound inside it are not.
+		// An inner function's free names are captured by the outer one too,
+		// for it to capture them from; names bound inside it are not.
 		{`(a -> (g ; g = b -> a + b + n)) ; n = 1`,
-			`((fn/2 ^n@0.0 | >0 -> (@1 ; >1 (fn/1 ^a@0.0 ^n@1.0 home=g | >0 -> (+ (+ @1.0 @0) @2.0)))) ; >0 1)`, 1},
+			`((fn/2 [@0] ^n&0 | >0 -> (@1 ; >1 (fn/1 [@0, &0] ^a&0 ^n&1 home=g | >0 -> (+ (+ &0 @0) &1)))) ; >0 1)`, 1},
 		// A chain of lambdas is one function of all their arguments.
 		{`(a -> b -> a + b + n) ; n = 1`,
-			`((fn/2 ^n@0.0 | >0 -> >1 -> (+ (+ @0 @1) @1.0)) ; >0 1)`, 1},
+			`((fn/2 [@0] ^n&0 | >0 -> >1 -> (+ (+ @0 @1) &0)) ; >0 1)`, 1},
 		// A parameter shadows a where-binding.
 		{`(x -> x) ; x = 1`, `((fn/1 | >0 -> @0) ; >0 1)`, 1},
 		// Composition.
 		{`f >> g ; f = x -> x ; g = x -> x`,
-			`((>> ^f@0.0 ^g@0.1 @0 @1) ; >0 (fn/1 home=f | >0 -> @0) ; >1 (fn/1 home=g | >0 -> @0))`, 2},
+			`((>> @0 @1) ; >0 (fn/1 home=f | >0 -> @0) ; >1 (fn/1 home=g | >0 -> @0))`, 2},
 		{`g << f ; f = x -> x ; g = x -> x`,
-			`((>> ^f@0.0 ^g@0.1 @0 @1) ; >0 (fn/1 home=f | >0 -> @0) ; >1 (fn/1 home=g | >0 -> @0))`, 2},
+			`((>> @0 @1) ; >0 (fn/1 home=f | >0 -> @0) ; >1 (fn/1 home=g | >0 -> @0))`, 2},
 		// Builtins are free names too.
 		{`xs -> list/map (x -> x) xs`,
 			`(fn/1 ^list/map | >0 -> (list/map (fn/1 | >0 -> @0) @0))`, 0},
@@ -312,7 +345,7 @@ func TestCompile(t *testing.T) {
 		{`x -> [(x |> | #a y -> y | _ -> 0), (x |> z -> z)]`,
 			`(fn/3 | >0 -> [(match @0 | (#a >1) -> @1 | _ -> 0), (match @0 | >2 -> @2)])`, 0},
 		{`1 |> y -> (g ; g = z -> y + z)`,
-			`(match 1 | >0 -> (@1 ; >1 (fn/1 ^y@0.0 home=g | >0 -> (+ @1.0 @0))))`, 2},
+			`(match 1 | >0 -> (@1 ; >1 (fn/1 [@0] ^y&0 home=g | >0 -> (+ &0 @0))))`, 2},
 		// A function of more arguments is still called.
 		{`1 |> | a -> b -> a`, `((fn/2 | >0 -> >1 -> @0) 1)`, 0},
 		// Values.
@@ -349,8 +382,8 @@ func TestCompileTypes(t *testing.T) {
 ; t : type -> type = a => [#x a, #y (t a), #z u]
 ; u : type = { n : int }`)
 	want := map[string]string{
-		"f": " ^t@0 ^int",
-		"t": " ^type ^type ^t@0 ^u@0",
+		"f": " ^t: ^int",
+		"t": " ^type ^type ^t: ^u:",
 		"u": " ^type ^int",
 	}
 	for _, b := range c.binders {

@@ -6,14 +6,16 @@ import "testing"
 // printed value must evaluate to the same value, which prints identically.
 // TestRoundTrip checks that each still breaks, so a fix must remove it here.
 var brokenRoundTrips = map[string]string{
-	// Closures of one lambda in different frames print with the last
-	// frame's bindings (TODO.md section 8).
-	`list/map mk [1, 2] ; mk = n -> (f ; f = x -> x + n)`:                 "both closures print with n = 2",
-	`list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x)) [1, 2, 3]`: "acc prints as calling itself",
+	// The bindings print as one where-group, in which r is recursive.
+	`f ; f = (| 0 -> 0 | n -> r.k (n - 1) ; r = { k = m -> f m })`: "r is recursive, so it must be a function",
 }
 
 // More sources to round-trip, beyond those of the other eval tests.
 var roundTrips = []string{
+	// Closures of one lambda print with their own captures.
+	`list/map mk [1, 2] ; mk = n -> (f ; f = x -> x + n)`,
+	`list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x)) [1, 2, 3]`,
+	`[ f, g ] ; f = x -> x >> g ; g = (y -> y) << (z -> z)`,
 	`{ a = 1, b = [#x, #y 2] }`,
 	`#a { b = ~ff, c = ~~aGVsbG8gd29ybGQ= }`,
 	`-3 - 5`,

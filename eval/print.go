@@ -2,6 +2,7 @@ package eval
 
 import (
 	"encoding/base64"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/printer"
 	"github.com/Victorystick/scrapscript/scanner"
+	"github.com/Victorystick/scrapscript/token"
 )
 
 // printValue returns a scrap that evaluates to v and prints the same, as SPEC.md
@@ -21,15 +23,18 @@ import (
 // name. Bindings keep their annotations, and the sort bindings that those
 // refer to are printed too, so that recursive functions still check.
 //
+// A lambda's code takes the values of its free names from its captures. A
+// binder with the same value, whichever closure captured it, is one
+// binding: values that are the same, with functions the same closure.
+//
 // The bindings come from many scopes, but print as one where-group, so a
 // name that is already taken gets primes: a, a', a”.
 func printValue(labels *label.Table, v Value) string {
 	p := valuePrinter{
-		labels: labels,
-		byKey:  make(map[bindingKey]*binding),
-		refs:   make(map[srcNode]*binding),
-		names:  make(map[string]bool),
-		idents: make(map[string]bool),
+		labels:   labels,
+		byBinder: make(map[binderKey][]*binding),
+		names:    make(map[string]bool),
+		idents:   make(map[string]bool),
 	}
 	p.collect(v)
 	p.name()
@@ -39,29 +44,22 @@ func printValue(labels *label.Table, v Value) string {
 // A binding is a variable, or a sort binding, that a printed value refers
 // to and so binds.
 type binding struct {
-	bindingKey
-	prog    *program // whose binders key.b is in
-	value   Value    // nil for a sort binding
-	printed string   // its name in the printed scrap
+	binderKey
+	value   Value  // nil for a sort binding
+	printed string // its name in the printed scrap
 }
 
-// A bindingKey is a binder of the frame that binds it.
-type bindingKey struct {
-	frame *frame
-	b     int32 // the index in binders of the program that frame belongs to
-}
-
-type srcNode struct {
-	src  *ast.SourceExpr
-	node ast.Node
+// A binderKey is a binder of a program.
+type binderKey struct {
+	prog *program
+	b    int32 // the index in binders of prog
 }
 
 type valuePrinter struct {
 	labels   *label.Table
 	bindings []*binding // in the order that they are found
-	byKey    map[bindingKey]*binding
-	// The bindings that the free Ident nodes of printed code refer to.
-	refs map[srcNode]*binding
+	// The bindings of each binder, one per value.
+	byBinder map[binderKey][]*binding
 	// The names that print as themselves without being bound, builtins.
 	names map[string]bool
 	// The names of every Ident in printed code.
@@ -82,11 +80,10 @@ func (sf ScriptFunc) uses() int32 {
 	return u
 }
 
-// home returns the key of the binding that defines sf, if its value is sf
-// itself.
-func home(sf ScriptFunc) (bindingKey, bool) {
+// home returns the binder that defines sf, if its value is sf itself.
+func home(sf ScriptFunc) (binderKey, bool) {
 	h := sf.prog.uses[sf.uses()].home
-	return bindingKey{sf.env, h}, h >= 0
+	return binderKey{sf.prog, h}, h >= 0 && sf.ref == ""
 }
 
 // collect finds the bindings that v refers to.
@@ -112,46 +109,53 @@ func (p *valuePrinter) collect(v Value) {
 			p.collect(arg)
 		}
 	case ScriptFunc:
-		if !v.composition() {
-			for _, arg := range v.args {
-				p.collect(arg)
-			}
+		for _, arg := range v.args {
+			p.collect(arg)
 		}
+		v.args = nil
 		if v.ref != "" {
 			return
 		}
 		if key, ok := home(v); ok {
-			p.need(v.prog, key)
+			p.need(key, v)
 			return
 		}
-		p.code(v.prog, v.env, v.uses())
+		p.code(v)
 	}
 }
 
-// need returns the binding for key, a binder of prog, finding what it
-// refers to the first time.
-func (p *valuePrinter) need(prog *program, key bindingKey) *binding {
-	if b := p.byKey[key]; b != nil {
+// find returns the binding of key with the value v, or nil.
+func (p *valuePrinter) find(key binderKey, v Value) *binding {
+	for _, b := range p.byBinder[key] {
+		if same(b.value, v) {
+			return b
+		}
+	}
+	return nil
+}
+
+// need returns the binding of key with the value v, nil for a sort
+// binding, finding what it refers to the first time.
+func (p *valuePrinter) need(key binderKey, v Value) *binding {
+	if b := p.find(key, v); b != nil {
 		return b
 	}
-	b := &binding{bindingKey: key, prog: prog}
-	p.byKey[key] = b
+	b := &binding{binderKey: key, value: v}
+	p.byBinder[key] = append(p.byBinder[key], b)
 	p.bindings = append(p.bindings, b)
 
 	bd := b.binder()
 	if bd.where != ast.None {
 		// Its annotation, or a sort binding's type.
-		p.code(prog, key.frame, bd.types)
+		p.refs(key.prog, bd.types, nil)
 		if bd.sort {
 			return b
 		}
 	}
-
-	b.value = key.frame.slots[bd.slot]
 	if p.defines(b) {
-		p.code(prog, key.frame, b.value.(ScriptFunc).uses())
+		p.code(v.(ScriptFunc))
 	} else {
-		p.collect(b.value)
+		p.collect(v)
 	}
 	return b
 }
@@ -160,16 +164,27 @@ func (p *valuePrinter) need(prog *program, key bindingKey) *binding {
 // prints as its code.
 func (p *valuePrinter) defines(b *binding) bool {
 	sf, ok := b.value.(ScriptFunc)
-	if !ok || sf.ref != "" || sf.prog != b.prog {
+	if !ok || len(sf.args) > 0 {
 		return false
 	}
 	key, ok := home(sf)
-	return ok && key == b.bindingKey
+	return ok && key == b.binderKey
 }
 
-// code finds the bindings that the code with uses u, in frame f of prog,
-// refers to.
-func (p *valuePrinter) code(prog *program, f *frame, u int32) {
+// code finds the bindings that the code of sf refers to. A composition's
+// code is its functions.
+func (p *valuePrinter) code(sf ScriptFunc) {
+	if sf.composition() {
+		p.collect(sf.caps[0])
+		p.collect(sf.caps[1])
+		return
+	}
+	p.refs(sf.prog, sf.uses(), sf.caps)
+}
+
+// refs finds the bindings that the code with uses u in prog refers to, the
+// values of its free names taken from caps.
+func (p *valuePrinter) refs(prog *program, u int32, caps []Value) {
 	us := prog.uses[u]
 	for _, name := range us.names {
 		p.idents[name] = true
@@ -179,12 +194,59 @@ func (p *valuePrinter) code(prog *program, f *frame, u int32) {
 			p.names[prog.src.TokenText(prog.src.Main(r.ident))] = true
 			continue
 		}
-		bf := f
-		for range r.depth {
-			bf = bf.parent
+		var v Value
+		if r.cap >= 0 {
+			v = caps[r.cap]
 		}
-		p.refs[srcNode{prog.src, r.ident}] = p.need(prog, bindingKey{bf, r.b})
+		p.need(binderKey{prog, r.b}, v)
 	}
+}
+
+// renames returns the printed names of the free names of the code with
+// uses u in prog, by Ident, with their values taken from caps, adding them
+// to into.
+func (p *valuePrinter) renames(into map[ast.Node]string, prog *program, u int32, caps []Value) map[ast.Node]string {
+	if into == nil {
+		into = make(map[ast.Node]string)
+	}
+	for _, r := range prog.uses[u].free {
+		if r.b < 0 {
+			continue
+		}
+		var v Value
+		if r.cap >= 0 {
+			v = caps[r.cap]
+		}
+		into[r.ident] = p.find(binderKey{prog, r.b}, v).printed
+	}
+	return into
+}
+
+// same returns true if a and b are the same value, as far as printing is
+// concerned: equal, with functions the same closure.
+func same(a, b Value) bool {
+	switch a := a.(type) {
+	case nil:
+		return b == nil
+	case ScriptFunc:
+		o, ok := b.(ScriptFunc)
+		return ok && a.prog == o.prog && a.node == o.node && a.ref == o.ref &&
+			len(a.caps) == len(o.caps) && (len(a.caps) == 0 || &a.caps[0] == &o.caps[0]) &&
+			slices.EqualFunc(a.args, o.args, same)
+	case Partial:
+		o, ok := b.(Partial)
+		return ok && a.fn.name == o.fn.name && slices.EqualFunc(a.args, o.args, same)
+	case Record:
+		o, ok := b.(Record)
+		return ok && a.shape == o.shape && slices.EqualFunc(a.values, o.values, same)
+	case List:
+		o, ok := b.(List)
+		return ok && slices.EqualFunc(a.elements, o.elements, same)
+	case Variant:
+		o, ok := b.(Variant)
+		return ok && a.tag == o.tag && same(a.value, o.value)
+	}
+	return a.eq(b)
 }
 
 // name names the bindings: each by its own name, unless an earlier binding
@@ -215,10 +277,18 @@ func (p *valuePrinter) print(v Value) string {
 			p.value(&s, b.value, printer.Body)
 			continue
 		}
-		pr := p.printer(b.prog.src)
+		names := p.renames(nil, b.prog, bd.types, nil)
+		pr := p.printer(b.prog.src, names)
 		_, _, typ, val := b.prog.src.Where(bd.where)
-		if bd.sort || p.defines(b) {
-			pr.Binding(typ, val, bd.sort)
+		if p.defines(b) {
+			if sf := b.value.(ScriptFunc); !sf.composition() {
+				p.renames(names, sf.prog, sf.uses(), sf.caps)
+				pr.Binding(typ, val, false)
+				s.WriteString(pr.String())
+				continue
+			}
+		} else if bd.sort {
+			pr.Binding(typ, val, true)
 			s.WriteString(pr.String())
 			continue
 		}
@@ -228,20 +298,39 @@ func (p *valuePrinter) print(v Value) string {
 			s.WriteString(pr.String())
 		}
 		s.WriteString(" = ")
-		p.value(&s, b.value, printer.Body)
+		v := b.value
+		if p.defines(b) {
+			// A composition that b defines prints as its functions.
+			p.compose(&s, v.(ScriptFunc), printer.Body)
+			continue
+		}
+		p.value(&s, v, printer.Body)
 	}
 	return s.String()
 }
 
-// printer returns a Printer for code in src, which prints free names as
-// the names of the bindings that they refer to.
-func (p *valuePrinter) printer(src *ast.SourceExpr) *printer.Printer {
+// printer returns a Printer for code in src, which prints the free names
+// in names as the names of the bindings that they refer to.
+func (p *valuePrinter) printer(src *ast.SourceExpr, names map[ast.Node]string) *printer.Printer {
 	return &printer.Printer{Src: src, Name: func(x ast.Node) string {
-		if b := p.refs[srcNode{src, x}]; b != nil {
-			return b.printed
-		}
-		return ""
+		return names[x]
 	}}
+}
+
+// compose prints the composition sf as its functions, in its source's
+// order.
+func (p *valuePrinter) compose(s *strings.Builder, sf ScriptFunc, ctx printer.Context) {
+	if ctx == printer.Arg {
+		s.WriteByte('(')
+		defer s.WriteByte(')')
+	}
+	first, second, op := sf.caps[0], sf.caps[1], " >> "
+	if bin, _, _ := sf.prog.src.Binary(sf.prog.at[sf.node]); bin == token.LCOMP {
+		first, second, op = second, first, " << "
+	}
+	p.value(s, first, printer.Arg)
+	s.WriteString(op)
+	p.value(s, second, printer.Arg)
 }
 
 // value prints v in ctx.
@@ -305,7 +394,7 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 	case Partial:
 		p.app(s, ctx, v.fn.name, v.args...)
 	case ScriptFunc:
-		if len(v.args) > 0 && !v.composition() {
+		if len(v.args) > 0 {
 			// A function applied to some of its arguments prints as such.
 			fn := v
 			fn.args = nil
@@ -315,9 +404,11 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 		} else if v.ref != "" {
 			s.WriteString(v.ref)
 		} else if key, ok := home(v); ok {
-			s.WriteString(p.byKey[key].printed)
+			s.WriteString(p.find(key, v).printed)
+		} else if v.composition() {
+			p.compose(s, v, ctx)
 		} else {
-			pr := p.printer(v.prog.src)
+			pr := p.printer(v.prog.src, p.renames(nil, v.prog, v.uses(), v.caps))
 			pr.Expr(v.prog.at[v.node], ctx)
 			s.WriteString(pr.String())
 		}
