@@ -70,6 +70,19 @@ func (p *program) run(n cnode, f *frame) Value {
 			r := p.range_(n)
 			fn := p.run(cnode(r[0]), f)
 			argNodes := r[1:]
+			// A builtin that takes exactly these arguments gets them as Go
+			// arguments.
+			if g, ok := fn.(BuiltInFunc); ok && g.arity == len(argNodes) {
+				switch {
+				case g.two != nil:
+					a := p.run(cnode(argNodes[0]), f)
+					return g.two(a, p.run(cnode(argNodes[1]), f))
+				case g.three != nil:
+					a := p.run(cnode(argNodes[0]), f)
+					b := p.run(cnode(argNodes[1]), f)
+					return g.three(a, b, p.run(cnode(argNodes[2]), f))
+				}
+			}
 			// A script function that takes exactly these arguments gets
 			// them in its frame directly.
 			if sf, ok := fn.(ScriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
@@ -267,7 +280,7 @@ func enter(fn, arg Value) (p *program, n cnode, f *frame, v Value) {
 			// Each partial application has its own arguments.
 			args := append(g.args[:len(g.args):len(g.args)], arg)
 			if len(args) == g.fn.arity {
-				return nil, none, nil, g.fn.call(args)
+				return nil, none, nil, g.fn.invoke(args)
 			}
 			return nil, none, nil, Partial{g.fn, args}
 		}
@@ -310,7 +323,7 @@ func enterN(fn Value, args []Value) (p *program, n cnode, f *frame, v Value) {
 	switch g := fn.(type) {
 	case BuiltInFunc:
 		if g.arity == len(args) && g.arity > 1 {
-			return nil, none, nil, g.call(args)
+			return nil, none, nil, g.invoke(args)
 		}
 	case ScriptFunc:
 		if len(g.args) == 0 && len(args) > 1 && !g.composition() {

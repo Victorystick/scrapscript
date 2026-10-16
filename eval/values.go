@@ -39,12 +39,26 @@ type Variant struct {
 }
 
 // A built-in function, or one that a host implements, which takes arity
-// arguments.
+// arguments. A builtin takes them as Go arguments, so that a call with all
+// of them needs no slice; a host function of more than one takes a slice.
 type BuiltInFunc struct {
 	name  string
 	arity int
-	one   func(Value) Value   // if arity is 1
-	call  func([]Value) Value // if arity is more, with all the arguments
+	one   func(Value) Value               // if arity is 1
+	two   func(Value, Value) Value        // a builtin of arity 2
+	three func(Value, Value, Value) Value // a builtin of arity 3
+	many  func([]Value) Value             // a host function of arity 2 or more
+}
+
+// invoke calls bf, which takes more than one argument, with all of them.
+func (bf BuiltInFunc) invoke(args []Value) Value {
+	switch {
+	case bf.two != nil:
+		return bf.two(args[0], args[1])
+	case bf.three != nil:
+		return bf.three(args[0], args[1], args[2])
+	}
+	return bf.many(args)
 }
 
 // A built-in function applied to some, but not all, of its arguments.

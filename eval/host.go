@@ -119,7 +119,7 @@ func NewFunc(name string, arity int, fn func(args []Value) (Value, error)) Value
 			return call([]Value{arg})
 		}}
 	}
-	return BuiltInFunc{name: name, arity: arity, call: call}
+	return BuiltInFunc{name: name, arity: arity, many: call}
 }
 
 // Call applies the function fn to args, all at once if it takes as many,
