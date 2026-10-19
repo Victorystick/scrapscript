@@ -21,9 +21,10 @@ type alias struct {
 	body       ast.Node // the type after the parameters
 	scope      *Scope[*alias]
 
-	// A value binding's value, and its static part, once resolved.
+	// A value binding's value, and where its static part goes once
+	// resolved.
 	value    ast.Node
-	static   static
+	static   *static
 	resolved bool
 
 	// Whether the kinds of the parameters are known, or being found.
@@ -193,7 +194,7 @@ func (c *context) markRows(params []param, t ast.Node) {
 				rows = append(rows, p.row)
 			}
 		case s.isType():
-			for _, p := range s.imported.Params {
+			for _, p := range s.res.Params {
 				rows = append(rows, p.Row)
 			}
 		}
@@ -258,8 +259,8 @@ func (c *context) typ(x ast.Node) TypeRef {
 			}
 			return v.val.ref
 		}
-		if !c.static(x).isNone() {
-			return c.applyStatic(x, x, nil)
+		if s := c.staticName(c.src.TokenBytes(c.src.Main(x))); !s.isNone() {
+			return c.applyStatic(x, x, s, nil)
 		}
 		if ref, ok := primitiveTypes[name]; ok {
 			return ref
@@ -269,7 +270,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 		}
 		c.bail(x, fmt.Sprintf("unknown type %s", name))
 	case ast.Import, ast.Access:
-		return c.applyStatic(x, x, nil)
+		return c.applyStatic(x, x, c.static(x), nil)
 	case ast.Literal:
 		if c.src.LiteralKind(x) == token.HOLE {
 			return HoleRef
@@ -349,12 +350,12 @@ func (c *context) application(x ast.Node) TypeRef {
 
 	switch c.src.Kind(fn) {
 	case ast.Import, ast.Access:
-		return c.applyStatic(x, fn, args)
+		return c.applyStatic(x, fn, c.static(fn), args)
 	case ast.Ident:
 		name := c.src.TokenText(c.src.Main(fn))
 		if c.tvars.Get(name) == nil {
-			if !c.static(fn).isNone() {
-				return c.applyStatic(x, fn, args)
+			if s := c.staticName(c.src.TokenBytes(c.src.Main(fn))); !s.isNone() {
+				return c.applyStatic(x, fn, s, args)
 			}
 			if name == "list" {
 				if len(args) != 1 {
@@ -408,14 +409,17 @@ func (c *context) typeArgs(name string, rows []bool, args []ast.Node) []TypeRef 
 	return refs
 }
 
-// applyStatic returns the type that the path fn denotes, applied to args if
-// it is a type constructor.
-func (c *context) applyStatic(x, fn ast.Node, args []ast.Node) TypeRef {
-	s := c.constructor(fn)
-	if s.alias != nil {
+// applyStatic returns the type that the path fn denotes, its static part s,
+// applied to args if it is a type constructor.
+func (c *context) applyStatic(x, fn ast.Node, s static, args []ast.Node) TypeRef {
+	switch {
+	case s.alias != nil:
 		return c.apply(x, s.alias, args)
+	case s.isType():
+		return c.applyResult(x, c.src.NodeText(fn), s.res, args)
 	}
-	return c.applyResult(x, c.src.NodeText(fn), *s.imported, args)
+	c.notType(fn)
+	return NoType
 }
 
 // applyResult returns the type that the imported type res, written name,

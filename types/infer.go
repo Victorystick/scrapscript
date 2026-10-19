@@ -81,8 +81,9 @@ type context struct {
 	payloads int
 	// The aliases being expanded, outermost first.
 	expanding []*alias
-	// The groups of the where nodes met, by node.
-	groups map[ast.Node]group
+	// The groups of the where nodes met, and their indices by node.
+	groupList []group
+	groups    map[ast.Node]int32
 	// The match functions, and their argument types, to check for
 	// exhaustiveness once the whole scrap is inferred.
 	matches []match
@@ -358,11 +359,11 @@ func (c *context) either(a, b, typ TypeRef) bool {
 // bindings are mutually recursive. Each strongly connected component of them
 // is inferred in turn, and generalized before the components that use it.
 func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
-	body, binds := c.src.Group(x)
 	scope, aliases := c.scope, c.aliases
 	defer func() { c.scope, c.aliases = scope, aliases }()
 
 	g := c.group(x)
+	body, binds := g.body, g.binds
 	c.aliases = g.aliases
 	// Check the aliases, even those that aren't used.
 	for _, a := range g.sorts {

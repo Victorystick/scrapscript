@@ -273,6 +273,13 @@ func (se *SourceExpr) TokenSpan(t Tok) token.Span {
 	return se.Tokens.Span(se.Source.Bytes(), int(t))
 }
 
+// TokenBytes returns the source bytes of token t. Comparing them with a
+// string, as in string(b) == name, doesn't allocate.
+func (se *SourceExpr) TokenBytes(t Tok) []byte {
+	s := se.TokenSpan(t)
+	return se.Source.Bytes()[s.Start:s.End]
+}
+
 // TokenText returns the source text of token t.
 func (se *SourceExpr) TokenText(t Tok) string {
 	return se.Source.GetString(se.TokenSpan(t))

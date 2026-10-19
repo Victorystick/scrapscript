@@ -15,35 +15,38 @@ import (
 // expression of any other form, such as a function or a call, has none.
 type static struct {
 	alias *alias // a local type
-	// An imported type, if it is Sort, or else the members of an imported
-	// record.
-	imported *Result
-	members  map[string]static // the members of a record literal
+	// With imp set, an imported type, if res is Sort, or else the members
+	// of an imported record. Held by value, so that it needn't escape.
+	imp     bool
+	res     Result
+	members map[string]static // the members of a record literal
 }
 
 // isType reports whether s denotes a type.
 func (s static) isType() bool {
-	return s.alias != nil || s.imported != nil && s.imported.Sort
+	return s.alias != nil || s.imp && s.res.Sort
 }
 
 // isNone reports whether s is no static part at all.
 func (s static) isNone() bool {
-	return s.alias == nil && s.imported == nil && s.members == nil
+	return s.alias == nil && !s.imp && s.members == nil
 }
 
 // member returns the member name of s, if it has one.
 func (s static) member(name string) (static, bool) {
-	if s.imported != nil {
-		m, ok := s.imported.Members[name]
-		return static{imported: &m}, ok
+	if s.imp {
+		m, ok := s.res.Members[name]
+		return static{imp: true, res: m}, ok
 	}
 	m, ok := s.members[name]
 	return m, ok
 }
 
-// A group is the alias scope of a where-group's bindings, and the aliases
-// of its sort bindings.
+// A group is a where-group's body and bindings, the alias scope of its
+// bindings, and the aliases of its sort bindings.
 type group struct {
+	body    ast.Node
+	binds   []ast.Node
 	aliases *Scope[*alias]
 	sorts   []*alias
 }
@@ -54,13 +57,25 @@ type group struct {
 // Paths may reach a group before inference does, so groups are made once
 // per node.
 func (c *context) group(x ast.Node) group {
-	if g, ok := c.groups[x]; ok {
-		return g
+	if i, ok := c.groups[x]; ok {
+		return c.groupList[i]
 	}
-	_, binds := c.src.Group(x)
-	g := group{aliases: c.aliases}
+	body, binds := c.src.Group(x)
+	g := group{body: body, binds: binds, aliases: c.aliases}
 	seen := make(map[string]bool, len(binds))
+	// The values are allocated at once, since the scope points into them.
+	n := 0
+	for _, b := range binds {
+		if _, _, _, val := c.src.Where(b); !c.src.Sort(b) && c.mayBeStatic(val) {
+			n++
+		}
+	}
 	var values []alias
+	var statics []static
+	if n > 0 {
+		values = make([]alias, 0, n)
+		statics = make([]static, n)
+	}
 	for _, b := range binds {
 		_, id, typ, val := c.src.Where(b)
 		name := c.src.TokenText(id)
@@ -75,10 +90,7 @@ func (c *context) group(x ast.Node) group {
 			a = c.sortBinding(b, name, typ, val)
 			g.sorts = append(g.sorts, a)
 		case c.mayBeStatic(val):
-			if values == nil {
-				values = make([]alias, 0, len(binds))
-			}
-			values = append(values, alias{name: name, node: b, value: val})
+			values = append(values, alias{name: name, node: b, value: val, static: &statics[len(values)]})
 			a = &values[len(values)-1]
 		default:
 			// Most values, such as functions, can't have a static part.
@@ -94,9 +106,10 @@ func (c *context) group(x ast.Node) group {
 		values[i].scope = g.aliases
 	}
 	if c.groups == nil {
-		c.groups = make(map[ast.Node]group)
+		c.groups = make(map[ast.Node]int32)
 	}
-	c.groups[x] = g
+	c.groups[x] = int32(len(c.groupList))
+	c.groupList = append(c.groupList, g)
 	return g
 }
 
@@ -114,27 +127,17 @@ func (c *context) mayBeStatic(x ast.Node) bool {
 func (c *context) static(x ast.Node) static {
 	switch c.src.Kind(x) {
 	case ast.Ident:
-		// A value without a static part leaves its name to outer types,
-		// so that a parser named int doesn't hide the type int.
-		name := c.src.TokenText(c.src.Main(x))
-		for b := c.aliases.Get(name); b != nil; b = b.parent.Get(name) {
-			if b.val.value == ast.None {
-				return static{alias: b.val}
-			}
-			if s := c.valueStatic(b.val); !s.isNone() {
-				return s
-			}
-		}
+		return c.staticName(c.src.TokenBytes(c.src.Main(x)))
 	case ast.Where:
-		body, _ := c.src.Group(x)
+		g := c.group(x)
 		aliases := c.aliases
-		c.aliases = c.group(x).aliases
-		s := c.static(body)
+		c.aliases = g.aliases
+		s := c.static(g.body)
 		c.aliases = aliases
 		return s
 	case ast.Import:
 		if res := c.imported(x); res.Sort || res.Members != nil {
-			return static{imported: &res}
+			return static{imp: true, res: res}
 		}
 	case ast.Record:
 		rest, fields := c.src.Record(x)
@@ -156,8 +159,28 @@ func (c *context) static(x ast.Node) static {
 		}
 	case ast.Access:
 		rec, key := c.src.Access(x)
-		if m, ok := c.static(rec).member(c.src.TokenText(key)); ok {
-			return m
+		if s := c.static(rec); !s.isNone() {
+			if m, ok := s.member(c.src.TokenText(key)); ok {
+				return m
+			}
+		}
+	}
+	return static{}
+}
+
+// staticName returns the static part of the name in alias scope. A value
+// without one leaves its name to outer types, so that a parser named int
+// doesn't hide the type int.
+func (c *context) staticName(name []byte) static {
+	for b := c.aliases; b != nil; b = b.parent {
+		if b.name != string(name) {
+			continue
+		}
+		if b.val.value == ast.None {
+			return static{alias: b.val}
+		}
+		if s := c.valueStatic(b.val); !s.isNone() {
+			return s
 		}
 	}
 	return static{}
@@ -167,7 +190,7 @@ func (c *context) static(x ast.Node) static {
 // on first use in the scope of its group.
 func (c *context) valueStatic(a *alias) static {
 	if a.resolved {
-		return a.static
+		return *a.static
 	}
 	if a.pending {
 		// A value that refers to itself has no static part; inference
@@ -179,7 +202,7 @@ func (c *context) valueStatic(a *alias) static {
 	c.aliases, c.tvars = a.scope, nil
 	s := c.static(a.value)
 	c.aliases, c.tvars = aliases, tvars
-	a.pending, a.resolved, a.static = false, true, s
+	a.pending, a.resolved, *a.static = false, true, s
 	return s
 }
 
@@ -189,8 +212,11 @@ func (c *context) typeOnly(v ast.Node) bool {
 	switch c.src.Kind(v) {
 	case ast.Ident:
 		// A value in scope, such as a function's parameter, shadows a type.
-		if c.scope.Get(c.src.TokenText(c.src.Main(v))) != nil {
-			return false
+		name := c.src.TokenBytes(c.src.Main(v))
+		for s := c.scope; s != nil; s = s.parent {
+			if s.name == string(name) {
+				return false
+			}
 		}
 	case ast.Import, ast.Access:
 	default:
@@ -199,13 +225,8 @@ func (c *context) typeOnly(v ast.Node) bool {
 	return c.static(v).isType()
 }
 
-// constructor returns the type that the path x denotes in type position,
-// failing if it is not a type.
-func (c *context) constructor(x ast.Node) static {
-	s := c.static(x)
-	if s.isType() {
-		return s
-	}
+// notType fails because the path x doesn't denote a type.
+func (c *context) notType(x ast.Node) {
 	text := c.src.NodeText(x)
 	if c.src.Kind(x) == ast.Access {
 		rec, key := c.src.Access(x)
@@ -214,21 +235,20 @@ func (c *context) constructor(x ast.Node) static {
 		}
 	}
 	c.bail(x, fmt.Sprintf("%s is a value, not a type", text))
-	return static{}
 }
 
 // exports returns the members of s as the results that importers see.
 func (c *context) exports(x ast.Node, s static) map[string]Result {
-	if s.imported != nil {
-		return s.imported.Members
+	if s.imp {
+		return s.res.Members
 	}
 	members := make(map[string]Result, len(s.members))
 	for name, m := range s.members {
 		switch {
 		case m.alias != nil:
 			members[name] = c.export(x, m.alias)
-		case m.imported != nil:
-			members[name] = *m.imported
+		case m.imp:
+			members[name] = m.res
 		default:
 			members[name] = Result{Members: c.exports(x, m)}
 		}
