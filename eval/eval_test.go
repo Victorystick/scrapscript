@@ -2,6 +2,7 @@ package eval
 
 import (
 	"fmt"
+	"os"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -343,6 +344,17 @@ func TestTailCalls(t *testing.T) {
 	for _, ex := range tailCalls {
 		evalString(t, ex.source, ex.result)
 	}
+}
+
+// An expression language built from fragments that each handle some tags and
+// pass the rest on, which presence types.
+func TestExpressionFragments(t *testing.T) {
+	source, err := os.ReadFile("testdata/expr.scrap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evalString(t, string(source), `{ small = #ok -1, small-text = "(1 + -2)", `+
+		`text = "let x = (2 + 3) in if (x < 10) then (x * x) else -x", unbound = #err "unbound y", value = #ok 25 }`)
 }
 
 func TestFailures(t *testing.T) {

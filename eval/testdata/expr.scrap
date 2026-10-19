@@ -1,0 +1,91 @@
+-- An expression language built from fragments, in the style of data types
+-- à la carte. Each fragment handles one group of tags for one operation, and
+-- passes the rest of its input to the next. A catch-all binder `other`
+-- excludes the tags its fragment handles, so the last fragment, which has no
+-- catch-all, needs no arms for them.
+{ value = eval [] program
+, text = show program
+, unbound = eval [] (#add { l = #lit 1, r = #var "y" })
+, small = eval-small [] tiny
+, small-text = show-small tiny
+}
+
+; program : expr =
+    #let { name = "x", value = #add { l = #lit 2, r = #lit 3 }
+         , body = #if { cond = #less { l = #var "x", r = #lit 10 }
+                      , yes = #mul { l = #var "x", r = #var "x" }
+                      , no = #neg (#var "x") } }
+
+; tiny : small = #add { l = #lit 1, r = #neg (#lit 2) }
+
+-- The whole language. Only the knots name it.
+; expr : type =
+  [ #lit int
+  , #add { l : expr, r : expr }, #mul { l : expr, r : expr }, #neg expr
+  , #less { l : expr, r : expr }, #if { cond : expr, yes : expr, no : expr }
+  , #var text, #let { name : text, value : expr, body : expr }
+  ]
+
+-- Arithmetic alone, from the same fragments.
+; small : type = [#lit int, #add { l : small, r : small }, #mul { l : small, r : small }, #neg small]
+
+-- The knots tie each operation's fragments to itself.
+; eval : env -> expr -> result = env -> x -> chain eval-ops (chain eval-cond eval-vars) eval eval-lit env x
+; show : expr -> text = x -> chain show-ops (chain show-cond show-vars) show show-lit x
+; eval-small : env -> small -> result = env -> x -> eval-ops eval-small eval-lit env x
+; show-small : small -> text = x -> show-ops show-small show-lit x
+
+-- Composes two fragments into one.
+; chain = f -> g -> self -> ext -> f self (g self ext)
+
+-- Evaluation.
+; result : type = [#ok int, #err text]
+; env : type = list { name : text, value : int }
+
+; eval-lit = env -> | #lit n -> #ok n
+
+; eval-ops = self -> ext -> env ->
+    | #add { l = l, r = r } -> both (self env l) (self env r) (a -> b -> #ok (a + b))
+    | #mul { l = l, r = r } -> both (self env l) (self env r) (a -> b -> #ok (a * b))
+    | #neg e -> then (self env e) (a -> #ok (0 - a))
+    | other -> ext env other
+
+; eval-cond = self -> ext -> env ->
+    | #less { l = l, r = r } -> both (self env l) (self env r) (a -> b -> #ok (less a b))
+    | #if { cond = c, yes = y, no = n } -> then (self env c) (| 0 -> self env n | _ -> self env y)
+    | other -> ext env other
+
+; eval-vars = self -> ext -> env ->
+    | #var name -> lookup name env
+    | #let { name = name, value = v, body = b } ->
+        then (self env v) (a -> self ({ name = name, value = a } >+ env) b)
+    | other -> ext env other
+
+; lookup : text -> env -> result = name ->
+    | [] -> #err ("unbound " ++ name)
+    | b >+ rest -> (text/cmp b.name name |> | #eq -> #ok b.value | _ -> lookup name rest)
+
+; less = a -> b -> int/cmp a b |> | #lt -> 1 | _ -> 0
+; then = r -> f -> r |> | #ok v -> f v | #err e -> #err e
+; both = r -> s -> f -> then r (a -> then s (b -> f a b))
+
+-- Printing.
+; show-lit = | #lit n -> int/to-text n
+
+; show-ops = self -> ext ->
+    | #add { l = l, r = r } -> paren (self l ++ " + " ++ self r)
+    | #mul { l = l, r = r } -> paren (self l ++ " * " ++ self r)
+    | #neg e -> "-" ++ self e
+    | other -> ext other
+
+; show-cond = self -> ext ->
+    | #less { l = l, r = r } -> paren (self l ++ " < " ++ self r)
+    | #if { cond = c, yes = y, no = n } -> "if " ++ self c ++ " then " ++ self y ++ " else " ++ self n
+    | other -> ext other
+
+; show-vars = self -> ext ->
+    | #var name -> name
+    | #let { name = name, value = v, body = b } -> "let " ++ name ++ " = " ++ self v ++ " in " ++ self b
+    | other -> ext other
+
+; paren = s -> "(" ++ s ++ ")"
