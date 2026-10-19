@@ -48,6 +48,9 @@ type Result struct {
 	// For a type constructor, its parameters, which are generalized variables
 	// in Type.
 	Params []Param
+	// For a scrap that denotes a record, its type members: the results of
+	// its fields' static parts, by name.
+	Members map[string]Result
 	// The type of each node of the scrap's expression, by node: of each value
 	// and pattern. Others have NoType: type expressions, and the inner Where
 	// nodes of a where-group, whose type is at its outermost one. A use of a
@@ -78,6 +81,8 @@ type context struct {
 	payloads int
 	// The aliases being expanded, outermost first.
 	expanding []*alias
+	// The groups of the where nodes met, by node.
+	groups map[ast.Node]group
 	// The match functions, and their argument types, to check for
 	// exhaustiveness once the whole scrap is inferred.
 	matches []match
@@ -152,7 +157,7 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 		name := c.src.TokenText(c.src.Main(x))
 		bound := c.scope.Get(name)
 		if bound == nil {
-			if c.aliases.Get(name) != nil {
+			if a := c.aliases.Lookup(name); a != nil && a.value == ast.None {
 				c.bail(x, fmt.Sprintf("cannot use type %s as a value", name))
 			}
 			c.bail(x, "unbound variable: "+name)
@@ -165,6 +170,9 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 	case ast.Record:
 		return c.record(x)
 	case ast.Access:
+		if c.static(x).isType() {
+			c.bail(x, fmt.Sprintf("cannot use type %s as a value", c.src.NodeText(x)))
+		}
 		rec, key := c.src.Access(x)
 		field := c.reg.Var()
 		row := c.reg.extend(c.reg.labels.Of(c.src.TokenText(key)), field, c.reg.Var())
@@ -227,7 +235,7 @@ func (c *context) scrap(x ast.Node) Result {
 	case ast.Ident:
 		name := c.src.TokenText(c.src.Main(x))
 		if c.scope.Get(name) == nil {
-			if a := c.aliases.Lookup(name); a != nil {
+			if a := c.aliases.Lookup(name); a != nil && a.value == ast.None {
 				return c.export(x, a)
 			}
 		}
@@ -236,7 +244,11 @@ func (c *context) scrap(x ast.Node) Result {
 			return res
 		}
 	}
-	return Result{Type: c.infer(x)}
+	res := Result{Type: c.infer(x)}
+	if s := c.static(x); !s.isNone() && !s.isType() {
+		res.Members = c.exports(x, s)
+	}
+	return res
 }
 
 // imported returns the result of the scrap that the import x refers to.
@@ -350,27 +362,10 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 	scope, aliases := c.scope, c.aliases
 	defer func() { c.scope, c.aliases = scope, aliases }()
 
-	seen := make(map[string]bool, len(binds))
-	var group []*alias
-	for _, b := range binds {
-		_, id, typ, val := c.src.Where(b)
-		name := c.src.TokenText(id)
-		if seen[name] {
-			c.bail(b, fmt.Sprintf("cannot bind %s twice", name))
-		}
-		seen[name] = true
-
-		if c.src.Sort(b) {
-			a := c.sortBinding(b, name, typ, val)
-			group = append(group, a)
-			c.aliases = c.aliases.Bind(name, a)
-		}
-	}
-	// Aliases see each other. Check them all, even those that aren't used.
-	for _, a := range group {
-		a.scope = c.aliases
-	}
-	for _, a := range group {
+	g := c.group(x)
+	c.aliases = g.aliases
+	// Check the aliases, even those that aren't used.
+	for _, a := range g.sorts {
 		c.checkAlias(a)
 	}
 
@@ -463,12 +458,21 @@ func (c *context) record(x ast.Node) TypeRef {
 	}
 
 	ref := make(map[string]TypeRef, fields.Len())
+	var members map[string]bool
 	for i := range fields.Len() {
-		k := c.src.TokenText(fields.Key(i))
-		if _, ok := ref[k]; ok {
-			c.bail(fields.Value(i), fmt.Sprintf("cannot set %s twice", k))
+		k, v := c.src.TokenText(fields.Key(i)), fields.Value(i)
+		if _, ok := ref[k]; ok || members[k] {
+			c.bail(v, fmt.Sprintf("cannot set %s twice", k))
 		}
-		ref[k] = c.infer(fields.Value(i))
+		// A type is a member, and not part of the record's value.
+		if c.typeOnly(v) {
+			if members == nil {
+				members = make(map[string]bool)
+			}
+			members[k] = true
+			continue
+		}
+		ref[k] = c.infer(v)
 	}
 	return c.reg.Record(ref)
 }

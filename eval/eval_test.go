@@ -450,6 +450,39 @@ func TestImportType(t *testing.T) {
 	}
 }
 
+func TestImportTypeMember(t *testing.T) {
+	const lib = "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445"
+	env := NewEnvironment()
+	env.UseFetcher(MapFetcher{
+		lib: `{ option = option, none = #none } ; option = a => [#some a, #none]`,
+	})
+
+	// A path reaches the member through a name bound to the import, or the
+	// import itself, the same as it would with the library inlined.
+	for _, src := range []string{
+		`f ; f : l.option int -> int = | #some n -> n | #none -> 0 ; l = $source:` + lib,
+		`f ; f : $source:` + lib + `.option int -> int = | #some n -> n | #none -> 0`,
+		`f ; f : l.option int -> int = | #some n -> n | #none -> 0 ; l = ({ option = option, none = #none } ; option = a => [#some a, #none])`,
+	} {
+		scrap, err := env.Read([]byte(src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if typ, err := env.Infer(scrap); err != nil || !strings.HasSuffix(strings.SplitN(typ, "\n", 2)[0], " int -> int") {
+			t.Errorf("%s: expected ... int -> int, got %s, %v", src, typ, err)
+		}
+	}
+
+	// The library's value leaves its members out.
+	scrap, err := env.Read([]byte(`$source:` + lib))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ, err := env.Infer(scrap); err != nil || typ != "{ none : [ #none, ..a ] }" {
+		t.Errorf("Expected { none : [ #none, ..a ] }, got %s, %v", typ, err)
+	}
+}
+
 type MapFetcher map[string]string
 
 func (mf MapFetcher) FetchSha256(key string) ([]byte, error) {

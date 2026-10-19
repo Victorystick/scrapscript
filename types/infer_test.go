@@ -250,6 +250,18 @@ func TestInfer(t *testing.T) {
 		{`a ; a : type = [#a b, #end] ; b : type = [#b a]`, "type = a\n; a : type = [ #a b, #end ]\n; b : type = [ #b a ]"},
 		{`sum ; sum : t int -> int = | #leaf -> 0 | #node n -> n.v + sum n.l ; t = a => [#leaf, #node (n a)] ; n = a => { v : a, l : t a }`,
 			"t int -> int\n; t = a => [ #leaf, #node (n a) ]\n; n = a => { l : t a, v : a }"},
+		// A record's fields that name types are its members, which paths
+		// reach in type position. They aren't part of its value.
+		{`lib ; lib = { t = t, v = 1 } ; t : type = int`, `{ v : int }`},
+		{`x ; x : lib.t = 1 ; lib = { t = t, v = 2 } ; t : type = int`, `int`},
+		{`x ; x : lib.t = 1 ; lib = ({ t = t } ; t : type = int)`, `int`},
+		{`x ; x : a.b.t = 1 ; a = { b = lib } ; lib = { t = t } ; t : type = int`, `int`},
+		{`x ; x : l.t = 1 ; l = lib ; lib = { t = t } ; t : type = int`, `int`},
+		{`x ; x : o.option int = #none ; o = { option = option } ; option = a => [#some a, #none]`,
+			"option int\n; option = a => [ #none, #some a ]"},
+		{`f ; f = x -> { t = x }`, `a -> { t : a }`},
+		// A value without a static part leaves its name to types.
+		{`x ; x : int = 1 ; int = 2`, `int`},
 		// Different unrollings of one type are the same type, and unify.
 		{`same ; same : t -> u = x -> x ; t : type = [#a t, #z] ; u : type = [#a [#a u, #z], #z]`,
 			"t -> t\n; t : type = [ #a t, #z ]"},
@@ -326,6 +338,15 @@ func TestInferFailure(t *testing.T) {
 		{`1 ; t : type = u ; u : type = list t`, `recursive type t must recur within a tag's payload`},
 		{`1 ; t = a => [#a (t (list a))]`, `recursive type t must recur with the same type arguments`},
 		{`f #b ; f : t -> int = _ -> 1 ; t : type = [#a t]`, "cannot unify 't' with '[ #b, ..a ]'\n; t : type = [ #a t ]"},
+		// Paths reach type members statically.
+		{`x ; x : lib.u = 1 ; lib = { t = t } ; t : type = int`, `lib has no type member u`},
+		{`x ; x : lib = 1 ; lib = { t = t } ; t : type = int`, `lib is a value, not a type`},
+		{`x ; x : int = 1 ; int = { t = t } ; t : type = text`, `int is a value, not a type`},
+		{`f ; f = lib -> (x ; x : lib.t = 1)`, `lib has no type member t`},
+		{`x ; x : lib.t = 1 ; lib = lib`, `lib has no type member t`},
+		{`lib.t ; lib = { t = t } ; t : type = int`, `cannot use type lib.t as a value`},
+		{`{ t = t, t = 1 } ; t : type = int`, `cannot set t twice`},
+		{`x ; x : o.option = #none ; o = { option = option } ; option = a => [#some a, #none]`, `option takes 1 type argument, not 0`},
 		// Only functions may be recursive.
 		{`x ; x : t = #next x ; t : type = [#next t]`, `x is recursive, so it must be a function`},
 		{`x ; x = y ; y = f 1 ; f = _ -> x`, `x is recursive, so it must be a function`},

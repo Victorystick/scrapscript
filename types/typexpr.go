@@ -10,7 +10,9 @@ import (
 )
 
 // An alias is a sort binding: a type, or a type constructor whose parameters
-// are the variables of its leading =>s.
+// are the variables of its leading =>s. With value set, it is instead a value
+// binding, which takes its name in type position, and whose static part
+// paths may reach.
 type alias struct {
 	name       string
 	node       ast.Node // the binding, for errors
@@ -18,6 +20,11 @@ type alias struct {
 	params     []param
 	body       ast.Node // the type after the parameters
 	scope      *Scope[*alias]
+
+	// A value binding's value, and its static part, once resolved.
+	value    ast.Node
+	static   static
+	resolved bool
 
 	// Whether the kinds of the parameters are known, or being found.
 	kinded, kinding bool
@@ -170,18 +177,23 @@ func (c *context) markRows(params []param, t ast.Node) {
 		fn, args := c.typeApp(t)
 		// The kinds of the constructor's parameters, if it is known.
 		var rows []bool
+		var s static
 		switch c.src.Kind(fn) {
 		case ast.Ident:
 			if index(fn) < 0 {
-				if a := c.aliases.Lookup(c.src.TokenText(c.src.Main(fn))); a != nil {
-					c.kinds(a)
-					for _, p := range a.params {
-						rows = append(rows, p.row)
-					}
-				}
+				s = c.static(fn)
 			}
-		case ast.Import:
-			for _, p := range c.imported(fn).Params {
+		case ast.Import, ast.Access:
+			s = c.static(fn)
+		}
+		switch {
+		case s.alias != nil:
+			c.kinds(s.alias)
+			for _, p := range s.alias.params {
+				rows = append(rows, p.row)
+			}
+		case s.isType():
+			for _, p := range s.imported.Params {
 				rows = append(rows, p.Row)
 			}
 		}
@@ -246,8 +258,8 @@ func (c *context) typ(x ast.Node) TypeRef {
 			}
 			return v.val.ref
 		}
-		if a := c.aliases.Lookup(name); a != nil {
-			return c.apply(x, a, nil)
+		if !c.static(x).isNone() {
+			return c.applyStatic(x, x, nil)
 		}
 		if ref, ok := primitiveTypes[name]; ok {
 			return ref
@@ -256,8 +268,8 @@ func (c *context) typ(x ast.Node) TypeRef {
 			c.bail(x, fmt.Sprintf("list takes %s, not 0", typeArguments(1)))
 		}
 		c.bail(x, fmt.Sprintf("unknown type %s", name))
-	case ast.Import:
-		return c.applyImport(x, x, nil)
+	case ast.Import, ast.Access:
+		return c.applyStatic(x, x, nil)
 	case ast.Literal:
 		if c.src.LiteralKind(x) == token.HOLE {
 			return HoleRef
@@ -335,14 +347,14 @@ func (c *context) typeApp(x ast.Node) (fn ast.Node, args []ast.Node) {
 func (c *context) application(x ast.Node) TypeRef {
 	fn, args := c.typeApp(x)
 
-	if c.src.Kind(fn) == ast.Import {
-		return c.applyImport(x, fn, args)
-	}
-	if c.src.Kind(fn) == ast.Ident {
+	switch c.src.Kind(fn) {
+	case ast.Import, ast.Access:
+		return c.applyStatic(x, fn, args)
+	case ast.Ident:
 		name := c.src.TokenText(c.src.Main(fn))
 		if c.tvars.Get(name) == nil {
-			if a := c.aliases.Lookup(name); a != nil {
-				return c.apply(x, a, args)
+			if !c.static(fn).isNone() {
+				return c.applyStatic(x, fn, args)
 			}
 			if name == "list" {
 				if len(args) != 1 {
@@ -396,14 +408,19 @@ func (c *context) typeArgs(name string, rows []bool, args []ast.Node) []TypeRef 
 	return refs
 }
 
-// applyImport returns the type that the type scrap imported by imp denotes,
-// applied to args if it is a type constructor.
-func (c *context) applyImport(x, imp ast.Node, args []ast.Node) TypeRef {
-	name := c.src.NodeText(imp)
-	res := c.imported(imp)
-	if !res.Sort {
-		c.bail(imp, fmt.Sprintf("%s is a value, not a type", name))
+// applyStatic returns the type that the path fn denotes, applied to args if
+// it is a type constructor.
+func (c *context) applyStatic(x, fn ast.Node, args []ast.Node) TypeRef {
+	s := c.constructor(fn)
+	if s.alias != nil {
+		return c.apply(x, s.alias, args)
 	}
+	return c.applyResult(x, c.src.NodeText(fn), *s.imported, args)
+}
+
+// applyResult returns the type that the imported type res, written name,
+// denotes, applied to args if it is a type constructor.
+func (c *context) applyResult(x ast.Node, name string, res Result, args []ast.Node) TypeRef {
 	if len(args) != len(res.Params) {
 		if len(res.Params) == 0 {
 			c.bail(x, fmt.Sprintf("%s is not a type constructor", name))
