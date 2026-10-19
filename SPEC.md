@@ -325,11 +325,12 @@ type     = NAME "=>" type                        # prenex quantification / type 
          | arrow
 arrow    = tapp [ "->" arrow ]                   # right-assoc
 tapp     = tatom { tatom }                       # type application: list int
-tatom    = NAME | "()" | "(" type ")"
+tatom    = tpath | "()" | "(" type ")"
          | "{" [ tfield { "," tfield } ] [ "," ".." NAME ] "}"   # record row
          | "[" [ ttag   { "," ttag   } ] [ "," ".." NAME ] "]"   # tag-union row
 tfield   = NAME ":" type
 ttag     = TAG [ tatom ]
+tpath    = ( NAME | HASH | PATH ) { "." NAME }   # a type, a type scrap, or a type member
 ```
 
 A row tail may stand alone: `{ ..r }`, `[ ..r ]`. Examples:

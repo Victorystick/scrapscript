@@ -98,6 +98,7 @@ var trees = []string{
 	`f ; f : a => b => { x : a, ..r } -> [#a b, #c (list a), ..s] = _ -> #c []`,
 	`t ; t : type -> type = s => { state : s }`,
 	`t ; t = a => [#leaf, #node { left : t a, value : a, right : t a }]`,
+	`t ; t : type = { paths : avl.tree text (p.parser int), q : lib.sub.t, r : $"./avl.scrap".tree int int }`,
 	`x ; x : () = ()`,
 	`f ; f : list (int -> int) = []`,
 	`f ; f : (a => a) -> int = _ -> 1`,

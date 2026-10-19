@@ -141,6 +141,9 @@ func TestParseTypes(t *testing.T) {
 		{`t ; t : type = { ..r }`, true},
 		{`t ; t : type -> type = s => { state : s }`, true},
 		{`t ; t = a => b => [#left a, #right b]`, true},
+		{`ignore ; ignore : avl.tree text int -> int = _ -> 1`, false},
+		{`t ; t : type = { paths : avl.tree text (p.parser int), q : lib.sub.t }`, true},
+		{`t ; t : type = [#a ($"./avl.scrap".tree int int), #b $source:0.t]`, true},
 	}
 
 	for _, ex := range examples {

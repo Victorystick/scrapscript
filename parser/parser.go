@@ -421,11 +421,12 @@ func startsTypeAtom(tok token.Token) bool {
 }
 
 // parseTypeAtom parses a type name, (), a parenthesised type, a record or
-// enum type, or a hash reference to a type scrap.
+// enum type, a reference to a type scrap, or a path to a type member, such
+// as `avl.tree` or `$"./avl.scrap".tree`.
 func (p *parser) parseTypeAtom() ast.Node {
 	switch p.tok {
 	case token.IDENT:
-		return p.ident()
+		return p.parseTypePath(p.ident())
 	case token.HOLE:
 		lit := p.add(ast.Literal, p.at(), 0, 0)
 		p.next()
@@ -457,11 +458,20 @@ func (p *parser) parseTypeAtom() ast.Node {
 		})
 		return p.add(ast.Enum, start, uint32(tail), info)
 	case token.HASH, token.PATH:
-		return p.parseImport()
+		return p.parseTypePath(p.parseImport())
 	}
 
 	p.unexpected()
 	return ast.None
+}
+
+// parseTypePath parses the members accessed from x, if any.
+func (p *parser) parseTypePath(x ast.Node) ast.Node {
+	for p.tok == token.ACCESS {
+		p.next()
+		x = p.add(ast.Access, p.identTok(), uint32(x), 0)
+	}
+	return x
 }
 
 // parseRow parses the comma-separated labels of a record or enum type, from
