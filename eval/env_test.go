@@ -185,6 +185,44 @@ type nopPusher struct{}
 
 func (nopPusher) PushScrap(data []byte) (string, error) { return "", nil }
 
+func TestReadDraft(t *testing.T) {
+	eval := func(env *Environment, s *Scrap, err error) string {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := env.Eval(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return env.Print(v)
+	}
+
+	// Its paths are relative to its name.
+	env := pathEnv(pathFiles)
+	main, err := env.ReadDraft("sub/main.scrap", []byte(`$"../inc.scrap" 41`))
+	if got := eval(env, main, err); got != "42" {
+		t.Errorf("Expected 42, got %s", got)
+	}
+
+	// Other drafts get it instead of the file.
+	env = pathEnv(pathFiles)
+	if _, err := env.ReadDraft("inc.scrap", []byte(`x -> x + 2`)); err != nil {
+		t.Fatal(err)
+	}
+	two, err := env.Read([]byte(`$"./sub/two.scrap"`))
+	if got := eval(env, two, err); got != "3" {
+		t.Errorf("Expected 3, got %s", got)
+	}
+
+	if _, err := env.ReadDraft("inc.scrap", []byte(`1`)); err == nil || err.Error() != "inc.scrap is already read" {
+		t.Errorf("Expected 'inc.scrap is already read', got %v", err)
+	}
+	if _, err := env.ReadDraft("../inc.scrap", []byte(`1`)); err == nil || err.Error() != "../inc.scrap is not a path within the drafts" {
+		t.Errorf("Expected '../inc.scrap is not a path within the drafts', got %v", err)
+	}
+}
+
 func TestDraftsWithPathsCannotBePushed(t *testing.T) {
 	env := NewEnvironment()
 	env.UsePusher(nopPusher{})

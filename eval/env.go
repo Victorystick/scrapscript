@@ -98,7 +98,28 @@ func (e *Environment) UseDrafts(files fs.FS) {
 	e.files = files
 }
 
-// Read parses a draft.
+// ReadDraft parses script as the draft at the path name among the files
+// that UseDrafts gave, such as an editor's unsaved copy of it, instead of
+// reading that file. Its paths are relative to name, and other drafts that
+// refer to name get this one.
+func (e *Environment) ReadDraft(name string, script []byte) (*Scrap, error) {
+	if !fs.ValidPath(name) {
+		return nil, fmt.Errorf("%s is not a path within the drafts", name)
+	}
+	if _, ok := e.drafts[name]; ok {
+		return nil, fmt.Errorf("%s is already read", name)
+	}
+	s, err := e.Read(script)
+	if err != nil {
+		return nil, err
+	}
+	s.name = name
+	e.drafts[name] = s
+	return s, nil
+}
+
+// Read parses a draft that isn't one of the files UseDrafts gave, such as
+// standard input. Its paths are relative to the root of the files.
 func (e *Environment) Read(script []byte) (*Scrap, error) {
 	src := token.NewSource(script)
 	se, err := parser.Parse(&src)
@@ -176,13 +197,7 @@ func (e *Environment) draft(from *Scrap, p string) (*Scrap, error) {
 	if err != nil {
 		return nil, err
 	}
-	s, err := e.Read(bytes)
-	if err != nil {
-		return nil, err
-	}
-	s.name = name
-	e.drafts[name] = s
-	return s, nil
+	return e.ReadDraft(name, bytes)
 }
 
 // fetch returns the published scrap with the given hash. The source scheme
