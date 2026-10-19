@@ -54,6 +54,8 @@ type hashKey struct {
 // An Environment loads, checks and evaluates scraps. It reaches outside
 // itself only through the Fetcher, Pusher and drafts it is given, so it runs
 // anywhere, including where there is no filesystem or network.
+//
+// An Environment is not safe for concurrent use: use one per goroutine.
 type Environment struct {
 	pusher  Pusher
 	fetcher Fetcher
