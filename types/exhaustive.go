@@ -188,14 +188,14 @@ func (c *context) missingIn(at, rows, width int) bool {
 	return missing
 }
 
-// tag returns the first tag of the enum row, and the rest of the row.
+// tag returns the first tag that the enum row may have, and the rest of the
+// row.
 func (c *context) tag(row TypeRef) (ctor, TypeRef, bool) {
-	row = c.reg.Resolve(row)
-	l := c.reg.at(row)
-	if l.kind != extendKind {
-		return ctor{}, row, false
+	l, payload, _, rest, ok := c.reg.entry(row)
+	if !ok {
+		return ctor{}, rest, false
 	}
-	return ctor{kind: tagCtor, label: c.reg.labels.Name(l.label()), typ: l.a}, l.b, true
+	return ctor{kind: tagCtor, label: c.reg.labels.Name(l), typ: payload}, rest, true
 }
 
 // split returns true if some value made with the constructor k matches no
@@ -231,8 +231,8 @@ func (c *context) argTypes(k ctor) int {
 	case tagCtor:
 		e.types = append(e.types, k.typ)
 	case recordCtor:
-		for row := c.reg.Resolve(c.reg.at(k.typ).a); c.reg.at(row).kind == extendKind; row = c.reg.Resolve(c.reg.at(row).b) {
-			e.types = append(e.types, c.reg.at(row).a)
+		for _, payload := range c.reg.fields(c.reg.at(k.typ).a) {
+			e.types = append(e.types, payload)
 		}
 	case listCtor:
 		for range k.n {
@@ -266,8 +266,8 @@ func (c *context) args(p ast.Node, k ctor) bool {
 		return true
 
 	case recordCtor:
-		for row := c.reg.Resolve(c.reg.at(k.typ).a); c.reg.at(row).kind == extendKind; row = c.reg.Resolve(c.reg.at(row).b) {
-			e.cells = append(e.cells, c.field(p, c.reg.labels.Name(c.reg.at(row).label())))
+		for l := range c.reg.fields(c.reg.at(k.typ).a) {
+			e.cells = append(e.cells, c.field(p, c.reg.labels.Name(l)))
 		}
 		return true
 
@@ -306,7 +306,7 @@ func (c *context) arity(k ctor) int {
 		return 1
 	case recordCtor:
 		n := 0
-		for row := c.reg.Resolve(c.reg.at(k.typ).a); c.reg.at(row).kind == extendKind; row = c.reg.Resolve(c.reg.at(row).b) {
+		for range c.reg.fields(c.reg.at(k.typ).a) {
 			n++
 		}
 		return n
@@ -447,9 +447,9 @@ func (c *context) write(b *strings.Builder, ks []ctor, arg bool) []ctor {
 	case recordCtor:
 		// The fields are in row order; write them by label.
 		var fields []string
-		for row := c.reg.Resolve(c.reg.at(k.typ).a); c.reg.at(row).kind == extendKind; row = c.reg.Resolve(c.reg.at(row).b) {
+		for l := range c.reg.fields(c.reg.at(k.typ).a) {
 			var f strings.Builder
-			f.WriteString(c.reg.labels.Name(c.reg.at(row).label()) + " = ")
+			f.WriteString(c.reg.labels.Name(l) + " = ")
 			ks = c.write(&f, ks, false)
 			fields = append(fields, f.String())
 		}

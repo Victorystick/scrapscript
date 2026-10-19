@@ -2,6 +2,7 @@ package types
 
 import (
 	"errors"
+	"iter"
 	"maps"
 	"slices"
 	"strings"
@@ -27,7 +28,8 @@ const (
 	recordKind             // a: the row of fields.
 	enumKind               // a: the row of tags.
 	emptyKind              // The empty row, which closes a row.
-	extendKind             // aux: the label. a: its type. b: the rest of the row.
+	extendKind             // aux: the label. a: its field. b: the rest of the row.
+	fieldKind              // An entry of a row. a: its payload. b: its flag: presentRef, absentRef or a variable.
 	rigidKind              // A rigid type variable, equal only to itself. aux: its level. a: its name's label. b: its lacks.
 )
 
@@ -48,7 +50,8 @@ func (n node) name() label.ID {
 	return label.ID(n.a)
 }
 
-// The fixed refs of the primitive types and the empty row.
+// The fixed refs of the primitive types, the empty row, and the flags of
+// fields.
 const (
 	NoType TypeRef = iota
 	HoleRef
@@ -58,6 +61,8 @@ const (
 	ByteRef
 	BytesRef
 	emptyRef
+	presentRef // A row has the label.
+	absentRef  // A row doesn't have the label, though it lists it.
 	numFixed
 )
 
@@ -231,6 +236,7 @@ func (r *Registry) Enum(tags map[string]TypeRef) TypeRef {
 	return r.add(node{kind: enumKind, a: r.row(tags, emptyRef)})
 }
 
+// row returns the row tail extended with present labels.
 func (r *Registry) row(labels map[string]TypeRef, tail TypeRef) TypeRef {
 	for _, l := range slices.Sorted(maps.Keys(labels)) {
 		tail = r.extend(r.labels.Of(l), labels[l], tail)
@@ -238,11 +244,23 @@ func (r *Registry) row(labels map[string]TypeRef, tail TypeRef) TypeRef {
 	return tail
 }
 
-// extend returns the row rest extended with the label l, which the variable
-// that ends rest then lacks: a row has each label at most once.
+// extend returns the row rest extended with the label l present, with the
+// payload typ.
 func (r *Registry) extend(l label.ID, typ, rest TypeRef) TypeRef {
+	return r.extendField(l, r.field(typ, presentRef), rest)
+}
+
+// extendField returns the row rest extended with the label l and its field,
+// which the variable that ends rest then lacks: a row has each label at most
+// once.
+func (r *Registry) extendField(l label.ID, field, rest TypeRef) TypeRef {
 	r.lack(r.rowTail(rest), l)
-	return r.add(node{kind: extendKind, aux: uint32(l), a: typ, b: rest})
+	return r.add(node{kind: extendKind, aux: uint32(l), a: field, b: rest})
+}
+
+// field returns a field with a payload and a flag.
+func (r *Registry) field(payload, flag TypeRef) TypeRef {
+	return r.add(node{kind: fieldKind, a: payload, b: flag})
 }
 
 // lacks returns the labels that the row variable v lacks.
@@ -385,7 +403,7 @@ func (r *Registry) generalize(ref TypeRef) {
 		}
 	case listKind, recordKind:
 		r.generalize(n.a)
-	case funcKind, extendKind:
+	case funcKind, extendKind, fieldKind:
 		r.generalize(n.a)
 		r.generalize(n.b)
 	}
@@ -472,13 +490,16 @@ func (in *instantiator) copy(ref TypeRef) TypeRef {
 		c := r.add(n)
 		in.name(ref, c)
 		return c
-	case funcKind, extendKind:
+	case funcKind, extendKind, fieldKind:
 		a, b := in.copy(n.a), in.copy(n.b)
 		if a == n.a && b == n.b {
 			return ref
 		}
-		if n.kind == extendKind {
-			return r.extend(n.label(), a, b)
+		switch n.kind {
+		case extendKind:
+			return r.extendField(n.label(), a, b)
+		case fieldKind:
+			return r.field(a, b)
 		}
 		n.a, n.b = a, b
 		c := r.add(n)
@@ -595,8 +616,23 @@ func (r *Registry) unify(a, b TypeRef) error {
 		return r.rowError(a, b, r.unifyRows(na.a, nb.a))
 	case extendKind:
 		return r.unifyRows(a, b)
+	case fieldKind:
+		if err := r.unifyFlags(na.b, nb.b); err != nil {
+			return err
+		}
+		return r.unify(na.a, nb.a)
 	}
 	return r.mismatch(a, b)
+}
+
+// unifyFlags unifies the flags of two fields. A label present in one row
+// and absent from the other is missing from it.
+func (r *Registry) unifyFlags(a, b TypeRef) error {
+	a, b = r.Resolve(a), r.Resolve(b)
+	if a != b && r.at(a).kind == conKind && r.at(b).kind == conKind {
+		return errMissingLabel
+	}
+	return r.unify(a, b)
 }
 
 // bind binds the variable v to the type t.
@@ -648,7 +684,7 @@ func (r *Registry) occurs(v TypeRef, level uint32, t TypeRef) error {
 		return r.occurs(v, level, n.a)
 	case listKind, recordKind:
 		return r.occurs(v, level, n.a)
-	case funcKind, extendKind:
+	case funcKind, extendKind, fieldKind:
 		if err := r.occurs(v, level, n.a); err != nil {
 			return err
 		}
@@ -679,22 +715,23 @@ func (r *Registry) unifyRows(a, b TypeRef) error {
 	// rest, the rows can only be equal if they are infinite.
 	tail := r.rowTail(na.b)
 	openTail := r.at(tail).kind == varKind
-	typ, rest, err := r.rewrite(b, na.label())
+	field, rest, err := r.rewrite(b, na.label())
 	if err != nil {
 		return err
 	}
 	if openTail && r.at(tail).kind != varKind {
 		return errInfiniteRow
 	}
-	if err := r.unify(na.a, typ); err != nil {
+	if err := r.unify(na.a, field); err != nil {
 		return err
 	}
 	return r.unifyRows(na.b, rest)
 }
 
-// rewrite finds the label l in row, returning its type and the rest of the
-// row. If the row is open and lacks l, its tail is extended with it.
-func (r *Registry) rewrite(row TypeRef, l label.ID) (typ, rest TypeRef, err error) {
+// rewrite finds the label l in row, returning its field and the rest of the
+// row. If the row is open and lacks l, its tail is extended with it. If the
+// row is closed without l, l is absent from it.
+func (r *Registry) rewrite(row TypeRef, l label.ID) (field, rest TypeRef, err error) {
 	row = r.Resolve(row)
 	n := r.at(row)
 	switch n.kind {
@@ -702,11 +739,11 @@ func (r *Registry) rewrite(row TypeRef, l label.ID) (typ, rest TypeRef, err erro
 		if n.label() == l {
 			return n.a, n.b, nil
 		}
-		typ, rest, err = r.rewrite(n.b, l)
+		field, rest, err = r.rewrite(n.b, l)
 		if err != nil {
 			return
 		}
-		return typ, r.extend(n.label(), n.a, rest), nil
+		return field, r.extendField(n.label(), n.a, rest), nil
 	case varKind:
 		lacks := r.lacks(row)
 		if slices.Contains(lacks, l) {
@@ -716,11 +753,13 @@ func (r *Registry) rewrite(row TypeRef, l label.ID) (typ, rest TypeRef, err erro
 		// what it does.
 		level := r.level
 		r.level = n.aux
-		typ, rest = r.Var(), r.Var()
+		field, rest = r.field(r.Var(), r.Var()), r.Var()
 		r.level = level
 		r.lack(rest, lacks...)
-		r.link(row, r.extend(l, typ, rest))
-		return typ, rest, nil
+		r.link(row, r.extendField(l, field, rest))
+		return field, rest, nil
+	case emptyKind:
+		return r.field(r.Var(), absentRef), row, nil
 	}
 	return 0, 0, errMissingLabel
 }
@@ -960,7 +999,7 @@ func (s *stringer) reserveBody(ref TypeRef) {
 		// named in.
 		entries, tail := s.reg.entries(ref)
 		for _, e := range entries {
-			s.reserve(e.typ)
+			s.reserve(e.payload)
 		}
 		s.reserve(tail)
 	}
@@ -1083,26 +1122,60 @@ func (s *stringer) named(name typeName, nesting int) {
 	}
 }
 
-// A rowEntry is a label of a row, and its type.
+// A rowEntry is a label of a row, its payload and its flag.
 type rowEntry struct {
-	label string
-	typ   TypeRef
+	label   string
+	payload TypeRef
+	flag    TypeRef
 }
 
-// entries returns a row's labels in order, and its tail.
+// entries returns the labels in order that a row may have, and its tail.
+// Absent labels are left out.
 func (r *Registry) entries(row TypeRef) ([]rowEntry, TypeRef) {
 	var entries []rowEntry
+	for {
+		l, payload, flag, rest, ok := r.entry(row)
+		if !ok {
+			row = rest
+			break
+		}
+		entries = append(entries, rowEntry{r.labels.Name(l), payload, flag})
+		row = rest
+	}
+	slices.SortFunc(entries, func(a, b rowEntry) int { return strings.Compare(a.label, b.label) })
+	return entries, row
+}
+
+// entry returns the first label of row that it may have, its payload and
+// flag, and the rest of the row after it. If there is none, it returns the
+// tail of the row as the rest, and false.
+func (r *Registry) entry(row TypeRef) (l label.ID, payload, flag, rest TypeRef, ok bool) {
 	for {
 		row = r.Resolve(row)
 		n := r.at(row)
 		if n.kind != extendKind {
-			break
+			return 0, 0, 0, row, false
 		}
-		entries = append(entries, rowEntry{r.labels.Name(n.label()), n.a})
+		f := r.at(r.Resolve(n.a))
+		if flag := r.Resolve(f.b); flag != absentRef {
+			return n.label(), f.a, flag, n.b, true
+		}
 		row = n.b
 	}
-	slices.SortFunc(entries, func(a, b rowEntry) int { return strings.Compare(a.label, b.label) })
-	return entries, row
+}
+
+// fields yields the labels that row may have, in row order, and their
+// payloads.
+func (r *Registry) fields(row TypeRef) iter.Seq2[label.ID, TypeRef] {
+	return func(yield func(label.ID, TypeRef) bool) {
+		for {
+			l, payload, _, rest, ok := r.entry(row)
+			if !ok || !yield(l, payload) {
+				return
+			}
+			row = rest
+		}
+	}
 }
 
 // row writes a row's labels in order, followed by its tail if it is open.
@@ -1114,7 +1187,7 @@ func (s *stringer) row(row TypeRef, open, close byte, label func(string, TypeRef
 			s.WriteByte(',')
 		}
 		s.WriteByte(' ')
-		label(e.label, e.typ)
+		label(e.label, e.payload)
 	}
 	isOpen := s.reg.at(row).kind != emptyKind
 	if isOpen {

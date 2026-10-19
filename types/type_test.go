@@ -1,6 +1,10 @@
 package types
 
-import "testing"
+import (
+	"maps"
+	"slices"
+	"testing"
+)
 
 func TestNoTypeIsInvalid(t *testing.T) {
 	defer func() {
@@ -218,6 +222,46 @@ func TestUnifyRows(t *testing.T) {
 	z := reg.add(node{kind: recordKind, a: reg.extend(reg.labels.Of("a"), IntRef, r)})
 	w := reg.add(node{kind: recordKind, a: reg.extend(reg.labels.Of("b"), IntRef, r)})
 	Neq(t, reg.Unify(z, w), nil)
+}
+
+func TestUnifyPresence(t *testing.T) {
+	reg := Registry{}
+
+	// An enum with tags of the given flags, each with the payload ().
+	enum := func(tail TypeRef, tags map[string]TypeRef) TypeRef {
+		row := tail
+		for _, l := range slices.Sorted(maps.Keys(tags)) {
+			row = reg.extendField(reg.labels.Of(l), reg.field(HoleRef, tags[l]), row)
+		}
+		return reg.add(node{kind: enumKind, a: row})
+	}
+
+	// Absent tags don't print, and a closed row has every other tag absent.
+	x := enum(emptyRef, map[string]TypeRef{"a": presentRef, "b": absentRef})
+	Eq(t, reg.String(x), "[ #a ]")
+	Eq(t, reg.Unify(x, enum(emptyRef, map[string]TypeRef{"a": presentRef})), nil)
+
+	// A flag variable is absent where a closed row lacks its tag, and present
+	// where the tag is present.
+	f, g := reg.Var(), reg.Var()
+	Eq(t, reg.Unify(enum(emptyRef, map[string]TypeRef{"a": f, "b": g}), enum(emptyRef, map[string]TypeRef{"a": presentRef})), nil)
+	Eq(t, reg.Resolve(f), presentRef)
+	Eq(t, reg.Resolve(g), absentRef)
+
+	// A present tag is missing from a row where it is absent.
+	Eq(t, reg.Unify(enum(emptyRef, map[string]TypeRef{"a": presentRef, "b": presentRef}), x).Error(),
+		"cannot unify '[ #a, #b ]' with '[ #a ]'")
+	Eq(t, reg.Unify(enum(reg.Var(), map[string]TypeRef{"b": presentRef}), x).Error(),
+		"cannot unify '[ #b, ..a ]' with '[ #a ]'")
+
+	// Instances get fresh flag variables.
+	h := reg.Gen()
+	scheme := enum(emptyRef, map[string]TypeRef{"a": h})
+	y, z := reg.Instantiate(scheme), reg.Instantiate(scheme)
+	Eq(t, reg.Unify(y, enum(emptyRef, map[string]TypeRef{"a": presentRef})), nil)
+	Eq(t, reg.Unify(z, enum(emptyRef, nil)), nil)
+	Eq(t, reg.String(y), "[ #a ]")
+	Eq(t, reg.String(z), "[]")
 }
 
 func Neq[T comparable](t *testing.T, a, b T) {

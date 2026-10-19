@@ -71,7 +71,7 @@ func (r *Registry) Shape(ref TypeRef) Shape {
 		}
 		entries, tail := r.entries(n.a)
 		for _, e := range entries {
-			s.Labels = append(s.Labels, Label{e.label, e.typ})
+			s.Labels = append(s.Labels, Label{e.label, e.payload})
 		}
 		s.Open = r.at(tail).kind != emptyKind
 	default:
