@@ -18,11 +18,8 @@
 , from-list = from-list
 }
 
-; tree : type -> type -> type = k => v =>
-    [#leaf, #node { key : k, value : v, left : tree k v, right : tree k v, height : int }]
+; tree : type -> type -> type = k => v => [#leaf, #node (node k v)]
 
--- The payload of #node. Defining tree through it would make the two
--- mutually recursive, which the checker rejects for aliases with parameters.
 ; node : type -> type -> type = k => v => { key : k, value : v, left : tree k v, right : tree k v, height : int }
 
 ; order : type -> type = k => k -> k -> [#lt, #eq, #gt]
