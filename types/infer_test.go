@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/parser"
 )
 
@@ -471,6 +472,62 @@ func TestInferImport(t *testing.T) {
 			typStr := reg.Describe(res)
 			if typStr != ex.result {
 				t.Errorf("Expected %s, got %s", ex.result, typStr)
+			}
+		}
+	}
+}
+
+func TestInferNodes(t *testing.T) {
+	examples := []struct {
+		in    string
+		types map[string]string // A node's text, and its type.
+	}{
+		{`f 1 ; f = a -> a`, map[string]string{
+			`f 1`:    `int`,
+			`f`:      `int -> int`, // The use is instantiated.
+			`1`:      `int`,
+			`a -> a`: `a -> a`,
+			`a`:      `a`,
+		}},
+		{`g (#x 2) ; g : [#x int, #y] -> int = | #x n -> n + 1 | #y -> 0`, map[string]string{
+			`#x 2`:                `[ #x int, #y ]`,
+			`#x n`:                `[ #x int, #y ]`,
+			`n`:                   `int`,
+			`n + 1`:               `int`,
+			`[#x int, #y] -> int`: ``, // A type expression has no type.
+		}},
+		{`{ a = x } ; x = [1]`, map[string]string{
+			`{ a = x }`: `{ a : list int }`,
+			`x`:         `list int`,
+			`[1]`:       `list int`,
+		}},
+	}
+
+	for _, ex := range examples {
+		var reg Registry
+		se := must(parser.ParseExpr(ex.in))
+		res := must(Infer(&reg, nil, se, nil))
+		found := make(map[string]string)
+		for n := ast.None + 1; int(n) < len(se.Kinds); n++ {
+			text := se.NodeText(n)
+			if _, ok := ex.types[text]; !ok {
+				continue
+			}
+			typ := ""
+			if ref := res.Nodes[n]; ref != NoType {
+				strs, _ := reg.Strings(ref)
+				typ = strs[0]
+			}
+			if prev, ok := found[text]; ok && prev != typ {
+				t.Errorf("%s: nodes %q have types %q and %q", ex.in, text, prev, typ)
+			}
+			found[text] = typ
+		}
+		for text, want := range ex.types {
+			if got, ok := found[text]; !ok {
+				t.Errorf("%s: no node %q", ex.in, text)
+			} else if got != want {
+				t.Errorf("%s: node %q has type %q, want %q", ex.in, text, got, want)
 			}
 		}
 	}

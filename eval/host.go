@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/types"
 )
@@ -175,6 +176,12 @@ func (e *Environment) Fetch(scheme, digest string) (*Scrap, error) {
 // Source returns the source of a scrap.
 func (s *Scrap) Source() []byte {
 	return s.expr.Source.Bytes()
+}
+
+// Expr returns the parsed expression of a scrap, whose nodes index the Nodes
+// of its result from TypeOf. The caller must only read it.
+func (s *Scrap) Expr() *ast.SourceExpr {
+	return &s.expr
 }
 
 // Closure returns the scraps that s refers to, directly or not, each once,

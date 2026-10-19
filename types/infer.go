@@ -47,6 +47,11 @@ type Result struct {
 	// For a type constructor, its parameters, which are generalized variables
 	// in Type.
 	Params []Param
+	// The type of each node of the scrap's expression, by node: of each value
+	// and pattern. Others have NoType: type expressions, and the inner Where
+	// nodes of a where-group, whose type is at its outermost one. A use of a
+	// polymorphic name has the type it is instantiated to there.
+	Nodes []TypeRef
 }
 
 // A Param is a parameter of an exported type constructor.
@@ -67,6 +72,7 @@ type context struct {
 	aliases *Scope[*alias]
 	tvars   *Scope[tvar]
 	imports Imports
+	nodes   []TypeRef
 	// How many tag payloads the type expression being read is inside of.
 	payloads int
 	// The match functions, and their argument types, to check for
@@ -77,6 +83,11 @@ type context struct {
 
 func (c *context) bail(n ast.Node, msg string) {
 	panic(c.src.Error(n, msg))
+}
+
+// typed records that x has the type ref.
+func (c *context) typed(x ast.Node, ref TypeRef) {
+	c.nodes[x] = ref
 }
 
 func (c *context) bind(name string, ref TypeRef) {
@@ -92,6 +103,7 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, imports Imports) (
 		reg:     reg,
 		scope:   scope,
 		imports: imports,
+		nodes:   make([]TypeRef, len(se.Kinds)),
 	}
 
 	level := reg.level
@@ -113,10 +125,17 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, imports Imports) (
 	}
 	reg.exit()
 	reg.generalize(res.Type)
+	res.Nodes = context.nodes
 	return res, err
 }
 
 func (c *context) infer(x ast.Node) TypeRef {
+	ref := c.inferNode(x)
+	c.typed(x, ref)
+	return ref
+}
+
+func (c *context) inferNode(x ast.Node) TypeRef {
 	switch c.src.Kind(x) {
 	case ast.Literal:
 		return literalTypeRef(c.src.LiteralKind(x))
@@ -159,6 +178,7 @@ func (c *context) infer(x ast.Node) TypeRef {
 			c.bail(arg, "function parameter must be an identifier")
 		}
 		binder := c.reg.Var()
+		c.typed(arg, binder)
 		scope := c.scope
 		if name := c.src.NodeText(arg); name != "_" {
 			c.bind(name, binder)
@@ -226,6 +246,8 @@ func (c *context) check(x ast.Node, want TypeRef) {
 	if c.src.Kind(x) == ast.Func {
 		arg, body := c.src.Func(x)
 		if n := c.reg.at(c.reg.Resolve(want)); n.kind == funcKind && c.src.Kind(arg) == ast.Ident {
+			c.typed(x, want)
+			c.typed(arg, n.a)
 			scope := c.scope
 			if name := c.src.NodeText(arg); name != "_" {
 				c.bind(name, n.a)
@@ -556,6 +578,7 @@ func (p position) coveredBy(catchAll []position) bool {
 // pattern infers the type of the pattern x at position at, unifying it with
 // ty and binding its names.
 func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
+	c.typed(x, ty)
 	switch c.src.Kind(x) {
 	case ast.Ident:
 		m.catchAll = append(m.catchAll, at)
