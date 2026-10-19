@@ -278,7 +278,7 @@ func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
 		return nil, fmt.Errorf("cannot evaluate a type")
 	}
 	if s.value == nil {
-		c, err := compile(&s.expr, e.vars, e.shapes)
+		c, err := compile(&s.expr, res.Nodes, e.vars, e.shapes)
 		if err != nil {
 			return nil, err
 		}

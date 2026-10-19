@@ -7,6 +7,7 @@ import (
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/token"
+	"github.com/Victorystick/scrapscript/types"
 )
 
 // The core that eval runs: a SourceExpr after type checking, with names
@@ -213,9 +214,13 @@ func (c *core) elems(n cnode) (rest cnode, elems []int32) {
 // compile lowers se, which must have been type-checked. Free names that it
 // doesn't bind refer to globals. Tags and record keys are interned in the
 // label table of shapes, and the shapes of records in shapes.
-func compile(se *ast.SourceExpr, globals Vars, shapes *shapeTable) (*core, error) {
+//
+// typed is the type of each node, from type checking, or nil to compile
+// every record field as a value.
+func compile(se *ast.SourceExpr, typed []types.TypeRef, globals Vars, shapes *shapeTable) (*core, error) {
 	c := compiler{
 		core:     core{src: se, labels: shapes.labels, table: shapes},
+		typed:    typed,
 		globals:  globals,
 		builtins: make(map[string]int32),
 	}
@@ -231,6 +236,7 @@ func compile(se *ast.SourceExpr, globals Vars, shapes *shapeTable) (*core, error
 
 type compiler struct {
 	core
+	typed   []types.TypeRef
 	globals Vars
 	// The index in consts of each builtin referred to.
 	builtins map[string]int32
@@ -318,6 +324,30 @@ func (c *compiler) builtin(x ast.Node, name string) int32 {
 // label returns the ID of the tag or record key t.
 func (c *compiler) label(t ast.Tok) int32 {
 	return int32(c.labels.Of(c.name(t)))
+}
+
+// valueFields returns the fields of a record that are values. The others are
+// type members, which the checker gave no type, and which are erased.
+func (c *compiler) valueFields(fields ast.Fields) ast.Fields {
+	if c.typed == nil {
+		return fields
+	}
+	var kept ast.Fields
+	for i := range fields.Len() {
+		if c.typed[fields.Value(i)] == types.NoType {
+			if kept == nil {
+				kept = slices.Clip(fields[:2*i])
+			}
+			continue
+		}
+		if kept != nil {
+			kept = append(kept, ast.Node(fields.Key(i)), fields.Value(i))
+		}
+	}
+	if kept == nil {
+		return fields
+	}
+	return kept
 }
 
 // shape adds the shape of a record's fields to shapes, and returns its
@@ -473,6 +503,7 @@ func (c *compiler) expr(x ast.Node) cnode {
 
 	case ast.Record:
 		rest, fields := se.Record(x)
+		fields = c.valueFields(fields)
 		if rest != ast.None {
 			xs := []int32{int32(c.expr(rest)), -1}
 			for i := range fields.Len() {

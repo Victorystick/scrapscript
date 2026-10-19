@@ -108,8 +108,33 @@ func loadAccessLog(tb testing.TB) Program {
 	return p
 }
 
+// loadLibraryAccessLog loads the version of the program in lib/, which
+// imports the parser and avl libraries.
+func loadLibraryAccessLog(tb testing.TB) Program {
+	tb.Helper()
+	source, err := os.ReadFile("../../../lib/access-log.scrap")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	env := eval.NewEnvironment()
+	env.UseDrafts(os.DirFS("../../../lib"))
+	app, err := env.ReadDraft("access-log.scrap", source)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	p, err := Load(env, app)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return p
+}
+
 func TestAccessLog(t *testing.T) {
-	p := loadAccessLog(t)
+	t.Run("testdata", func(t *testing.T) { testAccessLog(t, loadAccessLog(t)) })
+	t.Run("lib", func(t *testing.T) { testAccessLog(t, loadLibraryAccessLog(t)) })
+}
+
+func testAccessLog(t *testing.T, p Program) {
 	for _, size := range []struct{ lines, paths int }{{0, 1}, {1, 1}, {100, 3}, {5000, 300}} {
 		log := accessLog(size.lines, size.paths)
 		var out strings.Builder

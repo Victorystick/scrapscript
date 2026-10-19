@@ -473,13 +473,23 @@ func TestImportTypeMember(t *testing.T) {
 		}
 	}
 
-	// The library's value leaves its members out.
+	// The library's value leaves its members out, also when evaluated.
 	scrap, err := env.Read([]byte(`$source:` + lib))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if typ, err := env.Infer(scrap); err != nil || typ != "{ none : [ #none, ..a ] }" {
 		t.Errorf("Expected { none : [ #none, ..a ] }, got %s, %v", typ, err)
+	}
+	if val, err := env.Eval(scrap); err != nil || env.Print(val) != "{ none = #none }" {
+		t.Errorf("Expected { none = #none }, got %v, %v", val, err)
+	}
+	scrap, err = env.Read([]byte(`f l.none ; f : l.option int -> int = | #some n -> n | #none -> 0 ; l = $source:` + lib))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val, err := env.Eval(scrap); err != nil || env.Print(val) != "0" {
+		t.Errorf("Expected 0, got %v, %v", val, err)
 	}
 }
 
