@@ -679,6 +679,12 @@ always gives the same hashes.
   printing and type caching must handle. Open questions: whether members can be
   made abstract, and when two such records' types are equal. Type scraps (7.6)
   are the interim mechanism.
+  - Later, members through applications, as ML functors: in
+    `ordered = cmp -> { tree = tree, insert = … }` the members don't depend
+    on `cmp`, so `(avl.ordered text/cmp).tree` could resolve at compile time
+    (the static part of an application is that of the function's body). A
+    library could then close over its comparison instead of taking it in
+    every call.
 - **Compact runtime values.** Names exist only in source, types and printing;
   at runtime, values are words. Started: variables are frame slots, tags
   and labels are interned IDs, and records are buffers under a shape. The
