@@ -113,6 +113,17 @@ builtins now return plain values and panic with a `runtimeError`, which
       here"), several diagnostics per scrap instead of bailing at the first,
       and no ANSI colours in the error itself, only in the CLI's rendering
       (token.Error bakes them into Error()).
+- [ ] Say which tag a call can't pass. `(| #a -> 1 | #b -> 2) #c` reports
+      `cannot unify '[ #a?, #b? ]' with '[ #c, ..a ]'`, which names
+      neither the call nor `#c`, and with presence the `?` flags leak an
+      inference detail. Better: `cannot pass #c to a function that accepts
+      [ #a, #b ]`, pointing at the argument. Needs (1) the missing-label
+      error (`errMissingLabel`, from `rewrite` and from a present/absent
+      clash) to carry the label and the side lacking it, and (2)
+      `context.call` to unify the argument with the domain on its own, so
+      it knows the mismatch is the argument's. Absent entries print as
+      omitted, so without the label `[ #b? ]` vs `[ #a int ]` is no
+      clearer.
 - [x] Multi-pattern arms (SPEC.md section 3): an arm has one pattern per
       argument, and a match function collects all its arguments before
       matching any arm, so a later pattern falls through to the next arm.
