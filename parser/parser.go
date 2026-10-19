@@ -118,7 +118,7 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 			// resume same panic if it's not a token.Error.
 			e, ok := pnc.(token.Error)
 			if !ok {
-				panic(e)
+				panic(pnc)
 			} else if e.Msg != "" {
 				p.errors.Add(e)
 			}
