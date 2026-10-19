@@ -1,0 +1,127 @@
+-- parser: combinators over the characters of a text, after Elm's Parser but
+-- built with pipes, one step per line:
+--
+--   p.succeed (x -> y -> { x = x, y = y })
+--     |> p.skip (p.symbol "(")
+--     |> p.keep p.int
+--     |> p.skip (p.symbol ",")
+--     |> p.keep p.int
+--     |> p.skip (p.symbol ")")
+--
+-- `keep` applies the function so far to the step's value, `skip` drops it.
+-- Exports its types next to its functions: `parser a` and `outcome a` are
+-- type members, used as `p.parser int` in type position.
+
+{ parser = parser
+, outcome = outcome
+, run = run
+, succeed = succeed
+, problem = problem
+, keep = keep
+, skip = skip
+, map = map
+, and-then = and-then
+, one-of = one-of
+, many = many
+, many1 = many1
+, char-if = char-if
+, symbol = symbol
+, digit = digit
+, int = int
+, word = word
+, spaces = spaces
+, end = end
+}
+
+-- A parser takes the characters left and gives a value with the characters
+-- after it, or what it expected where it failed.
+; parser : type -> type = a => list text -> outcome a
+
+; outcome : type -> type = a =>
+    [#ok { value : a, rest : list text }, #err { expected : text, rest : list text }]
+
+-- Runs a parser on a whole text. `at` counts the characters before the
+-- failure.
+; run : a => parser a -> text -> [#ok a, #err { expected : text, at : int }] = p -> input ->
+    (p chars |>
+      | #ok r  -> #ok r.value
+      | #err e -> #err { expected = e.expected, at = list/length chars - list/length e.rest }
+    ; chars = text/split "" input)
+
+; succeed : a => a -> parser a = value -> rest -> #ok { value = value, rest = rest }
+
+; problem : a => text -> parser a = expected -> rest -> #err { expected = expected, rest = rest }
+
+; map : a => b => (a -> b) -> parser a -> parser b = f -> p -> input -> p input |>
+    | #ok r  -> #ok { value = f r.value, rest = r.rest }
+    | #err e -> #err e
+
+; and-then : a => b => (a -> parser b) -> parser a -> parser b = f -> p -> input -> p input |>
+    | #ok r  -> f r.value r.rest
+    | #err e -> #err e
+
+-- `pf |> keep pa` runs pf, then pa, and applies pf's function to pa's value.
+; keep : a => b => parser a -> parser (a -> b) -> parser b = pa -> pf ->
+    pf |> and-then (f -> pa |> map f)
+
+-- `pb |> skip pa` runs pb, then pa, and keeps pb's value.
+; skip : a => b => parser a -> parser b -> parser b = pa -> pb ->
+    pb |> and-then (b -> pa |> map (_ -> b))
+
+-- Tries each parser on the same input and gives the first success, or the
+-- last failure.
+; one-of : a => list (parser a) -> parser a =
+    | []      -> problem "an alternative"
+    | [p]     -> p
+    | p >+ ps -> (input -> p input |>
+        | #err _ -> one-of ps input
+        | ok     -> ok)
+
+-- Zero or more. p must consume input when it succeeds, or this never ends.
+; many : a => parser a -> parser (list a) = p ->
+    one-of [p |> and-then (x -> many p |> map (xs -> x >+ xs)), succeed []]
+
+; many1 : a => parser a -> parser (list a) = p ->
+    succeed (x -> xs -> x >+ xs)
+      |> keep p
+      |> keep (many p)
+
+-- One character that ok accepts; expected names the class.
+; char-if : (text -> [#true, #false]) -> text -> parser text = ok -> expected ->
+    | []        -> #err { expected = expected, rest = [] }
+    | c >+ rest -> (ok c |>
+        | #true  -> #ok { value = c, rest = rest }
+        | #false -> #err { expected = expected, rest = c >+ rest })
+
+; symbol : text -> parser () = s -> input -> strip (text/split "" s) input |>
+    | #some rest -> #ok { value = (), rest = rest }
+    | #none      -> #err { expected = "\"" ++ s ++ "\"", rest = input }
+
+; digit : parser text = char-if (c -> text/to-int c |> | #some _ -> #true | #none -> #false) "a digit"
+
+-- A non-negative decimal int.
+; int : parser int = many1 digit |> and-then (ds -> number (text/join "" ds))
+
+-- One or more characters other than a space.
+; word : parser text = many1 (char-if (c -> not (same c " ")) "a non-space") |> map (text/join "")
+
+-- One or more spaces.
+; spaces : parser () = many1 (char-if (same " ") "a space") |> map (_ -> ())
+
+; end : parser () =
+    | []   -> #ok { value = (), rest = [] }
+    | rest -> #err { expected = "the end", rest = rest }
+
+-- Internals.
+
+-- The input after the prefix, if it starts with it.
+; strip : list text -> list text -> [#some (list text), #none] =
+    | []      -> rest    -> #some rest
+    | c >+ cs -> d >+ ds -> (same c d |> | #true -> strip cs ds | #false -> #none)
+    | _       -> _       -> #none
+
+; number = t -> text/to-int t |> | #some n -> succeed n | #none -> problem "an int"
+
+; same = a -> b -> text/cmp a b |> | #eq -> #true | _ -> #false
+
+; not = | #true -> #false | #false -> #true

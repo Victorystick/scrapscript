@@ -1,0 +1,110 @@
+-- avl: a persistent map as an AVL tree. Keys are ordered by a comparison
+-- function that each operation takes first, as in `avl.insert text/cmp`.
+--
+-- Exports its types next to its functions: `tree k v`, `node k v` and
+-- `order k` are type members, used as `avl.tree text int` in type position.
+
+{ tree = tree
+, node = node
+, order = order
+, empty = #leaf
+, size = size
+, lookup = lookup
+, insert = insert
+, upsert = upsert
+, remove = remove
+, fold = fold
+, to-list = to-list
+, from-list = from-list
+}
+
+; tree : type -> type -> type = k => v =>
+    [#leaf, #node { key : k, value : v, left : tree k v, right : tree k v, height : int }]
+
+-- The payload of #node. Defining tree through it would make the two
+-- mutually recursive, which the checker rejects for aliases with parameters.
+; node : type -> type -> type = k => v => { key : k, value : v, left : tree k v, right : tree k v, height : int }
+
+; order : type -> type = k => k -> k -> [#lt, #eq, #gt]
+
+; size : k => v => tree k v -> int = t -> fold (n -> key -> value -> n + 1) 0 t
+
+; lookup : k => v => order k -> k -> tree k v -> [#some v, #none] = cmp -> key ->
+    | #leaf   -> #none
+    | #node n -> (cmp key n.key |>
+        | #lt -> lookup cmp key n.left
+        | #gt -> lookup cmp key n.right
+        | #eq -> #some n.value)
+
+; insert : k => v => order k -> k -> v -> tree k v -> tree k v = cmp -> key -> value ->
+    upsert cmp key (_ -> value)
+
+-- Sets the value at key to f of the value there, if any.
+; upsert : k => v => order k -> k -> ([#some v, #none] -> v) -> tree k v -> tree k v = cmp -> key -> f ->
+    | #leaf   -> make key (f #none) #leaf #leaf
+    | #node n -> (cmp key n.key |>
+        | #lt -> balance n.key n.value (upsert cmp key f n.left) n.right
+        | #gt -> balance n.key n.value n.left (upsert cmp key f n.right)
+        | #eq -> #node { ..n, value = f (#some n.value) })
+
+; remove : k => v => order k -> k -> tree k v -> tree k v = cmp -> key ->
+    | #leaf   -> #leaf
+    | #node n -> (cmp key n.key |>
+        | #lt -> balance n.key n.value (remove cmp key n.left) n.right
+        | #gt -> balance n.key n.value n.left (remove cmp key n.right)
+        | #eq -> join n.left n.right)
+
+-- Folds over the entries in ascending key order.
+; fold : k => v => a => (a -> k -> v -> a) -> a -> tree k v -> a = f -> acc ->
+    | #leaf   -> acc
+    | #node n -> fold f (f (fold f acc n.left) n.key n.value) n.right
+
+; to-list : k => v => tree k v -> list { key : k, value : v } = t -> entries [] t
+
+; from-list : k => v => order k -> list { key : k, value : v } -> tree k v = cmp ->
+    list/fold #leaf (t -> e -> insert cmp e.key e.value t)
+
+-- Internals.
+
+; entries : k => v => list { key : k, value : v } -> tree k v -> list { key : k, value : v } = acc ->
+    | #leaf   -> acc
+    | #node n -> entries ({ key = n.key, value = n.value } >+ entries acc n.right) n.left
+
+-- Joins two trees whose keys are all ordered left before right.
+; join : k => v => tree k v -> tree k v -> tree k v = left ->
+    | #leaf   -> left
+    | #node r -> (pop-min r |> m -> balance m.key m.value left m.rest)
+
+; pop-min : k => v => node k v -> { key : k, value : v, rest : tree k v } = n -> n.left |>
+    | #leaf   -> { key = n.key, value = n.value, rest = n.right }
+    | #node l -> (pop-min l |> m -> { ..m, rest = balance n.key n.value m.rest n.right })
+
+; height : k => v => tree k v -> int = | #leaf -> 0 | #node n -> n.height
+
+; make : k => v => k -> v -> tree k v -> tree k v -> tree k v = key -> value -> left -> right ->
+    #node { key = key, value = value, left = left, right = right, height = 1 + larger (height left) (height right) }
+
+; larger = a -> b -> int/cmp a b |> | #lt -> b | _ -> a
+
+; balance = key -> value -> left -> right -> lean key value left right (height left - height right)
+
+; lean = key -> value -> left -> right ->
+    | 2  -> left-heavy key value right left
+    | -2 -> right-heavy key value left right
+    | _  -> make key value left right
+
+; left-heavy : k => v => k -> v -> tree k v -> tree k v -> tree k v = key -> value -> right ->
+    | #node l -> (int/cmp (height l.left) (height l.right) |>
+        | #lt -> (l.right |>
+            | #node m -> make m.key m.value (make l.key l.value l.left m.left) (make key value m.right right)
+            | #leaf   -> make key value (make l.key l.value l.left l.right) right)
+        | _   -> make l.key l.value l.left (make key value l.right right))
+    | #leaf   -> make key value #leaf right
+
+; right-heavy : k => v => k -> v -> tree k v -> tree k v -> tree k v = key -> value -> left ->
+    | #node r -> (int/cmp (height r.right) (height r.left) |>
+        | #lt -> (r.left |>
+            | #node m -> make m.key m.value (make key value left m.left) (make r.key r.value m.right r.right)
+            | #leaf   -> make key value left (make r.key r.value r.left r.right))
+        | _   -> make r.key r.value (make key value left r.left) r.right)
+    | #leaf   -> make key value left #leaf

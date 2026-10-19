@@ -1,0 +1,62 @@
+-- access-log on top of the parser and avl libraries: the same program as
+-- cmd/example/scrap-terminal/testdata/access-log.scrap, with the line format
+-- as a parser and the tree imported. Annotations name the libraries' types
+-- as members: `p.parser request`, `avl.tree text stat`.
+
+{ init = { state = { paths = avl.empty, bad = 0 }, out = "", next = #read-line }
+, step = | #line line -> s -> { state = add line s, out = "", next = #read-line }
+         | #eof       -> s -> { state = s, out = report s, next = #exit 0 }
+}
+
+; state : type = { paths : avl.tree text stat, bad : int }
+
+; stat : type = { requests : int, errors : int, total : int, max : int }
+
+; request : type = { path : text, status : int, ms : int }
+
+-- "METHOD PATH STATUS MILLIS"
+; line : p.parser request =
+    p.succeed (method -> path -> status -> ms -> { path = path, status = status, ms = ms })
+      |> p.keep p.word
+      |> p.skip p.spaces
+      |> p.keep p.word
+      |> p.skip p.spaces
+      |> p.keep p.int
+      |> p.skip p.spaces
+      |> p.keep p.int
+      |> p.skip p.end
+
+; add : text -> state -> state = input -> s -> p.run line input |>
+    | #ok r  -> { ..s, paths = avl.upsert text/cmp r.path (hit r.status r.ms) s.paths }
+    | #err _ -> { ..s, bad = s.bad + 1 }
+
+; hit = status -> ms ->
+    | #none   -> { requests = 1, errors = error status, total = ms, max = ms }
+    | #some t -> { requests = t.requests + 1, errors = t.errors + error status, total = t.total + ms, max = larger t.max ms }
+
+; error = status -> int/cmp status 499 |> | #gt -> 1 | _ -> 0
+
+; larger = a -> b -> int/cmp a b |> | #lt -> b | _ -> a
+
+-- The report.
+
+; report : state -> text = s ->
+    header ++ text/join "" (list/map row (list/sort busier (avl.to-list s.paths))) ++ footer s.bad
+
+; header = "  reqs   5xx  mean   max path\n"
+
+; busier = a -> b -> int/cmp b.value.requests a.value.requests |> | #eq -> text/cmp a.key b.key | o -> o
+
+; row = e -> text/join " " [num e.value.requests, num e.value.errors, mean e.value, num e.value.max, e.key] ++ "\n"
+
+; mean = t -> int/div t.total t.requests |> | #some m -> num m | #none -> pad "-"
+
+; num = n -> pad (int/to-text n)
+
+; pad = t -> text/repeat (larger 0 (5 - text/length t)) " " ++ t
+
+; footer = | 0 -> "" | n -> int/to-text n ++ " malformed\n"
+
+; p = $"./parser.scrap"
+
+; avl = $"./avl.scrap"
