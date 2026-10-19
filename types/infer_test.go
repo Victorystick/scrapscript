@@ -248,6 +248,8 @@ func TestInfer(t *testing.T) {
 			"{ a : t, b : t' }\n; t : type = [ #a t, #end ]\n; t' : type = [ #b t', #end ]"},
 		// Mutually recursive types.
 		{`a ; a : type = [#a b, #end] ; b : type = [#b a]`, "type = a\n; a : type = [ #a b, #end ]\n; b : type = [ #b a ]"},
+		{`sum ; sum : t int -> int = | #leaf -> 0 | #node n -> n.v + sum n.l ; t = a => [#leaf, #node (n a)] ; n = a => { v : a, l : t a }`,
+			"t int -> int\n; t = a => [ #leaf, #node (n a) ]\n; n = a => { l : t a, v : a }"},
 		// Different unrollings of one type are the same type, and unify.
 		{`same ; same : t -> u = x -> x ; t : type = [#a t, #z] ; u : type = [#a [#a u, #z], #z]`,
 			"t -> t\n; t : type = [ #a t, #z ]"},

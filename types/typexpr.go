@@ -471,6 +471,7 @@ func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 		return c.recur(x, a, refs)
 	}
 	a.pending, a.args, a.depth, a.back = true, refs, c.payloads, NoType
+	c.expanding = append(c.expanding, a)
 	before := c.reg.next()
 	aliases, tvars := c.aliases, c.tvars
 	c.aliases, c.tvars = a.scope, nil
@@ -479,6 +480,7 @@ func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 	}
 	ref := c.typ(a.body)
 	c.aliases, c.tvars = aliases, tvars
+	c.expanding = c.expanding[:len(c.expanding)-1]
 	back := a.back
 	a.pending, a.args = false, nil
 	if back != NoType {
@@ -505,9 +507,34 @@ func (c *context) define(x ast.Node, a *alias, ref TypeRef) *typeDef {
 		for i := range a.params {
 			a.def.params[i] = c.reg.Gen()
 		}
-		a.def.body = c.expand(x, a, a.def.params)
+		a.def.body = c.independently(func() TypeRef { return c.expand(x, a, a.def.params) })
 	}
 	return a.def
+}
+
+// independently returns f's type as if no alias were being expanded, so
+// that a use of one in f expands it afresh rather than recurring with
+// arguments that f's caller chose. Mutually recursive aliases define one
+// another this way, each with its own generalized parameters.
+func (c *context) independently(f func() TypeRef) TypeRef {
+	type state struct {
+		args  []TypeRef
+		depth int
+		back  TypeRef
+	}
+	outer := c.expanding
+	saved := make([]state, len(outer))
+	for i, a := range outer {
+		saved[i] = state{a.args, a.depth, a.back}
+		a.pending = false
+	}
+	c.expanding = nil
+	ref := f()
+	c.expanding = outer
+	for i, a := range outer {
+		a.pending, a.args, a.depth, a.back = true, saved[i].args, saved[i].depth, saved[i].back
+	}
+	return ref
 }
 
 // recur returns the type that a recursive use x of the alias a, applied to

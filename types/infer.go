@@ -76,6 +76,8 @@ type context struct {
 	nodes   []TypeRef
 	// How many tag payloads the type expression being read is inside of.
 	payloads int
+	// The aliases being expanded, outermost first.
+	expanding []*alias
 	// The match functions, and their argument types, to check for
 	// exhaustiveness once the whole scrap is inferred.
 	matches []match
