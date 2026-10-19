@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/Victorystick/scrapscript/eval"
+	"github.com/Victorystick/scrapscript/token"
 	"github.com/Victorystick/scrapscript/yards"
 )
 
@@ -55,7 +56,7 @@ func main() {
 
 func must[T any](val T, err error) T {
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, token.Render(err, isTerminal(os.Stderr)))
 		os.Exit(1)
 	}
 	return val
@@ -110,4 +111,10 @@ func hashScrap(args []string) {
 	env := makeEnv()
 	scrap := must(env.Read(input))
 	fmt.Println(scrap.Sha256())
+}
+
+// isTerminal returns true if f is a terminal, which errors are colored for.
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
