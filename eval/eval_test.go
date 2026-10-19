@@ -130,6 +130,51 @@ var expressions = []struct {
 	{`| ns ++ [2, 3] -> ns | _ -> [] <| [1, 2, 3]`, `[ 1 ]`},
 	{`| [1, 2] ++ ns -> ns | _ -> [] <| [1, 2, 3]`, `[ 3 ]`},
 	{`| ns ++ [2, last] -> ns +< last | _ -> [] <| [1, 2, 3]`, `[ 1, 3 ]`},
+	// A catch-all binder excludes the tags that earlier arms cover.
+	{`eval (#add { l = #lit 1, r = #lit 2 })
+; eval : expr -> int = x -> eval-add eval eval-lit x
+; expr : type = [#lit int, #add { l : expr, r : expr }]
+; eval-lit = | #lit n -> n
+; eval-add = self -> ext ->
+    | #add { l = l, r = r } -> self l + self r
+    | other -> ext other`, `3`},
+	{`eval (#add { l = #lit 1, r = #mul { l = #lit 2, r = #neg (#lit 3) } })
+; eval : expr -> int = x -> all eval eval-lit x
+; expr : type = [#lit int, #add { l : expr, r : expr },
+                 #mul { l : expr, r : expr }, #neg expr]
+; all = chain eval-add (chain eval-mul eval-neg)
+; chain = f -> g -> self -> ext -> f self (g self ext)
+; eval-lit = | #lit n -> n
+; eval-add = self -> ext ->
+    | #add { l = l, r = r } -> self l + self r
+    | other -> ext other
+; eval-mul = self -> ext ->
+    | #mul { l = l, r = r } -> self l * self r
+    | other -> ext other
+; eval-neg = self -> ext ->
+    | #neg e -> 0 - self e
+    | other -> ext other`, `-5`},
+	// Each use of the binder may or may not have the excluded tags.
+	{`{ a = f (#some 1), b = f #none }
+; f = | #none -> #some 0 | o -> map inc o
+; map = g -> | #some x -> #some (g x) | #none -> #none
+; inc = n -> n + 1`, `{ a = #some 2, b = #some 0 }`},
+	{`f (#some 1)
+; f = | #none -> { a = #none, b = 0 } | o -> { a = map inc o, b = ext o }
+; map = g -> | #some x -> #some (g x) | #none -> #none
+; inc = n -> n + 1
+; ext = | #some n -> n`, `{ a = #some 2, b = 1 }`},
+	{`f #b
+; f = | #a -> 0 | r -> with-a r + without-a r
+; with-a : [#a, #b] -> int = | #a -> 1 | #b -> 2
+; without-a : [#b] -> int = | #b -> 3`, `5`},
+	// An arm covers a tag when it tests nothing but the tag, on the path to
+	// the binder.
+	{`{ a = f (#a 1), b = f #b } ; f = | #a x -> x | r -> ext r ; ext = | #b -> 2`, `{ a = 1, b = 2 }`},
+	{`{ a = f #a, b = f (#b 2), c = f #c } ; f = | #a -> 1 | #b n -> n | r -> ext r ; ext = | #c -> 3`, `{ a = 1, b = 2, c = 3 }`},
+	{`f (#a { x = 1 }) ; f = | #a { x = x } -> x | r -> ext r ; ext = | #b -> 2`, `1`},
+	{`{ a = f (#a 1) 5, b = f #b 0 } ; f = | #a x -> _ -> x | r -> 0 -> ext r | _ -> _ -> 2 ; ext = | #b -> 3`, `{ a = 1, b = 3 }`},
+	{`{ a = f (#wrap #a), b = f (#wrap #b) } ; f = | #wrap #a -> 1 | #wrap r -> ext r ; ext = | #b -> 2`, `{ a = 1, b = 2 }`},
 }
 
 func TestScrapItentity(t *testing.T) {

@@ -160,10 +160,32 @@ func TestInfer(t *testing.T) {
 		{`[#a, #a ()]`, `list [ #a, ..a ]`},
 		// Tags are open; a payload tag is nullary.
 		{`#true #false`, `[ #true [ #false, ..a ], ..b ]`},
-		// Without a catch-all, a match accepts exactly the tags it lists.
+		// Without a catch-all, a match accepts at most the tags it lists.
 		{`| #a #x -> 1 | #b -> 2`, `[ #a [ #x ], #b ] -> int`},
 		{`| #a -> 1 | _ -> 2`, `[ #a, ..a ] -> int`},
 		{`| #a #x -> 1 | #a y -> 2 | #b -> 3`, `[ #a [ #x, ..a ], #b ] -> int`},
+		{`eval-lit ; eval-lit = | #lit n -> n`, `[ #lit a ] -> a`},
+		// Functions closed to different tags meet at the tags both accept.
+		{`x -> { a = g x, b = h x } ; g = | #a -> 0 | #b -> 1 ; h = | #a -> 2 | #c -> 3`,
+			`[ #a ] -> { a : int, b : int }`},
+		{`f ; f : [#a] -> { a : int, b : int } = x -> { a = g x, b = h x } ; g = | #a -> 0 | #b -> 1 ; h = | #a -> 2 | #c -> 3`,
+			`[ #a ] -> { a : int, b : int }`},
+		{`x -> { a = (| #a -> 0 | #b -> 1) x, b = (| #a -> 2 | #c -> 3) x }`, `[ #a ] -> { a : int, b : int }`},
+		// An open match accepts a closed enum without its tags.
+		{`f x ; x : [#b] = #b ; f = | #a -> 0 | _ -> 1`, `int`},
+		// Types print the instance that accepts the most and returns the least:
+		// a tag that may be present is present in an input position, and
+		// absent where it is only in output positions.
+		{`x -> { a = g x, b = x } ; g = | #a -> 0`, `[ #a ] -> { a : int, b : [ #a ] }`},
+		// A catch-all binder excludes the tags that earlier arms cover; each use
+		// of it may or may not have them.
+		{`| #a -> 0 | x -> 1`, `[ #a, ..a ] -> int`},
+		{`| #a n -> n | x -> 0`, `[ #a int, ..a ] -> int`},
+		{`| #a -> #b | x -> x`, `[ #a, #b, ..a ] -> [ #b, ..a ]`},
+		{`eval-add ; eval-add = self -> ext -> | #add { l = l, r = r } -> self l + self r | other -> ext other`,
+			`(a -> int) -> ([ ..b ] -> int) -> [ #add { l : a, r : a }, ..b ] -> int`},
+		{`f ; f = | #a -> 0 | r -> with-a r + without-a r ; with-a : [#a, #b] -> int = | #a -> 1 | #b -> 2 ; without-a : [#b] -> int = | #b -> 3`,
+			`[ #a, #b ] -> int`},
 
 		// Records
 		{`r -> r.a`, `{ a : a, ..b } -> a`},
@@ -275,6 +297,14 @@ func TestInferFailure(t *testing.T) {
 		{`| { a = 1 } -> 1 | { a = 1, b = 2 } -> 2`, `cannot unify '{ a : int }' with '{ a : a, b : b }'`},
 		{`{ a = 1 }.b`, `cannot unify '{ a : int }' with '{ b : a, ..b }'`},
 		{`(| #a -> 1 | #b -> 2) #c`, `cannot unify '[ #a, #b ]' with '[ #c, ..a ]'`},
+		// A catch-all binder keeps the tags of arms that don't fully cover them.
+		{`f (#a 0) ; f = | #a 0 -> 1 | r -> ext r ; ext = | #b -> 2`, `cannot unify '[ #b ]' with '[ #a `},
+		{`f (#a 1) 0 ; f = | #a x -> 0 -> x | r -> _ -> ext r ; ext = | #b -> 3`, `cannot unify '[ #b ]' with '[ #a `},
+		{`f [#a] ; f = | [#a] -> 1 | [r] -> ext r | _ -> 3 ; ext = | #b -> 2`, `cannot unify`},
+		{`f { p = #a, q = #d } ; f = | { p = #a, q = #c } -> 1 | { p = r, q = _ } -> ext r ; ext = | #b -> 2`, `cannot unify`},
+		{`f { p = 2, q = #a } ; f = | { p = 1, q = #a } -> 1 | { p = _, q = r } -> ext r ; ext = | #b -> 2`, `cannot unify`},
+		// Payloads unify even for tags that can't be present.
+		{`x -> { a = f x, b = g x } ; f = | #a -> 0 | #b n -> n ; g = | #a -> 0 | #b "x" -> 1 | #b _ -> 2`, `cannot unify 'text' with 'int'`},
 		// A row has each label at most once; the rest of a record lacks the
 		// fields taken from it, also when generalized.
 		{`x -> ((| { ..rest, a = y } -> rest) x).a`, `cannot unify '{ ..a }' with '{ a : b, ..c }', which would have a twice`},

@@ -764,6 +764,12 @@ func (r *Registry) rewrite(row TypeRef, l label.ID) (field, rest TypeRef, err er
 	return 0, 0, errMissingLabel
 }
 
+// isVar returns true if the resolved ref is a type variable.
+func (r *Registry) isVar(ref TypeRef) bool {
+	k := r.at(ref).kind
+	return k == varKind || k == genKind
+}
+
 // rowTail returns the empty row or variable that ends a row.
 func (r *Registry) rowTail(row TypeRef) TypeRef {
 	for {
@@ -807,7 +813,10 @@ func (r *Registry) errorf(format string, a, b TypeRef) error {
 // format formats the error with its types, which share the names of their
 // variables.
 func (e *typeError) format(r *Registry) error {
-	strs, where := r.Strings(e.a, e.b)
+	// The types are parts of others, with no positions to go by, so they
+	// show every tag that may be present.
+	s := stringer{reg: r, mayBe: true}
+	strs, where := s.strings(e.a, e.b)
 	msg := strings.Replace(e.msg, "%s", strs[0], 1)
 	msg = strings.Replace(msg, "%s", strs[1], 1)
 	return errors.New(msg + where)
@@ -824,6 +833,7 @@ func (r *Registry) Describe(res Result) string {
 	// that it must be named anyway.
 	s := stringer{reg: r}
 	typ := r.Resolve(res.Type)
+	s.flags(typ, false)
 	s.reserveBody(typ)
 	name, named := r.names[typ]
 	_, recurs := s.defs[name.def]
@@ -869,16 +879,26 @@ func (r *Registry) apply(vars []TypeRef, body TypeRef, args []TypeRef) TypeRef {
 // String returns a string representation of a type. The types of aliases
 // print by name, and their definitions follow in a where-clause.
 func (r *Registry) String(ref TypeRef) string {
-	s := stringer{reg: r}
-	s.reserve(ref)
-	return s.string(ref) + s.where()
+	strs, where := r.Strings(ref)
+	return strs[0] + where
 }
 
 // Strings returns string representations of types that are shown together,
 // which share the names of their variables and aliases, and the
 // where-clause that defines those aliases once for all of them.
+//
+// A tag that may or may not be present shows as the type that accepts the
+// most and returns the least: present if it is in an input position, a
+// function's argument, and absent otherwise.
 func (r *Registry) Strings(refs ...TypeRef) (strs []string, where string) {
 	s := stringer{reg: r}
+	for _, ref := range refs {
+		s.flags(ref, false)
+	}
+	return s.strings(refs...)
+}
+
+func (s *stringer) strings(refs ...TypeRef) (strs []string, where string) {
 	for _, ref := range refs {
 		s.reserve(ref)
 	}
@@ -905,6 +925,61 @@ type stringer struct {
 	// The printed names of the aliases met, in the order met.
 	defs  map[*typeDef]string
 	order []*typeDef
+	// The flag variables in input positions, whose labels show as present.
+	inputs map[TypeRef]bool
+	// Whether every label that may be present shows, as in errors.
+	mayBe bool
+	// The enums that flags has visited, by the positions it visited them in.
+	visited map[TypeRef]uint8
+}
+
+// flags finds the flag variables of ref that are in input positions, if
+// input is false, or that are in output positions otherwise.
+func (s *stringer) flags(ref TypeRef, input bool) {
+	ref = s.reg.Resolve(ref)
+	n := s.reg.at(ref)
+	switch n.kind {
+	case enumKind:
+		bit := uint8(1)
+		if input {
+			bit = 2
+		}
+		if s.visited[ref]&bit != 0 {
+			return
+		}
+		if s.visited == nil {
+			s.visited = make(map[TypeRef]uint8)
+		}
+		s.visited[ref] |= bit
+		s.flags(n.a, input)
+	case listKind, recordKind:
+		s.flags(n.a, input)
+	case funcKind:
+		s.flags(n.a, !input)
+		s.flags(n.b, input)
+	case extendKind:
+		s.flags(n.a, input)
+		s.flags(n.b, input)
+	case fieldKind:
+		if flag := s.reg.Resolve(n.b); input && s.reg.isVar(flag) {
+			if s.inputs == nil {
+				s.inputs = make(map[TypeRef]bool)
+			}
+			s.inputs[flag] = true
+		}
+		s.flags(n.a, input)
+	}
+}
+
+// entries returns the labels of row that show, and its tail.
+func (s *stringer) entries(row TypeRef) ([]rowEntry, TypeRef) {
+	entries, tail := s.reg.entries(row)
+	if !s.mayBe {
+		entries = slices.DeleteFunc(entries, func(e rowEntry) bool {
+			return s.reg.isVar(e.flag) && !s.inputs[e.flag]
+		})
+	}
+	return entries, tail
 }
 
 // where returns the where-clause that defines the aliases written.
@@ -997,7 +1072,7 @@ func (s *stringer) reserveBody(ref TypeRef) {
 	case extendKind:
 		// In the order that they are written, which recursive types are
 		// named in.
-		entries, tail := s.reg.entries(ref)
+		entries, tail := s.entries(ref)
 		for _, e := range entries {
 			s.reserve(e.payload)
 		}
@@ -1180,7 +1255,7 @@ func (r *Registry) fields(row TypeRef) iter.Seq2[label.ID, TypeRef] {
 
 // row writes a row's labels in order, followed by its tail if it is open.
 func (s *stringer) row(row TypeRef, open, close byte, label func(string, TypeRef)) {
-	entries, row := s.reg.entries(row)
+	entries, row := s.entries(row)
 	s.WriteByte(open)
 	for i, e := range entries {
 		if i > 0 {

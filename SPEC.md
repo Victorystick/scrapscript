@@ -270,9 +270,15 @@ Desugaring:
 - Variants and records are **structural**. There are no type declarations.
 - Tag expressions are open: `#a : [#a, ..r]`, and `#a e` with `e : T` has type
   `[#a T, ..r]`.
-- A match **without** a wildcard arm closes its argument type to exactly the tags
-  it lists, so it is exhaustive by construction. A wildcard arm leaves the
-  argument type open. Exhaustiveness is a typing rule: a scrap that type-checks
+- A match **without** a wildcard arm closes its argument type to at most the
+  tags it lists, so it is exhaustive by construction: it also accepts values
+  that never have some of them. A wildcard arm leaves the argument type open.
+- A name pattern excludes the tags that earlier arms **fully cover** at its
+  position: an arm covers `#t` there if its only refutable tests are `#t` at
+  that position, with an irrefutable payload pattern, and the tags on the way
+  there. Each use of the name may have the excluded tags or not, so
+  `| #lit n -> n | other -> ext other` passes `other` to an `ext` that doesn't
+  handle `#lit`, and `| #none -> d | o -> option-map f o` to one that does. Exhaustiveness is a typing rule: a scrap that type-checks
   cannot raise a match error. INT, BYTE, TEXT and BYTES patterns always need a
   catch-all arm. The checker closes enums, then, once the whole scrap is
   inferred, checks every match function against its argument types (Maranget's
@@ -382,6 +388,16 @@ tags in the other; the unifier is the same. Unifying two rows unifies the types
 of shared labels and pushes labels present on only one side into the other's
 tail (fresh row variable). Duplicate labels in a row are an error.
 
+Each label of a row is **present**, **absent**, or not yet known: a presence
+variable, which unification binds like a type variable. A closed row has every
+label it doesn't list absent, and a label present in one row can't be absent
+from the other. Presence has no syntax: a type prints the instance that
+accepts the most and returns the least, with a label present where its
+presence is a variable in an input position (a function's argument), and
+absent otherwise. Errors print every label that may be present. Open: reading
+a closed enum in an input position of an annotation as "at most those tags",
+so that printed types read back as general as they were inferred.
+
 Rows compare by label, not position: `[#a int, #b text]` and
 `[#b text, #a int]` are the same type. To keep each label unique, a row variable
 lacks the labels written before it: in `{ a : t, ..r }`, `r` can never be bound
@@ -392,7 +408,7 @@ gives them.
 
 - `r.a` requires `{ a : t, ..r' }`.
 - A match requires `[ #a T, …, ..r' ]` (open if it has a wildcard arm, closed
-  otherwise).
+  otherwise), where each tag it lists may be present or not.
 - **Record spread is update-only.** In `{ ..r, a = v, … }` every explicitly
   written key must already be in `r`'s row, with the same type as `v`. The result
   has the type of `r`. It cannot add a field or change a field's type, so

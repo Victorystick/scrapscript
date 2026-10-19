@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -79,6 +80,12 @@ type context struct {
 	// exhaustiveness once the whole scrap is inferred.
 	matches []match
 	ex      exhauster
+	// The refutable tests of the arms of the match functions being
+	// inferred, and where each arm's end, as a stack: an inner match
+	// function's come after its outer one's, and are dropped when it is
+	// done.
+	tests []test
+	ends  []int
 }
 
 func (c *context) bail(n ast.Node, msg string) {
@@ -515,6 +522,44 @@ type arms struct {
 	enums []positioned
 	// The names bound by the current arm.
 	bound map[string]bool
+	// Where this match function's tests and arm ends start in the
+	// context's buffers.
+	tests, ends int
+}
+
+// A test is a refutable pattern: a tag, or another (with no tag).
+type test struct {
+	at  position
+	tag string
+	// Whether the tag's payload pattern is irrefutable.
+	total bool
+}
+
+// covered returns the tags that some earlier arm fully covers at the
+// position at: it tests nothing but the tag there, with an irrefutable
+// payload, and the tags on the way there, which an arm with a pattern at at
+// tests too.
+func (c *context) covered(m *arms, at position) []string {
+	var tags []string
+	start := m.tests
+	for _, end := range c.ends[m.ends:] {
+		tests := c.tests[start:end]
+		start = end
+		tag := ""
+		for _, t := range tests {
+			if t.tag != "" && t.at == at && t.total {
+				tag = t.tag
+			} else if t.tag == "" || !at.within(t.at.step("#"+t.tag)) {
+				// Any other test can fail where the tag is at.
+				tag = ""
+				break
+			}
+		}
+		if tag != "" && !slices.Contains(tags, tag) {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
 }
 
 // A match is a match function and its argument types, one per pattern of
@@ -540,7 +585,8 @@ func (c *context) matchFunc(x ast.Node) TypeRef {
 		args[i] = c.reg.Var()
 	}
 	bodyTy := c.reg.Var()
-	var m arms
+	m := arms{tests: len(c.tests), ends: len(c.ends)}
+	defer func() { c.tests, c.ends = c.tests[:m.tests], c.ends[:m.ends] }()
 	for _, arm := range c.src.Arms(x) {
 		pats, body := c.src.Arm(arm)
 		scope := c.scope
@@ -549,6 +595,7 @@ func (c *context) matchFunc(x ast.Node) TypeRef {
 			// Each argument is a root of its own.
 			c.pattern(&m, pat, args[i], position("").step(strconv.Itoa(i)))
 		}
+		c.ends = append(c.ends, len(c.tests))
 		c.ensure(body, bodyTy, c.infer(body))
 		c.scope = scope
 	}
@@ -590,6 +637,10 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 			c.bail(x, fmt.Sprintf("cannot bind %s twice", name))
 		}
 		m.bound[name] = true
+		if tags := c.covered(m, at); len(tags) > 0 {
+			ty = c.narrow(x, ty, tags)
+			c.typed(x, ty)
+		}
 		c.bind(name, ty)
 		return
 
@@ -597,6 +648,9 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 		kind := c.src.LiteralKind(x)
 		if kind == token.FLOAT {
 			c.bail(x, "cannot match on floats")
+		}
+		if kind != token.HOLE {
+			c.tests = append(c.tests, test{at: at})
 		}
 		c.ensure(x, ty, literalTypeRef(kind))
 		return
@@ -608,9 +662,12 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 		if payload != ast.None {
 			typ = c.reg.Var()
 		}
-		row := c.reg.extend(c.reg.labels.Of(tag), typ, c.reg.Var())
+		// A function that handles a tag also works on values that never
+		// have it, so the tag may or may not be present.
+		row := c.reg.extendField(c.reg.labels.Of(tag), c.reg.field(typ, c.reg.Var()), c.reg.Var())
 		c.ensure(x, ty, c.reg.add(node{kind: enumKind, a: row}))
 		m.enums = append(m.enums, positioned{at: at, typ: ty})
+		c.tests = append(c.tests, test{at, tag, payload == ast.None || c.irrefutable(payload)})
 		if payload != ast.None {
 			c.pattern(m, payload, typ, at.step("#"+tag))
 		}
@@ -640,6 +697,7 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 		return
 
 	case ast.List:
+		c.tests = append(c.tests, test{at: at})
 		elem := c.reg.Var()
 		c.ensure(x, ty, c.reg.List(elem))
 		for _, v := range c.src.List(x) {
@@ -650,6 +708,7 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 	case ast.Binary:
 		// Parts of a list are lists, but don't catch all of it.
 		op, l, r := c.src.Binary(x)
+		c.tests = append(c.tests, test{at: at})
 		elem := c.reg.Var()
 		list := c.reg.List(elem)
 		switch op {
@@ -672,4 +731,39 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 	}
 
 	c.bail(x, fmt.Sprintf("cannot match on %s", c.src.Kind(x)))
+}
+
+// irrefutable returns true if the pattern x matches every value of its type.
+func (c *context) irrefutable(x ast.Node) bool {
+	switch c.src.Kind(x) {
+	case ast.Ident:
+		return true
+	case ast.Literal:
+		return c.src.LiteralKind(x) == token.HOLE
+	case ast.Record:
+		_, fields := c.src.Record(x)
+		for i := range fields.Len() {
+			if !c.irrefutable(fields.Value(i)) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// narrow returns the type of a catch-all binder at a position of type ty,
+// whose value can't have the tags, since earlier arms cover them. Each use
+// of the binder may have them or not, with any payload, as nothing else
+// refers to them; the rest of the row is the argument's.
+func (c *context) narrow(x ast.Node, ty TypeRef, tags []string) TypeRef {
+	rest := c.reg.Var()
+	arg, binder := rest, rest
+	for _, tag := range tags {
+		l := c.reg.labels.Of(tag)
+		arg = c.reg.extendField(l, c.reg.field(c.reg.Var(), c.reg.Var()), arg)
+		binder = c.reg.extendField(l, c.reg.field(c.reg.Gen(), c.reg.Gen()), binder)
+	}
+	c.ensure(x, ty, c.reg.add(node{kind: enumKind, a: arg}))
+	return c.reg.add(node{kind: enumKind, a: binder})
 }

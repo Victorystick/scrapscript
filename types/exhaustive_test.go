@@ -31,6 +31,9 @@ func TestExhaustive(t *testing.T) {
 		`| #a -> s -> s | #b -> s -> 0`,
 		`| #a -> #c -> 1 | #a -> #d -> 2 | #b -> #c -> 3 | #b -> #d -> 4`,
 		`| [] -> _ -> 0 | _ -> [] -> 0 | (x >+ _) -> (y >+ _) -> x + y`,
+		// Tags that can't be present need no arm.
+		`x -> { a = (| #a -> 0 | #b -> 1) x, b = (| #a -> 2 | #c -> 3) x }`,
+		`| #a -> 1 | r -> (| #b -> 2) r`,
 		// Recursive types.
 		`size ; size : tree -> int = | #leaf -> 0 | #node { left = l, right = r } -> 1 + size l + size r
 ; tree : type = [#leaf, #node { left : tree, right : tree }]`,
