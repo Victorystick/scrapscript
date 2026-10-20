@@ -74,6 +74,7 @@ const (
 	opCompose // A..B: the function applied first, then second, then its uses.
 	opLambda  // A..B: its frame's size, its uses, its arity n, its number of captures k, then k captures, then n patterns and a body per arm. If n > 1, its frame's first n slots are its arguments.
 	opMatch   // A..B: the value matched, then a pattern and a body per arm. Its patterns bind slots of the current frame.
+	opMatchN  // A..B: the first of n slots of the current frame, n, then n arguments, which go in those slots, then n patterns and a body per arm.
 	opWhere   // A..B: the body, then a slot and value per binding, in evaluation order, with recursive ones' closures made first.
 	opFill    // A: a lambda. B: the slot of the closure made for it before, whose captures it fills in.
 	opRecord  // A..B: the record it is based on or none, its shape or -1, then a key and value per field.
@@ -493,11 +494,12 @@ const (
 	inlineBudget = 4 * inlineMax
 )
 
-// An inlinable is a where-bound function literal of one argument that isn't
-// recursive, so that a call to it may compile as a match of its arms in the
-// caller's frame.
+// An inlinable is a where-bound function literal that isn't recursive, so
+// that a call to it with all its arguments may compile as a match of its
+// arms in the caller's frame.
 type inlinable struct {
-	val ast.Node
+	val   ast.Node
+	arity int
 	// The number of names in scope where it is bound, of values and of
 	// types, which its body sees.
 	values, types int
@@ -900,18 +902,21 @@ func (c *compiler) call(x, fn, arg ast.Node) cnode {
 		fn, a = c.src.Call(fn)
 		args = append(args, a)
 	}
+	slices.Reverse(args)
 	if len(args) == 1 {
 		if arms := c.arms(fn); arms != nil {
 			return c.match(fn, c.expr(arg), arms)
 		}
-		if n, ok := c.inline(fn, arg); ok {
-			return n
-		}
+	}
+	if n, ok := c.inline(fn, args); ok {
+		return n
+	}
+	if len(args) == 1 {
 		return c.node(opCall, int32(c.expr(fn)), int32(c.expr(arg)), x)
 	}
 	xs := []int32{int32(c.expr(fn))}
-	for i := len(args) - 1; i >= 0; i-- {
-		xs = append(xs, int32(c.expr(args[i])))
+	for _, a := range args {
+		xs = append(xs, int32(c.expr(a)))
 	}
 	return c.span(opCallN, xs, x)
 }
@@ -960,11 +965,12 @@ func (c *compiler) match(fn ast.Node, arg cnode, arms []ast.Node) cnode {
 	return c.span(opMatch, xs, fn)
 }
 
-// inline compiles the call of fn to arg as a match, as if fn's value were
-// written in its place, if fn names an inlinable function that is small
-// enough, or that nothing else refers to. Calls in an inlined body are
-// inlined by size alone, so that its copies stay bounded.
-func (c *compiler) inline(fn, arg ast.Node) (cnode, bool) {
+// inline compiles the call of fn to args as a match, as if fn's value were
+// written in its place, if fn names an inlinable function of that many
+// arguments that is small enough, or that nothing else refers to. Calls in
+// an inlined body are inlined by size alone, so that its copies stay
+// bounded.
+func (c *compiler) inline(fn ast.Node, args []ast.Node) (cnode, bool) {
 	if c.src.Kind(fn) != ast.Ident {
 		return none, false
 	}
@@ -974,7 +980,7 @@ func (c *compiler) inline(fn, arg ast.Node) (cnode, bool) {
 		return none, false
 	}
 	in, ok := c.inlines[c.values[i].b]
-	if !ok {
+	if !ok || in.arity != len(args) {
 		return none, false
 	}
 	size := int(c.src.Last(in.val)-c.src.First(in.val)) + 1
@@ -988,14 +994,29 @@ func (c *compiler) inline(fn, arg ast.Node) (cnode, bool) {
 	// The call prints as itself, so it still refers to fn.
 	c.use(name)
 	c.refer(fn, i, true, true)
-	v := c.expr(arg)
+	vs := make([]int32, len(args))
+	for i, a := range args {
+		vs[i] = int32(c.expr(a))
+	}
 
 	// The body sees the names in scope where fn is bound. It refers to them
 	// from this frame, but prints only as part of fn's value.
 	values, types, roots := c.values, c.types, c.roots
 	c.values, c.types, c.roots = slices.Clip(values[:in.values]), slices.Clip(types[:in.types]), nil
 	c.depth++
-	n := c.match(in.val, v, c.arms(in.val))
+	var n cnode
+	if in.arity == 1 {
+		n = c.match(in.val, cnode(vs[0]), c.arms(in.val))
+	} else {
+		// The arguments go in slots of their own, as in a function's
+		// frame.
+		base := c.next
+		for range args {
+			c.alloc()
+		}
+		xs := append([]int32{int32(base), int32(in.arity)}, vs...)
+		n = c.span(opMatchN, c.fnArms(xs, c.literal(in.val), base, c.next), in.val)
+	}
 	c.depth--
 	c.values, c.types, c.roots = values, types, roots
 	return n, true
@@ -1012,51 +1033,18 @@ func (c *compiler) fn(x ast.Node) cnode {
 	c.level, c.next, c.size, c.budget = c.level+1, 0, 0, inlineBudget
 	c.fns = append(c.fns[:c.level], nil)
 
-	var params []ast.Node
-	body := x
-	for c.src.Kind(body) == ast.Func {
-		var param ast.Node
-		param, body = c.src.Func(body)
-		params = append(params, param)
-	}
-	arms := []ast.Node{body}
-	arity := len(params)
-	match := c.src.Kind(body) == ast.MatchFunc
-	if match {
-		arms = c.src.Arms(body)
-		arity += c.src.Arity(body)
-	}
+	f := c.literal(x)
 	// A function of one argument matches it as it is; one of more keeps
 	// them in its first slots, for its arms to match.
 	args := 0
-	if arity > 1 {
-		args = arity
+	if f.arity > 1 {
+		args = f.arity
 	}
 	c.size = args
+	xs := c.fnArms(nil, f, 0, args)
 
-	var xs []int32
-	for _, a := range arms {
-		c.next = args
-		scope := len(c.values)
-		// Each parameter is a scope of its own, which may shadow the ones
-		// before it.
-		for i, param := range params {
-			xs = append(xs, int32(c.param(param, i, arity, len(c.values))))
-		}
-		body := a
-		if match {
-			var pats []ast.Node
-			pats, body = c.src.Arm(a)
-			arm := len(c.values)
-			for i, pat := range pats {
-				xs = append(xs, int32(c.param(pat, len(params)+i, arity, arm)))
-			}
-		}
-		xs = append(xs, int32(c.expr(body)))
-		c.values = c.values[:scope]
-	}
 	caps := c.fns[c.level]
-	head := []int32{int32(c.size), u, int32(arity), int32(len(caps))}
+	head := []int32{int32(c.size), u, int32(f.arity), int32(len(caps))}
 	for _, x := range caps {
 		head = append(head, x.from)
 	}
@@ -1064,6 +1052,66 @@ func (c *compiler) fn(x ast.Node) cnode {
 	c.level, c.next, c.size, c.budget = level, next, size, budget
 	c.close()
 	return c.span(opLambda, append(head, xs...), x)
+}
+
+// A fnLiteral is a function literal: a chain of Func nodes, a -> b -> …,
+// each of which takes an argument, perhaps ending in a match function,
+// which takes its arguments too.
+type fnLiteral struct {
+	params []ast.Node // the Func nodes' parameters
+	// The match function's arms if match, or else the chain's body.
+	arms  []ast.Node
+	match bool
+	arity int
+}
+
+func (c *compiler) literal(x ast.Node) fnLiteral {
+	var f fnLiteral
+	body := x
+	for c.src.Kind(body) == ast.Func {
+		var param ast.Node
+		param, body = c.src.Func(body)
+		f.params = append(f.params, param)
+	}
+	f.arms = []ast.Node{body}
+	f.arity = len(f.params)
+	f.match = c.src.Kind(body) == ast.MatchFunc
+	if f.match {
+		f.arms = c.src.Arms(body)
+		f.arity += c.src.Arity(body)
+	}
+	return f
+}
+
+// fnArms appends to xs the patterns and body of each arm of f, as a
+// function of one argument matches it, or else for arguments in the slots
+// from base. Each arm's own slots start at next and overlap the other
+// arms'; the frame's next free slot is after the largest.
+func (c *compiler) fnArms(xs []int32, f fnLiteral, base, next int) []int32 {
+	end := next
+	for _, a := range f.arms {
+		c.next = next
+		scope := len(c.values)
+		// Each parameter is a scope of its own, which may shadow the ones
+		// before it.
+		for i, param := range f.params {
+			xs = append(xs, int32(c.param(param, base+i, f.arity, len(c.values))))
+		}
+		body := a
+		if f.match {
+			var pats []ast.Node
+			pats, body = c.src.Arm(a)
+			arm := len(c.values)
+			for i, pat := range pats {
+				xs = append(xs, int32(c.param(pat, base+len(f.params)+i, f.arity, arm)))
+			}
+		}
+		xs = append(xs, int32(c.expr(body)))
+		c.values = c.values[:scope]
+		end = max(end, c.next)
+	}
+	c.next = end
+	return xs
 }
 
 // group compiles a where-group, whose bindings are mutually recursive, in
@@ -1151,13 +1199,13 @@ func (c *compiler) group(x ast.Node) cnode {
 }
 
 // inlinable notes the group's bindings that calls may be inlined into: the
-// function literals of one argument that aren't recursive.
+// function literals that aren't recursive.
 func (c *compiler) inlinable(body ast.Node, binds []ast.Node, comps []ast.Component, byNode map[ast.Node]int32) {
 	var counts []int
 	for _, comp := range comps {
 		w := comp.Binds[0]
 		_, _, _, val := c.src.Where(w)
-		if comp.Recursive || c.arms(val) == nil {
+		if k := c.src.Kind(val); comp.Recursive || k != ast.Func && k != ast.MatchFunc {
 			continue
 		}
 		if counts == nil {
@@ -1165,7 +1213,7 @@ func (c *compiler) inlinable(body ast.Node, binds []ast.Node, comps []ast.Compon
 		}
 		// The group's binders are in the order of binds.
 		b := byNode[w]
-		c.inlines[b] = inlinable{val, len(c.values), len(c.types), counts[b-byNode[binds[0]]] == 1}
+		c.inlines[b] = inlinable{val, c.literal(val).arity, len(c.values), len(c.types), counts[b-byNode[binds[0]]] == 1}
 	}
 }
 
@@ -1225,10 +1273,10 @@ func (c *compiler) fill(v cnode, slot int32) (cnode, cnode) {
 	return c.node(opFill, int32(v), slot, c.at[v]), v
 }
 
-// param compiles the pattern x of argument i of a function of arity
-// arguments. If it takes more than one, they are in its first slots, and a
-// name binds the argument's own slot.
-func (c *compiler) param(x ast.Node, i, arity, scope int) cnode {
+// param compiles the pattern x of an argument of a function of arity
+// arguments. If it takes more than one, the argument is in slot, and a name
+// binds that slot.
+func (c *compiler) param(x ast.Node, slot, arity, scope int) cnode {
 	if arity == 1 || c.src.Kind(x) != ast.Ident || c.src.TokenText(c.src.Main(x)) == "_" {
 		return c.pattern(x, scope)
 	}
@@ -1236,8 +1284,8 @@ func (c *compiler) param(x ast.Node, i, arity, scope int) cnode {
 	if lookup(c.values, name) >= scope {
 		c.error(x, fmt.Sprintf("cannot bind %s twice", name))
 	}
-	c.bind(binder{name: name, slot: i, where: ast.None, types: -1, static: -1})
-	return c.node(patArg, int32(i), 0, x)
+	c.bind(binder{name: name, slot: slot, where: ast.None, types: -1, static: -1})
+	return c.node(patArg, int32(slot), 0, x)
 }
 
 // split compiles the record pattern x, with a rest, that matches records

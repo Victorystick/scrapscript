@@ -181,7 +181,7 @@ func (p *program) builtin(n cnode) (BuiltInFunc, bool) {
 func (p *program) expr(n cnode) code {
 	d := p.data[n]
 	switch p.ops[n] {
-	case opCall, opCallN, opMatch, opWhere:
+	case opCall, opCallN, opMatch, opMatchN, opWhere:
 		t := p.tail(n)
 		return func(f frame) Value {
 			v, next, g := t(f)
@@ -491,6 +491,27 @@ func (p *program) tail(n cnode) tcode {
 				}
 			}
 			panic(p.errorf(n, "no arm matches %s", printValue(p.labels, v)))
+		}
+
+	case opMatchN:
+		r := p.range_(n)
+		s, k := r[0], int(r[1])
+		vcs := p.operands(r[2 : 2+k])
+		var arms []armCode
+		for a := r[2+k:]; len(a) > 0; a = a[k+1:] {
+			arms = append(arms, armCode{pats: p.patterns(a[:k]), body: p.tail(cnode(a[k]))})
+		}
+		return func(f frame) (Value, tcode, frame) {
+			args := f.slots[s : int(s)+k]
+			for i, vc := range vcs {
+				args[i] = vc.get(f)
+			}
+			for _, a := range arms {
+				if matchEach(a.pats, args, f.slots) {
+					return a.body(f)
+				}
+			}
+			panic(p.noArm(n, args))
 		}
 
 	case opWhere:

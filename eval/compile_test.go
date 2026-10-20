@@ -154,6 +154,25 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 			c.dump(s, cnode(r[i+1]))
 		}
 		s.WriteString(")")
+	case opMatchN:
+		r := c.range_(n)
+		k := int(r[1])
+		fmt.Fprintf(s, "(match@%d", r[0])
+		for _, x := range r[2 : 2+k] {
+			s.WriteString(" ")
+			c.dump(s, cnode(x))
+		}
+		for a := r[2+k:]; len(a) > 0; a = a[k+1:] {
+			s.WriteString(" |")
+			for _, pat := range a[:k] {
+				s.WriteString(" ")
+				c.dump(s, cnode(pat))
+				s.WriteString(" ->")
+			}
+			s.WriteString(" ")
+			c.dump(s, cnode(a[k]))
+		}
+		s.WriteString(")")
 	case opWhere:
 		body, binds := c.where(n)
 		s.WriteString("(")
@@ -411,6 +430,13 @@ func TestCompile(t *testing.T) {
 			`((match 1 | >2 -> (match 2 | >3 -> (+ @3 @1))) ; >1 10 ; >0 (fn/1 [@1] ^n&0 home=f | >0 -> (+ @0 &0)))`, 4},
 		{`y -> f y ; f = x -> g x + 1 ; g = x -> x + k ; k = 3`,
 			`((fn/3 [@0, @2] ^f&0 | >0 -> (match @0 | >1 -> (+ (match @1 | >2 -> (+ @2 &1)) 1))) ; >2 3 ; >1 (fn/1 [@2] ^k&0 home=g | >0 -> (+ @0 &0)) ; >0 (fn/2 [@1, @2] ^g&0 home=f | >0 -> (+ (match @0 | >1 -> (+ @1 &1)) 1)))`, 3},
+		// One of more arguments puts them in slots of their own, as in its
+		// frame, but only if the call passes all of them.
+		{`f 1 2 ; f = a -> b -> a + b + n ; n = 10`,
+			`((match@2 1 2 | >2 -> >3 -> (+ (+ @2 @3) @1)) ; >1 10 ; >0 (fn/2 [@1] ^n&0 home=f | >0 -> >1 -> (+ (+ @0 @1) &0)))`, 4},
+		{`g 1 2 ; g = | 1 -> b -> b | a -> _ -> a`,
+			`((match@1 1 2 | 1 -> >2 -> @2 | >1 -> _ -> @1) ; >0 (fn/2 home=g | 1 -> >1 -> @1 | >0 -> _ -> @0))`, 3},
+		{`f 1 ; f = a -> b -> a + b`, `((@0 1) ; >0 (fn/2 home=f | >0 -> >1 -> (+ @0 @1)))`, 1},
 		// A large one only if nothing else refers to it.
 		{`f 1 + f 2 ; f = | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10`,
 			`((+ (@0 1) (@0 2)) ; >0 (fn/0 home=f | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10))`, 1},

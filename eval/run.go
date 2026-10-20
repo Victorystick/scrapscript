@@ -163,6 +163,23 @@ func (p *program) run(n cnode, f frame) Value {
 			}
 			n = cnode(arms[i+1])
 
+		case opMatchN:
+			r := p.range_(n)
+			s, k := r[0], r[1]
+			args := f.slots[s : s+k]
+			for i, x := range r[2 : 2+k] {
+				args[i] = p.value(cnode(x), &f)
+			}
+			arms := r[2+k:]
+			i := int32(0)
+			for int(i) < len(arms) && !p.matchArm(arms[i:i+k], args, f.slots) {
+				i += k + 1
+			}
+			if int(i) == len(arms) {
+				panic(p.noArm(n, args))
+			}
+			n = cnode(arms[i+k])
+
 		case opWhere:
 			body, binds := p.where(n)
 			for i := 0; i < len(binds); i += 2 {
@@ -443,11 +460,17 @@ func (p *program) arm(sf ScriptFunc, f frame) cnode {
 			return cnode(arms[i+arity])
 		}
 	}
-	strs := make([]string, arity)
+	panic(p.noArm(sf.node, args))
+}
+
+// noArm returns the error that no arm of the function or match n matches
+// the arguments args.
+func (p *program) noArm(n cnode, args []Value) runtimeError {
+	strs := make([]string, len(args))
 	for i, a := range args {
 		strs[i] = printValue(p.labels, a)
 	}
-	panic(p.errorf(sf.node, "no arm matches %s", strings.Join(strs, ", ")))
+	return p.errorf(n, "no arm matches %s", strings.Join(strs, ", "))
 }
 
 // match matches v against the pattern n, writing the names it binds into
