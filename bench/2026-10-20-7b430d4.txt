@@ -1,0 +1,213 @@
+PASS
+ok  	github.com/Victorystick/scrapscript/ast	0.323s
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/cmd/example/scrap-terminal
+cpu: Apple M3 Pro
+BenchmarkAccessLog 	      24	  48748740 ns/op	   6.01 MB/s	44825371 B/op	  644357 allocs/op
+BenchmarkAccessLog 	      24	  48876217 ns/op	   5.99 MB/s	44825366 B/op	  644357 allocs/op
+BenchmarkAccessLog 	      24	  48530465 ns/op	   6.04 MB/s	44825361 B/op	  644357 allocs/op
+BenchmarkAccessLog 	      22	  48112574 ns/op	   6.09 MB/s	44825374 B/op	  644357 allocs/op
+BenchmarkAccessLog 	      24	  48455785 ns/op	   6.05 MB/s	44825364 B/op	  644357 allocs/op
+BenchmarkAccessLog 	      24	  48551806 ns/op	   6.03 MB/s	44825376 B/op	  644357 allocs/op
+BenchmarkAccessLog 	      24	  48369559 ns/op	   6.06 MB/s	44825360 B/op	  644357 allocs/op
+BenchmarkAccessLog 	      24	  48105917 ns/op	   6.09 MB/s	44825364 B/op	  644357 allocs/op
+BenchmarkAccessLog 	      24	  48767346 ns/op	   6.01 MB/s	44825368 B/op	  644357 allocs/op
+BenchmarkAccessLog 	      24	  48185786 ns/op	   6.08 MB/s	44825372 B/op	  644357 allocs/op
+PASS
+ok  	github.com/Victorystick/scrapscript/cmd/example/scrap-terminal	11.889s
+?   	github.com/Victorystick/scrapscript/cmd/scrap	[no test files]
+?   	github.com/Victorystick/scrapscript/cmd/scrap-gen-go	[no test files]
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/eval
+cpu: Apple M3 Pro
+BenchmarkEval/fib         	    4731	    250623 ns/op	   87520 B/op	    5210 allocs/op
+BenchmarkEval/fib         	    4976	    247731 ns/op	   87520 B/op	    5210 allocs/op
+BenchmarkEval/fib         	    4922	    247179 ns/op	   87520 B/op	    5210 allocs/op
+BenchmarkEval/fib         	    4068	    249182 ns/op	   87520 B/op	    5210 allocs/op
+BenchmarkEval/fib         	    4992	    247375 ns/op	   87520 B/op	    5210 allocs/op
+BenchmarkEval/fib         	    4405	    249990 ns/op	   87520 B/op	    5210 allocs/op
+BenchmarkEval/fib         	    4926	    250557 ns/op	   87520 B/op	    5210 allocs/op
+BenchmarkEval/fib         	    4962	    247501 ns/op	   87520 B/op	    5210 allocs/op
+BenchmarkEval/fib         	    4947	    245702 ns/op	   87520 B/op	    5210 allocs/op
+BenchmarkEval/fib         	    5019	    246317 ns/op	   87520 B/op	    5210 allocs/op
+BenchmarkEval/loop        	    1310	    888603 ns/op	  638064 B/op	   29737 allocs/op
+BenchmarkEval/loop        	    1357	    886528 ns/op	  638064 B/op	   29737 allocs/op
+BenchmarkEval/loop        	    1358	    885999 ns/op	  638064 B/op	   29737 allocs/op
+BenchmarkEval/loop        	    1366	    896821 ns/op	  638064 B/op	   29737 allocs/op
+BenchmarkEval/loop        	    1363	    884725 ns/op	  638064 B/op	   29737 allocs/op
+BenchmarkEval/loop        	    1363	    883369 ns/op	  638064 B/op	   29737 allocs/op
+BenchmarkEval/loop        	    1354	    885604 ns/op	  638064 B/op	   29737 allocs/op
+BenchmarkEval/loop        	    1360	    880469 ns/op	  638064 B/op	   29737 allocs/op
+BenchmarkEval/loop        	    1368	    886192 ns/op	  638064 B/op	   29737 allocs/op
+BenchmarkEval/loop        	    1364	    880021 ns/op	  638064 B/op	   29737 allocs/op
+BenchmarkEval/sum         	   13083	     91563 ns/op	   78560 B/op	    2752 allocs/op
+BenchmarkEval/sum         	   13200	     91104 ns/op	   78560 B/op	    2752 allocs/op
+BenchmarkEval/sum         	   13012	     92212 ns/op	   78560 B/op	    2752 allocs/op
+BenchmarkEval/sum         	   12968	     92314 ns/op	   78560 B/op	    2752 allocs/op
+BenchmarkEval/sum         	   13243	     90625 ns/op	   78560 B/op	    2752 allocs/op
+BenchmarkEval/sum         	   13040	     91862 ns/op	   78560 B/op	    2752 allocs/op
+BenchmarkEval/sum         	   13114	     91507 ns/op	   78560 B/op	    2752 allocs/op
+BenchmarkEval/sum         	   13058	     92068 ns/op	   78560 B/op	    2752 allocs/op
+BenchmarkEval/sum         	   13148	     91062 ns/op	   78560 B/op	    2752 allocs/op
+BenchmarkEval/sum         	   13099	     91664 ns/op	   78560 B/op	    2752 allocs/op
+BenchmarkEval/fold        	    2548	    477901 ns/op	  561888 B/op	   19748 allocs/op
+BenchmarkEval/fold        	    2529	    482030 ns/op	  561888 B/op	   19748 allocs/op
+BenchmarkEval/fold        	    2545	    482622 ns/op	  561888 B/op	   19748 allocs/op
+BenchmarkEval/fold        	    2496	    478005 ns/op	  561888 B/op	   19748 allocs/op
+BenchmarkEval/fold        	    2466	    477572 ns/op	  561888 B/op	   19748 allocs/op
+BenchmarkEval/fold        	    2526	    478388 ns/op	  561888 B/op	   19748 allocs/op
+BenchmarkEval/fold        	    2521	    476021 ns/op	  561888 B/op	   19748 allocs/op
+BenchmarkEval/fold        	    2481	    477028 ns/op	  561888 B/op	   19748 allocs/op
+BenchmarkEval/fold        	    2545	    475859 ns/op	  561888 B/op	   19748 allocs/op
+BenchmarkEval/fold        	    2546	    479005 ns/op	  561888 B/op	   19748 allocs/op
+BenchmarkEval/records     	    8632	    143452 ns/op	  108168 B/op	    4496 allocs/op
+BenchmarkEval/records     	    8593	    143242 ns/op	  108168 B/op	    4496 allocs/op
+BenchmarkEval/records     	    8589	    143184 ns/op	  108168 B/op	    4496 allocs/op
+BenchmarkEval/records     	    8592	    142849 ns/op	  108168 B/op	    4496 allocs/op
+BenchmarkEval/records     	    8538	    143790 ns/op	  108168 B/op	    4496 allocs/op
+BenchmarkEval/records     	    8611	    143739 ns/op	  108168 B/op	    4496 allocs/op
+BenchmarkEval/records     	    8624	    142762 ns/op	  108168 B/op	    4496 allocs/op
+BenchmarkEval/records     	    8577	    143275 ns/op	  108168 B/op	    4496 allocs/op
+BenchmarkEval/records     	    8642	    142991 ns/op	  108168 B/op	    4496 allocs/op
+BenchmarkEval/records     	    8595	    143723 ns/op	  108168 B/op	    4496 allocs/op
+BenchmarkEval/fields      	    3909	    307251 ns/op	  403000 B/op	   11316 allocs/op
+BenchmarkEval/fields      	    3984	    307577 ns/op	  403000 B/op	   11316 allocs/op
+BenchmarkEval/fields      	    3966	    310825 ns/op	  403000 B/op	   11316 allocs/op
+BenchmarkEval/fields      	    3954	    307356 ns/op	  403000 B/op	   11316 allocs/op
+BenchmarkEval/fields      	    3943	    307477 ns/op	  403000 B/op	   11316 allocs/op
+BenchmarkEval/fields      	    3939	    306670 ns/op	  403000 B/op	   11316 allocs/op
+BenchmarkEval/fields      	    3932	    309057 ns/op	  403000 B/op	   11316 allocs/op
+BenchmarkEval/fields      	    3867	    308949 ns/op	  403000 B/op	   11316 allocs/op
+BenchmarkEval/fields      	    3956	    307757 ns/op	  403000 B/op	   11316 allocs/op
+BenchmarkEval/fields      	    3936	    308341 ns/op	  403000 B/op	   11316 allocs/op
+BenchmarkEval/rows        	    2653	    455031 ns/op	  492384 B/op	   16497 allocs/op
+BenchmarkEval/rows        	    2642	    454561 ns/op	  492384 B/op	   16497 allocs/op
+BenchmarkEval/rows        	    2655	    456332 ns/op	  492384 B/op	   16497 allocs/op
+BenchmarkEval/rows        	    2647	    474271 ns/op	  492384 B/op	   16497 allocs/op
+BenchmarkEval/rows        	    2641	    457580 ns/op	  492384 B/op	   16497 allocs/op
+BenchmarkEval/rows        	    2624	    457106 ns/op	  492384 B/op	   16497 allocs/op
+BenchmarkEval/rows        	    2667	    456533 ns/op	  492384 B/op	   16497 allocs/op
+BenchmarkEval/rows        	    2554	    459776 ns/op	  492384 B/op	   16497 allocs/op
+BenchmarkEval/rows        	    2510	    462056 ns/op	  492384 B/op	   16497 allocs/op
+BenchmarkEval/rows        	    2606	    464806 ns/op	  492384 B/op	   16497 allocs/op
+BenchmarkEval/destructure 	    4899	    243136 ns/op	  251368 B/op	    8372 allocs/op
+BenchmarkEval/destructure 	    4788	    253580 ns/op	  251368 B/op	    8372 allocs/op
+BenchmarkEval/destructure 	    4980	    241961 ns/op	  251368 B/op	    8372 allocs/op
+BenchmarkEval/destructure 	    4993	    242880 ns/op	  251368 B/op	    8372 allocs/op
+BenchmarkEval/destructure 	    4935	    240288 ns/op	  251368 B/op	    8372 allocs/op
+BenchmarkEval/destructure 	    4995	    242647 ns/op	  251368 B/op	    8372 allocs/op
+BenchmarkEval/destructure 	    4977	    241986 ns/op	  251368 B/op	    8372 allocs/op
+BenchmarkEval/destructure 	    5046	    241344 ns/op	  251368 B/op	    8372 allocs/op
+BenchmarkEval/destructure 	    4861	    241321 ns/op	  251368 B/op	    8372 allocs/op
+BenchmarkEval/destructure 	    4995	    241601 ns/op	  251368 B/op	    8372 allocs/op
+BenchmarkEval/destructure-closed         	    6384	    191776 ns/op	  187352 B/op	    6372 allocs/op
+BenchmarkEval/destructure-closed         	    5299	    191825 ns/op	  187352 B/op	    6372 allocs/op
+BenchmarkEval/destructure-closed         	    6318	    192488 ns/op	  187352 B/op	    6372 allocs/op
+BenchmarkEval/destructure-closed         	    6322	    190483 ns/op	  187352 B/op	    6372 allocs/op
+BenchmarkEval/destructure-closed         	    6337	    191041 ns/op	  187352 B/op	    6372 allocs/op
+BenchmarkEval/destructure-closed         	    6328	    190800 ns/op	  187352 B/op	    6372 allocs/op
+BenchmarkEval/destructure-closed         	    6387	    189676 ns/op	  187352 B/op	    6372 allocs/op
+BenchmarkEval/destructure-closed         	    6360	    191037 ns/op	  187352 B/op	    6372 allocs/op
+BenchmarkEval/destructure-closed         	    6442	    190869 ns/op	  187352 B/op	    6372 allocs/op
+BenchmarkEval/destructure-closed         	    6266	    192466 ns/op	  187352 B/op	    6372 allocs/op
+BenchmarkEval/tree                       	    4342	    279394 ns/op	  180472 B/op	    8200 allocs/op
+BenchmarkEval/tree                       	    4350	    280841 ns/op	  180472 B/op	    8200 allocs/op
+BenchmarkEval/tree                       	    4312	    280351 ns/op	  180472 B/op	    8200 allocs/op
+BenchmarkEval/tree                       	    4322	    282157 ns/op	  180472 B/op	    8200 allocs/op
+BenchmarkEval/tree                       	    4318	    280446 ns/op	  180472 B/op	    8200 allocs/op
+BenchmarkEval/tree                       	    4371	    279470 ns/op	  180472 B/op	    8200 allocs/op
+BenchmarkEval/tree                       	    4347	    283577 ns/op	  180472 B/op	    8200 allocs/op
+BenchmarkEval/tree                       	    4312	    280387 ns/op	  180472 B/op	    8200 allocs/op
+BenchmarkEval/tree                       	    4327	    285558 ns/op	  180472 B/op	    8200 allocs/op
+BenchmarkEval/tree                       	    4264	    280835 ns/op	  180472 B/op	    8200 allocs/op
+BenchmarkEval/text                       	    6985	    157730 ns/op	 1128360 B/op	    3004 allocs/op
+BenchmarkEval/text                       	    7764	    160574 ns/op	 1128360 B/op	    3004 allocs/op
+BenchmarkEval/text                       	    6492	    160948 ns/op	 1128360 B/op	    3004 allocs/op
+BenchmarkEval/text                       	    7723	    157951 ns/op	 1128360 B/op	    3004 allocs/op
+BenchmarkEval/text                       	    7722	    159173 ns/op	 1128360 B/op	    3004 allocs/op
+BenchmarkEval/text                       	    7632	    161537 ns/op	 1128360 B/op	    3004 allocs/op
+BenchmarkEval/text                       	    7734	    158987 ns/op	 1128360 B/op	    3004 allocs/op
+BenchmarkEval/text                       	    7396	    160159 ns/op	 1128360 B/op	    3004 allocs/op
+BenchmarkEval/text                       	    7636	    158757 ns/op	 1128360 B/op	    3004 allocs/op
+BenchmarkEval/text                       	    7632	    158494 ns/op	 1128360 B/op	    3004 allocs/op
+BenchmarkEval/echo                       	    1598	    759325 ns/op	 3208905 B/op	   15038 allocs/op
+BenchmarkEval/echo                       	    1582	    752229 ns/op	 3208903 B/op	   15038 allocs/op
+BenchmarkEval/echo                       	    1599	    755164 ns/op	 3208904 B/op	   15038 allocs/op
+BenchmarkEval/echo                       	    1584	    761904 ns/op	 3208902 B/op	   15038 allocs/op
+BenchmarkEval/echo                       	    1573	    756792 ns/op	 3208903 B/op	   15038 allocs/op
+BenchmarkEval/echo                       	    1598	    755314 ns/op	 3208902 B/op	   15038 allocs/op
+BenchmarkEval/echo                       	    1593	    757266 ns/op	 3208904 B/op	   15038 allocs/op
+BenchmarkEval/echo                       	    1588	    755891 ns/op	 3208903 B/op	   15038 allocs/op
+BenchmarkEval/echo                       	    1585	    758892 ns/op	 3208903 B/op	   15038 allocs/op
+BenchmarkEval/echo                       	    1596	    756838 ns/op	 3208902 B/op	   15038 allocs/op
+BenchmarkRead                            	   18909	     63049 ns/op	   85994 B/op	     991 allocs/op
+BenchmarkRead                            	   19092	     63210 ns/op	   85994 B/op	     991 allocs/op
+BenchmarkRead                            	   19087	     62734 ns/op	   85994 B/op	     991 allocs/op
+BenchmarkRead                            	   18852	     63422 ns/op	   85994 B/op	     991 allocs/op
+BenchmarkRead                            	   19012	     63139 ns/op	   85994 B/op	     991 allocs/op
+BenchmarkRead                            	   18832	     63401 ns/op	   85994 B/op	     991 allocs/op
+BenchmarkRead                            	   19129	     63121 ns/op	   85994 B/op	     991 allocs/op
+BenchmarkRead                            	   18864	     63404 ns/op	   85994 B/op	     991 allocs/op
+BenchmarkRead                            	   19023	     63269 ns/op	   85994 B/op	     991 allocs/op
+BenchmarkRead                            	   19114	     62829 ns/op	   85994 B/op	     991 allocs/op
+BenchmarkInfer                           	    1046	   1145169 ns/op	 1972464 B/op	   19318 allocs/op
+BenchmarkInfer                           	    1051	   1148974 ns/op	 1972464 B/op	   19318 allocs/op
+BenchmarkInfer                           	    1058	   1144353 ns/op	 1972464 B/op	   19318 allocs/op
+BenchmarkInfer                           	    1052	   1144420 ns/op	 1972464 B/op	   19318 allocs/op
+BenchmarkInfer                           	    1051	   1139763 ns/op	 1972464 B/op	   19318 allocs/op
+BenchmarkInfer                           	    1036	   1146106 ns/op	 1972464 B/op	   19318 allocs/op
+BenchmarkInfer                           	    1047	   1140151 ns/op	 1972464 B/op	   19318 allocs/op
+BenchmarkInfer                           	    1050	   1134999 ns/op	 1972464 B/op	   19318 allocs/op
+BenchmarkInfer                           	    1059	   1145496 ns/op	 1972464 B/op	   19318 allocs/op
+BenchmarkInfer                           	    1046	   1147609 ns/op	 1972464 B/op	   19318 allocs/op
+PASS
+ok  	github.com/Victorystick/scrapscript/eval	174.695s
+PASS
+ok  	github.com/Victorystick/scrapscript/gogen	0.392s
+PASS
+ok  	github.com/Victorystick/scrapscript/gogen/internal/rich	0.363s
+?   	github.com/Victorystick/scrapscript/host	[no test files]
+PASS
+ok  	github.com/Victorystick/scrapscript/label	0.315s
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/parser
+cpu: Apple M3 Pro
+BenchmarkParse 	     211	   5500006 ns/op	 190.71 MB/s	10895472 B/op	      16 allocs/op
+BenchmarkParse 	     220	   5438340 ns/op	 192.87 MB/s	10895472 B/op	      16 allocs/op
+BenchmarkParse 	     220	   5407605 ns/op	 193.96 MB/s	10895472 B/op	      16 allocs/op
+BenchmarkParse 	     222	   5520472 ns/op	 190.00 MB/s	10895472 B/op	      16 allocs/op
+BenchmarkParse 	     220	   5453167 ns/op	 192.34 MB/s	10895472 B/op	      16 allocs/op
+BenchmarkParse 	     220	   5432473 ns/op	 193.08 MB/s	10895472 B/op	      16 allocs/op
+BenchmarkParse 	     216	   5496254 ns/op	 190.84 MB/s	10895472 B/op	      16 allocs/op
+BenchmarkParse 	     220	   5395698 ns/op	 194.39 MB/s	10895472 B/op	      16 allocs/op
+BenchmarkParse 	     222	   5397611 ns/op	 194.32 MB/s	10895472 B/op	      16 allocs/op
+BenchmarkParse 	     223	   5405496 ns/op	 194.04 MB/s	10895472 B/op	      16 allocs/op
+PASS
+ok  	github.com/Victorystick/scrapscript/parser	12.275s
+PASS
+ok  	github.com/Victorystick/scrapscript/printer	0.344s
+goos: darwin
+goarch: arm64
+pkg: github.com/Victorystick/scrapscript/scanner
+cpu: Apple M3 Pro
+BenchmarkScan 	     102	  11525046 ns/op	 449.23 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+BenchmarkScan 	     100	  11379901 ns/op	 454.96 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+BenchmarkScan 	     100	  11160834 ns/op	 463.89 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+BenchmarkScan 	     100	  11168300 ns/op	 463.57 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+BenchmarkScan 	     100	  11226779 ns/op	 461.16 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+BenchmarkScan 	     100	  11178550 ns/op	 463.15 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+BenchmarkScan 	     100	  11177710 ns/op	 463.18 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+BenchmarkScan 	     100	  11068502 ns/op	 467.75 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+BenchmarkScan 	     100	  11260433 ns/op	 459.78 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+BenchmarkScan 	     100	  11234498 ns/op	 460.84 MB/s	         3.292 bytes/token	14589952 B/op	       4 allocs/op
+PASS
+ok  	github.com/Victorystick/scrapscript/scanner	11.600s
+PASS
+ok  	github.com/Victorystick/scrapscript/token	0.330s
+PASS
+ok  	github.com/Victorystick/scrapscript/types	0.352s
+PASS
+ok  	github.com/Victorystick/scrapscript/yards	0.386s

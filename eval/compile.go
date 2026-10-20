@@ -501,7 +501,9 @@ type compiler struct {
 }
 
 // The most tokens that a function may have to be inlined by size, and the
-// most tokens that may be inlined so into one function.
+// most tokens that may be inlined so into one function. An inlined call
+// keeps its slots in the caller's frame, so inlining more can make frames
+// so large that calls get slower; BENCHMARK.md has the sweep.
 const (
 	inlineMax    = 40
 	inlineBudget = 4 * inlineMax
