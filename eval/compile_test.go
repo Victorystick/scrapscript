@@ -345,8 +345,8 @@ func TestCompile(t *testing.T) {
 		{`a + b ; a = 1 ; b = a`, `((+ @0 @1) ; >0 1 ; >1 @0)`, 2},
 		{`b ; b = a ; a = 1`, `(@0 ; >1 1 ; >0 @1)`, 2},
 		// A function has its own frame; the outer one is one out.
-		{`f 2 ; f = x -> x + n ; n = 1`,
-			`((@0 2) ; >1 1 ; >0 (fn/1 [@1] ^n&0 home=f | >0 -> (+ @0 &0)))`, 2},
+		{`list/map f [2] ; f = x -> x + n ; n = 1`,
+			`((list/map @0 [2]) ; >1 1 ; >0 (fn/1 [@1] ^n&0 home=f | >0 -> (+ @0 &0)))`, 2},
 		// A recursive function captures itself once it is made.
 		{`f ; f = | 0 -> 1 | n -> n * f (n - 1)`,
 			`(@0 ; >0 new ; >0 (fill @0 (fn/1 [@0] ^f&0 home=f | 0 -> 1 | >0 -> (* @0 (&0 (- @0 1))))))`, 1},
@@ -356,7 +356,7 @@ func TestCompile(t *testing.T) {
 		// A recursive function's closure is made before its where, whose
 		// closures may capture it.
 		{`f ; f = (x -> g x ; g = y -> f y)`,
-			`(@0 ; >0 new ; >0 ((fill @0 (fn/1 [@1] ^g&0 | >0 -> (&0 @0))) ; >1 (fn/1 [@0] ^f&0 home=g | >0 -> (&0 @0))))`, 2},
+			`(@0 ; >0 new ; >0 ((fill @0 (fn/2 [@1, @0] ^g&0 | >0 -> (match @0 | >1 -> (&1 @1)))) ; >1 (fn/1 [@0] ^f&0 home=g | >0 -> (&0 @0))))`, 2},
 		// A where in a function body takes slots in the function's frame.
 		{`x -> (y ; y = x)`, `(fn/2 | >0 -> (@1 ; >1 @0))`, 0},
 		// The arms of a match share slots; the frame is the largest arm.
@@ -404,6 +404,18 @@ func TestCompile(t *testing.T) {
 			`(match 1 | >0 -> (@1 ; >1 (fn/1 [@0] ^y&0 home=g | >0 -> (+ &0 @0))))`, 2},
 		// A function of more arguments is still called.
 		{`1 |> | a -> b -> a`, `((fn/2 | >0 -> >1 -> @0) 1)`, 0},
+		// A call to a small where-bound function of one argument is a match
+		// too, whose body sees the names where the function is bound. The
+		// caller still captures the function, which its code prints with.
+		{`1 |> n -> f 2 ; f = x -> x + n ; n = 10`,
+			`((match 1 | >2 -> (match 2 | >3 -> (+ @3 @1))) ; >1 10 ; >0 (fn/1 [@1] ^n&0 home=f | >0 -> (+ @0 &0)))`, 4},
+		{`y -> f y ; f = x -> g x + 1 ; g = x -> x + k ; k = 3`,
+			`((fn/3 [@0, @2] ^f&0 | >0 -> (match @0 | >1 -> (+ (match @1 | >2 -> (+ @2 &1)) 1))) ; >2 3 ; >1 (fn/1 [@2] ^k&0 home=g | >0 -> (+ @0 &0)) ; >0 (fn/2 [@1, @2] ^g&0 home=f | >0 -> (+ (match @0 | >1 -> (+ @1 &1)) 1)))`, 3},
+		// A large one only if nothing else refers to it.
+		{`f 1 + f 2 ; f = | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10`,
+			`((+ (@0 1) (@0 2)) ; >0 (fn/0 home=f | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10))`, 1},
+		{`f 1 ; f = | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10`,
+			`((match 1 | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10) ; >0 (fn/0 home=f | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10))`, 1},
 		// Values.
 		// On records of a closed type, fields are at static indices.
 		{`{ ..r, a = 1 }.a ; r = { a = 2 }`, `({ a[0] = 1 ..@0 }.a[0] ; >0 { a = 2 })`, 1},

@@ -57,6 +57,31 @@ func (se *SourceExpr) Components(binds []Node, cut func(Node) bool) []Component 
 	return t.components
 }
 
+// References counts the references to each of a group's bindings, by its
+// index in binds: the free identifiers that name it in the group's body
+// and in the bindings' values.
+func (se *SourceExpr) References(body Node, binds []Node) []int {
+	index := make(map[string]int, len(binds))
+	for i, b := range binds {
+		if !se.Sort(b) {
+			index[se.TokenText(se.Mains[b])] = i
+		}
+	}
+	counts := make([]int, len(binds))
+	f := freeNames{se: se, bound: make(map[string]int), visit: func(name string) {
+		if i, ok := index[name]; ok {
+			counts[i]++
+		}
+	}}
+	for _, b := range binds {
+		if _, _, _, val := se.Where(b); !se.Sort(b) {
+			f.expr(val)
+		}
+	}
+	f.expr(body)
+	return counts
+}
+
 type tarjan struct {
 	se         *SourceExpr
 	binds      []Node

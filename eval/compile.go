@@ -334,6 +334,7 @@ func compile(units []unit, reg *types.Registry, globals Vars, shapes *shapeTable
 		globals:  globals,
 		builtins: make(map[string]int32),
 		scraps:   make([]int32, len(units)),
+		inlines:  make(map[int32]inlinable),
 	}
 	c.srcs = make([]source, len(units))
 	for i, u := range units {
@@ -383,6 +384,7 @@ func compile(units []unit, reg *types.Registry, globals Vars, shapes *shapeTable
 // static part for printing.
 func (c *compiler) scrap() cnode {
 	x := c.src.Expr
+	c.budget = inlineBudget
 	v := c.expr(x)
 	if c.static.Has(x) {
 		c.srcs[c.cur].rootStatic = c.open(false)
@@ -475,6 +477,32 @@ type compiler struct {
 	values, types []entry
 	// The printed code being compiled, innermost last.
 	roots []root
+
+	// The functions that calls may be inlined into, by binder; how many
+	// inlined bodies are being compiled; and how many more tokens of code
+	// may be inlined into the function being compiled by size.
+	inlines map[int32]inlinable
+	depth   int
+	budget  int
+}
+
+// The most tokens that a function may have to be inlined by size, and the
+// most tokens that may be inlined so into one function.
+const (
+	inlineMax    = 40
+	inlineBudget = 4 * inlineMax
+)
+
+// An inlinable is a where-bound function literal of one argument that isn't
+// recursive, so that a call to it may compile as a match of its arms in the
+// caller's frame.
+type inlinable struct {
+	val ast.Node
+	// The number of names in scope where it is bound, of values and of
+	// types, which its body sees.
+	values, types int
+	// Whether one call is the only reference to it.
+	once bool
 }
 
 type entry struct {
@@ -874,7 +902,10 @@ func (c *compiler) call(x, fn, arg ast.Node) cnode {
 	}
 	if len(args) == 1 {
 		if arms := c.arms(fn); arms != nil {
-			return c.match(fn, arg, arms)
+			return c.match(fn, c.expr(arg), arms)
+		}
+		if n, ok := c.inline(fn, arg); ok {
+			return n
 		}
 		return c.node(opCall, int32(c.expr(fn)), int32(c.expr(arg)), x)
 	}
@@ -915,8 +946,8 @@ func (c *compiler) arms(fn ast.Node) []ast.Node {
 // arms are fn's patterns and bodies. The arms' slots overlap, but not with
 // the slots of what follows the match, which closures made in an arm may
 // still read.
-func (c *compiler) match(fn, arg ast.Node, arms []ast.Node) cnode {
-	xs := []int32{int32(c.expr(arg))}
+func (c *compiler) match(fn ast.Node, arg cnode, arms []ast.Node) cnode {
+	xs := []int32{int32(arg)}
 	start, end := c.next, c.next
 	for i := 0; i < len(arms); i += 2 {
 		c.next = start
@@ -929,6 +960,47 @@ func (c *compiler) match(fn, arg ast.Node, arms []ast.Node) cnode {
 	return c.span(opMatch, xs, fn)
 }
 
+// inline compiles the call of fn to arg as a match, as if fn's value were
+// written in its place, if fn names an inlinable function that is small
+// enough, or that nothing else refers to. Calls in an inlined body are
+// inlined by size alone, so that its copies stay bounded.
+func (c *compiler) inline(fn, arg ast.Node) (cnode, bool) {
+	if c.src.Kind(fn) != ast.Ident {
+		return none, false
+	}
+	name := c.name(c.src.Main(fn))
+	i := lookup(c.values, name)
+	if i < 0 {
+		return none, false
+	}
+	in, ok := c.inlines[c.values[i].b]
+	if !ok {
+		return none, false
+	}
+	size := int(c.src.Last(in.val)-c.src.First(in.val)) + 1
+	switch {
+	case in.once && c.depth == 0:
+	case size <= inlineMax && size <= c.budget:
+		c.budget -= size
+	default:
+		return none, false
+	}
+	// The call prints as itself, so it still refers to fn.
+	c.use(name)
+	c.refer(fn, i, true, true)
+	v := c.expr(arg)
+
+	// The body sees the names in scope where fn is bound. It refers to them
+	// from this frame, but prints only as part of fn's value.
+	values, types, roots := c.values, c.types, c.roots
+	c.values, c.types, c.roots = slices.Clip(values[:in.values]), slices.Clip(types[:in.types]), nil
+	c.depth++
+	n := c.match(in.val, v, c.arms(in.val))
+	c.depth--
+	c.values, c.types, c.roots = values, types, roots
+	return n, true
+}
+
 // fn compiles a function, a Func node or a match function, in a new frame,
 // whose first slots are its arguments. A chain of Func nodes, a -> b -> …,
 // is one function that takes an argument per node, and if the chain ends
@@ -936,8 +1008,8 @@ func (c *compiler) match(fn, arg ast.Node, arms []ast.Node) cnode {
 // of one arm with one pattern. The arms' slots overlap.
 func (c *compiler) fn(x ast.Node) cnode {
 	u := c.open(true)
-	level, next, size := c.level, c.next, c.size
-	c.level, c.next, c.size = c.level+1, 0, 0
+	level, next, size, budget := c.level, c.next, c.size, c.budget
+	c.level, c.next, c.size, c.budget = c.level+1, 0, 0, inlineBudget
 	c.fns = append(c.fns[:c.level], nil)
 
 	var params []ast.Node
@@ -989,7 +1061,7 @@ func (c *compiler) fn(x ast.Node) cnode {
 		head = append(head, x.from)
 	}
 
-	c.level, c.next, c.size = level, next, size
+	c.level, c.next, c.size, c.budget = level, next, size, budget
 	c.close()
 	return c.span(opLambda, append(head, xs...), x)
 }
@@ -1040,8 +1112,11 @@ func (c *compiler) group(x ast.Node) cnode {
 		c.wheres = append(c.wheres, whereStatic{c.cur, x, u})
 	}
 
+	comps := se.Components(binds, nil)
+	c.inlinable(body, binds, comps, byNode)
+
 	xs := []int32{0}
-	for _, comp := range se.Components(binds, nil) {
+	for _, comp := range comps {
 		var made []int32
 		for _, w := range comp.Binds {
 			_, _, _, val := se.Where(w)
@@ -1073,6 +1148,25 @@ func (c *compiler) group(x ast.Node) cnode {
 
 	c.values, c.types = c.values[:values], c.types[:types]
 	return c.span(opWhere, xs, x)
+}
+
+// inlinable notes the group's bindings that calls may be inlined into: the
+// function literals of one argument that aren't recursive.
+func (c *compiler) inlinable(body ast.Node, binds []ast.Node, comps []ast.Component, byNode map[ast.Node]int32) {
+	var counts []int
+	for _, comp := range comps {
+		w := comp.Binds[0]
+		_, _, _, val := c.src.Where(w)
+		if comp.Recursive || c.arms(val) == nil {
+			continue
+		}
+		if counts == nil {
+			counts = c.src.References(body, binds)
+		}
+		// The group's binders are in the order of binds.
+		b := byNode[w]
+		c.inlines[b] = inlinable{val, len(c.values), len(c.types), counts[b-byNode[binds[0]]] == 1}
+	}
 }
 
 // typeName resolves the Ident x in type position: a type variable, a sort
