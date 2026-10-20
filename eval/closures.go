@@ -181,14 +181,129 @@ func (p *program) builtin(n cnode) (BuiltInFunc, bool) {
 func (p *program) expr(n cnode) code {
 	d := p.data[n]
 	switch p.ops[n] {
-	case opCall, opCallN, opMatch, opMatchN, opWhere:
-		t := p.tail(n)
+	case opCall:
+		ac := p.operand(cnode(d.b))
+		if g, ok := p.builtin(cnode(d.a)); ok && g.arity == 1 {
+			return func(f frame) Value { return g.one(ac.get(f)) }
+		}
+		fc := p.operand(cnode(d.a))
 		return func(f frame) Value {
-			v, next, g := t(f)
-			if next != nil {
-				return trampoline(next, g)
+			fn := fc.get(f)
+			arg := ac.get(f)
+			if sf, ok := fn.(ScriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
+				if l := sf.prog.lam(sf.node); l.arity == 1 {
+					return trampoline(l.enter1(sf, arg))
+				}
 			}
-			return v
+			q, body, g, v := enter(fn, arg)
+			if v != nil {
+				return v
+			}
+			return trampoline(q.body(body), g)
+		}
+
+	case opCallN:
+		r := p.range_(n)
+		acs := p.operands(r[1:])
+		k := len(acs)
+		if g, ok := p.builtin(cnode(r[0])); ok && g.arity == k {
+			switch {
+			case g.two != nil:
+				a, b := acs[0], acs[1]
+				return func(f frame) Value {
+					x := a.get(f)
+					return g.two(x, b.get(f))
+				}
+			case g.three != nil:
+				a, b, c := acs[0], acs[1], acs[2]
+				return func(f frame) Value {
+					x := a.get(f)
+					y := b.get(f)
+					return g.three(x, y, c.get(f))
+				}
+			}
+		}
+		fc := p.operand(cnode(r[0]))
+		return func(f frame) Value {
+			fn := fc.get(f)
+			if g, ok := fn.(BuiltInFunc); ok && g.arity == k {
+				switch {
+				case g.two != nil:
+					x := acs[0].get(f)
+					return g.two(x, acs[1].get(f))
+				case g.three != nil:
+					x := acs[0].get(f)
+					y := acs[1].get(f)
+					return g.three(x, y, acs[2].get(f))
+				}
+			}
+			if sf, ok := fn.(ScriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
+				if l := sf.prog.lam(sf.node); l.arity == k {
+					g := sf.frame(l.size)
+					for i, c := range acs {
+						g.slots[i] = c.get(f)
+					}
+					return trampoline(l.enterN(sf, g), g)
+				}
+			}
+			args := make([]Value, k)
+			for i, c := range acs {
+				args[i] = c.get(f)
+			}
+			q, body, g, v := enterN(fn, args)
+			if v != nil {
+				return v
+			}
+			return trampoline(q.body(body), g)
+		}
+
+	case opMatch:
+		r := p.range_(n)
+		vc := p.operand(cnode(r[0]))
+		arms := r[1:]
+		pats := make([]mcode, len(arms)/2)
+		bodies := p.exprsOf(arms, 2)
+		for i := range pats {
+			pats[i] = p.pattern(cnode(arms[2*i]))
+		}
+		return func(f frame) Value {
+			v := vc.get(f)
+			for i, m := range pats {
+				if m(v, f.slots) {
+					return bodies[i](f)
+				}
+			}
+			panic(p.errorf(n, "no arm matches %s", printValue(p.labels, v)))
+		}
+
+	case opMatchN:
+		r := p.range_(n)
+		s, k := r[0], int(r[1])
+		vcs := p.operands(r[2 : 2+k])
+		var pats [][]mcode
+		bodies := p.exprsOf(r[2+k:], k+1)
+		for a := r[2+k:]; len(a) > 0; a = a[k+1:] {
+			pats = append(pats, p.patterns(a[:k]))
+		}
+		return func(f frame) Value {
+			args := f.slots[s : int(s)+k]
+			for i, vc := range vcs {
+				args[i] = vc.get(f)
+			}
+			for i, ms := range pats {
+				if matchEach(ms, args, f.slots) {
+					return bodies[i](f)
+				}
+			}
+			panic(p.noArm(n, args))
+		}
+
+	case opWhere:
+		body, binds := p.where(n)
+		bind, bc := p.binds(binds), p.expr(body)
+		return func(f frame) Value {
+			bind(f)
+			return bc(f)
 		}
 
 	case opConst:
@@ -516,35 +631,53 @@ func (p *program) tail(n cnode) tcode {
 
 	case opWhere:
 		body, binds := p.where(n)
-		type bind struct {
-			slot int32
-			c    code  // its value, or nil for a closure made before its captures
-			l    cnode // the lambda of that closure
-			caps int
-		}
-		bs := make([]bind, len(binds)/2)
-		for i := range bs {
-			s, x := binds[2*i], cnode(binds[2*i+1])
-			if s < 0 {
-				bs[i] = bind{slot: -1 - s, l: x, caps: len(p.captures(x))}
-			} else {
-				bs[i] = bind{slot: s, c: p.expr(x)}
-			}
-		}
-		bc := p.tail(body)
+		bind, bc := p.binds(binds), p.tail(body)
 		return func(f frame) (Value, tcode, frame) {
-			for _, b := range bs {
-				if b.c == nil {
-					f.slots[b.slot] = ScriptFunc{prog: p, node: b.l, caps: make([]Value, b.caps)}
-					continue
-				}
-				f.slots[b.slot] = b.c(f)
-			}
+			bind(f)
 			return bc(f)
 		}
 	}
 	c := p.expr(n)
 	return func(f frame) (Value, tcode, frame) { return done(c(f)) }
+}
+
+// binds compiles a where's bindings, as pairs of slot and value, into
+// code that puts their values in their slots.
+func (p *program) binds(binds []int32) func(f frame) {
+	type bind struct {
+		slot int32
+		c    code  // its value, or nil for a closure made before its captures
+		l    cnode // the lambda of that closure
+		caps int
+	}
+	bs := make([]bind, len(binds)/2)
+	for i := range bs {
+		s, x := binds[2*i], cnode(binds[2*i+1])
+		if s < 0 {
+			bs[i] = bind{slot: -1 - s, l: x, caps: len(p.captures(x))}
+		} else {
+			bs[i] = bind{slot: s, c: p.expr(x)}
+		}
+	}
+	return func(f frame) {
+		for _, b := range bs {
+			if b.c == nil {
+				f.slots[b.slot] = ScriptFunc{prog: p, node: b.l, caps: make([]Value, b.caps)}
+				continue
+			}
+			f.slots[b.slot] = b.c(f)
+		}
+	}
+}
+
+// exprsOf compiles the bodies of arms, the last of each stride nodes of
+// ns.
+func (p *program) exprsOf(ns []int32, stride int) []code {
+	cs := make([]code, 0, len(ns)/stride)
+	for i := stride - 1; i < len(ns); i += stride {
+		cs = append(cs, p.expr(cnode(ns[i])))
+	}
+	return cs
 }
 
 func matchAny(Value, []Value) bool { return true }
