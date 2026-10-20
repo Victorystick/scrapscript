@@ -313,8 +313,8 @@ Desugaring:
 Type names are lowercase: `int float text byte bytes list`, plus `()` for the hole
 type. Types and values share one namespace. A name bound by a sort binding
 (below) may appear only in type positions, and sort bindings are erased from the
-core. The one exception is a scrap's body, which may name a type to export it
-(7.6).
+core. The exceptions are a scrap's body, which may name a type to export it
+(7.6), and a record literal's field, which makes the type a member (7.7).
 
 Type variables are introduced explicitly with `=>`; there is no implicit
 quantification. A name in a type is a variable bound by an enclosing `=>`, a
@@ -332,6 +332,9 @@ tfield   = NAME ":" type
 ttag     = TAG [ tatom ]
 tpath    = ( NAME | HASH | PATH ) { "." NAME }   # a type, a type scrap, or a type member
 ```
+
+A path with dots, `avl.tree` or `$"./avl.scrap".tree`, names a type member and
+resolves through static parts (7.7).
 
 A row tail may stand alone: `{ ..r }`, `[ ..r ]`. Examples:
 
@@ -491,8 +494,66 @@ f : $source:… -> int = | #a _ -> 1 | #b n -> n | #c _ -> 0
 - Exports are still structural: the hash names a type, it does not make it
   nominal. Two type scraps that denote the same type are interchangeable.
 
-This exports one type per scrap. Bundling a library's types and values into one
-scrap needs types as record members, which is planned work (section 12).
+A type scrap exports one type. A library bundles its types with its values as
+the members of the record it denotes (7.7). Both follow one rule: a reference in
+type position resolves from the body of the scrap it names.
+
+### 7.7 Static parts and type members
+
+A scrap runs in two phases. The **static** phase builds the program: it
+resolves types, and the members that paths in types reach, without inferring or
+running any value. The runtime phase evaluates values only. Types and members
+belong to the static phase, and are erased from the core.
+
+An expression's **static part** is the type it denotes, or the type members of
+the record it denotes:
+
+- A name bound by a sort binding: that type. A name bound by a value binding:
+  the static part of the binding's value.
+- `e ; …`: the static part of `e`, with the where-clause's bindings in scope.
+- A reference: the static part of the referenced scrap's body. An import means
+  the same as its source inlined in parentheses, so a path resolves the same way
+  locally and across imports.
+- A record literal without a spread: its fields whose values have a static part,
+  by name. These are its **members**.
+- `e.m`: the member `m` of the static part of `e`.
+- Anything else, such as a lambda, a call or a spread, has none. Members don't
+  survive value flow: for `f = x -> …`, a path `x.t` is an error, and so are
+  `(id lib).t` and `{ ..lib, v = 1 }.t`.
+
+```scrap
+f
+; f : avl.tree text int -> int = avl.size
+; avl = $"./avl.scrap"
+```
+
+```scrap
+{ tree = tree, empty = #leaf, size = size, … }
+; tree : type -> type -> type = k => v => [#leaf, #node (node k v)]
+; …
+```
+
+- A field whose value denotes only a type is a member and not a field of the
+  value: `{ t = t, v = 1 }` has the type `{ v : int }`, and its runtime shape is
+  that of `{ v = 1 }`. A field whose value is a record with members, such as
+  `{ s = { t = t, v = 1 } }`, is both a value field and a member.
+- A member names a type: a sort binding, a path, or a reference to a type scrap.
+  The kind comes from the sort binding's annotation.
+- Members are transparent: `avl.tree text int` is the structural type it expands
+  to, with the same arity and row-argument checks as a type scrap (7.6).
+- In type position, a name bound by a value binding without a static part
+  doesn't hide a type of the same name in an outer scope, so a parser named
+  `int` doesn't hide the type `int`.
+- Static parts don't depend on the order of a where-group: `state : type = {
+  paths : avl.tree text int }` and `avl = …` may share a group in either order.
+- A scrap's result exports the members of the static part of its body, which is
+  all that importers see of it.
+- Printing keeps members where their record literal is printed (section 10,
+  rule 6).
+
+Open: abstract members, which would need nominal identity; members through
+applications (section 12); the printed type of a value, as `scrap type` shows
+it, names a path `avl.tree` without a binding for `avl`.
 
 ## 8. Binding groups
 
@@ -602,6 +663,14 @@ Reliability is a top-level requirement. The rules:
    - Bindings keep their annotations, and the sort bindings that those refer
      to print too. Recursive functions over recursive types (7.5) need them
      to check.
+   - Type members (7.7) print with the record literals they belong to: a
+     binding, or the scrap's result, whose value is a record literal prints
+     its fields and its members. A binding whose value is a reference prints
+     as that reference. A binding that only paths in types reach, such as
+     `avl` in `avl.tree`, prints as its static part alone: a reference as
+     itself, a record literal as its members, `{ option = option }`. A record
+     that reaches the result any other way, as through a call, prints without
+     members, since members don't survive value flow.
    - Printing adds the parentheses the grammar needs: `#fun (x -> x * 2)`,
      `list/fold 0 (a -> b -> a + b)`.
    - TEXT, BYTE and BYTES print with escapes that read back to the same bytes, and
@@ -672,13 +741,8 @@ always gives the same hashes.
     variants, and the exhaustiveness rule of 7.1: a closed, well-typed term never
     raises a match error.
 - **Canonical encoding of the core** (section 9), deferred by decision.
-- **Types as record members**, the end goal for exporting types: one scrap
-  bundles a library's types and values, as in
-  `{ option = a => [#some a, #none], map = … }`, used as `lib.option int` in type
-  position. Record types then carry manifest type members, which row unification,
-  printing and type caching must handle. Open questions: whether members can be
-  made abstract, and when two such records' types are equal. Type scraps (7.6)
-  are the interim mechanism.
+- **Type members** (7.7) are resolved statically and erased, so record types
+  carry none and row unification is unchanged. Open: abstract members.
   - Later, members through applications, as ML functors: in
     `ordered = cmp -> { tree = tree, insert = … }` the members don't depend
     on `cmp`, so `(avl.ordered text/cmp).tree` could resolve at compile time
