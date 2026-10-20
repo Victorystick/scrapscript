@@ -27,32 +27,76 @@ import (
 // binder with the same value, whichever closure captured it, is one
 // binding: values that are the same, with functions the same closure.
 //
+// A record that a binding's value is the literal of keeps its type
+// members, which the checker found in the binding's static part. A binding
+// that only types refer to, as avl in avl.tree, prints as its static part:
+// an import as itself, a record literal as its members.
+//
 // The bindings come from many scopes, but print as one where-group, so a
 // name that is already taken gets primes: a, a', a”.
 func printValue(labels *label.Table, v Value) string {
-	p := valuePrinter{
-		labels:   labels,
-		byBinder: make(map[binderKey][]*binding),
-		names:    make(map[string]bool),
-		idents:   make(map[string]bool),
-	}
+	p := newValuePrinter(labels)
 	p.collect(v)
+	p.merge()
 	p.name()
 	return p.print(v)
+}
+
+// printScrap prints v, the value of prog, as printValue does, with the
+// members of prog's static part. An import's are those of its scrap.
+func printScrap(labels *label.Table, v Value, prog *program) string {
+	x := prog.src.Expr
+	for prog.src.Kind(x) == ast.Import {
+		prog = prog.imported(x)
+		x = prog.src.Expr
+	}
+	u := prog.rootStatic
+	if prog.src.Kind(x) == ast.Where {
+		u = prog.whereUses(x)
+	}
+	if u < 0 {
+		return printValue(labels, v)
+	}
+	p := newValuePrinter(labels)
+	p.collect(v)
+	if prog.rootStatic >= 0 {
+		p.refs(prog, prog.rootStatic, nil)
+	}
+	wheres(prog, x, func(u int32) { p.refs(prog, u, nil) })
+	p.merge()
+	p.name()
+	var s strings.Builder
+	p.withMembers(&s, prog, p.staticNames(prog, prog.rootStatic, x), x, v)
+	p.where(&s)
+	return s.String()
 }
 
 // A binding is a variable, or a sort binding, that a printed value refers
 // to and so binds.
 type binding struct {
 	binderKey
-	value   Value  // nil for a sort binding
+	// nil for a sort binding, and for a variable that only types refer to,
+	// which prints as its static part
+	value   Value
 	printed string // its name in the printed scrap
+	// A variable's binding with a value that has its members, which one
+	// that only types refer to prints as instead.
+	merged *binding
 }
 
 // A binderKey is a binder of a program.
 type binderKey struct {
 	prog *program
 	b    int32 // the index in binders of prog
+}
+
+func newValuePrinter(labels *label.Table) *valuePrinter {
+	return &valuePrinter{
+		labels:   labels,
+		byBinder: make(map[binderKey][]*binding),
+		names:    make(map[string]bool),
+		idents:   make(map[string]bool),
+	}
 }
 
 type valuePrinter struct {
@@ -151,6 +195,16 @@ func (p *valuePrinter) need(key binderKey, v Value) *binding {
 		if bd.sort {
 			return b
 		}
+		if bd.static >= 0 {
+			_, _, _, val := key.prog.src.Where(bd.where)
+			if v == nil || p.members(b) {
+				p.refs(key.prog, bd.static, nil)
+				wheres(key.prog, val, func(u int32) { p.refs(key.prog, u, nil) })
+			}
+			if v == nil || key.prog.src.Kind(val) == ast.Import {
+				return b
+			}
+		}
 	}
 	if p.defines(b) {
 		p.code(v.(ScriptFunc))
@@ -158,6 +212,71 @@ func (p *valuePrinter) need(key binderKey, v Value) *binding {
 		p.collect(v)
 	}
 	return b
+}
+
+// wheres calls f with the uses of the static part of each where-group in
+// the static part of x, which have uses of their own.
+func wheres(prog *program, x ast.Node, f func(u int32)) {
+	se := prog.src
+	switch se.Kind(x) {
+	case ast.Record:
+		_, fields := se.Record(x)
+		for i := range fields.Len() {
+			if v := fields.Value(i); prog.static.Has(v) {
+				wheres(prog, v, f)
+			}
+		}
+	case ast.Where:
+		body, _ := se.Group(x)
+		f(prog.whereUses(x))
+		wheres(prog, body, f)
+	}
+}
+
+// staticNames returns the printed names of the free names of the static
+// part of x in prog, whose uses are u, or -1 for none.
+func (p *valuePrinter) staticNames(prog *program, u int32, x ast.Node) map[ast.Node]string {
+	names := make(map[ast.Node]string)
+	if u >= 0 {
+		p.renames(names, prog, u, nil)
+	}
+	wheres(prog, x, func(u int32) { p.renames(names, prog, u, nil) })
+	return names
+}
+
+// members returns true if b's value, with a static part, prints with its
+// members: as the import or record literal that it is the value of.
+func (p *valuePrinter) members(b *binding) bool {
+	bd := b.binder()
+	if b.value == nil || bd.static < 0 {
+		return false
+	}
+	_, _, _, val := b.prog.src.Where(bd.where)
+	switch b.prog.src.Kind(val) {
+	case ast.Import, ast.Record:
+		return true
+	}
+	return false
+}
+
+// merge lets the bindings that only types refer to print as a binding of
+// the same binder whose value prints with its members, if there is one.
+func (p *valuePrinter) merge() {
+	kept := p.bindings[:0]
+	for _, b := range p.bindings {
+		if b.value == nil && !b.binder().sort {
+			for _, o := range p.byBinder[b.binderKey] {
+				if p.members(o) {
+					b.merged = o
+					break
+				}
+			}
+		}
+		if b.merged == nil {
+			kept = append(kept, b)
+		}
+	}
+	p.bindings = kept
 }
 
 // defines returns true if b's value is a function that b defines, which
@@ -263,18 +382,31 @@ func (p *valuePrinter) name() {
 		taken[name] = true
 		b.printed = name
 	}
+	for _, bs := range p.byBinder {
+		for _, b := range bs {
+			if b.merged != nil {
+				b.printed = b.merged.printed
+			}
+		}
+	}
 }
 
 func (p *valuePrinter) print(v Value) string {
 	var s strings.Builder
 	p.value(&s, v, printer.Expr)
+	p.where(&s)
+	return s.String()
+}
+
+// where prints the bindings as a where-group.
+func (p *valuePrinter) where(s *strings.Builder) {
 	for _, b := range p.bindings {
 		s.WriteString("\n; ")
 		s.WriteString(b.printed)
 		bd := b.binder()
 		if bd.where == ast.None {
 			s.WriteString(" = ")
-			p.value(&s, b.value, printer.Body)
+			p.value(s, b.value, printer.Body)
 			continue
 		}
 		names := p.renames(nil, b.prog, bd.types, nil)
@@ -301,12 +433,89 @@ func (p *valuePrinter) print(v Value) string {
 		v := b.value
 		if p.defines(b) {
 			// A composition that b defines prints as its functions.
-			p.compose(&s, v.(ScriptFunc), printer.Body)
+			p.compose(s, v.(ScriptFunc), printer.Body)
 			continue
 		}
-		p.value(&s, v, printer.Body)
+		if v == nil || p.members(b) {
+			names := p.staticNames(b.prog, bd.static, val)
+			p.withMembers(s, b.prog, names, val, v)
+			continue
+		}
+		p.value(s, v, printer.Body)
 	}
-	return s.String()
+}
+
+// withMembers prints v, the value of x in prog, with the members of x's
+// static part. An import prints as itself, a record literal as v's fields
+// and its members. Without v, x prints as its static part alone. names are
+// the printed names of the static part's free names.
+func (p *valuePrinter) withMembers(s *strings.Builder, prog *program, names map[ast.Node]string, x ast.Node, v Value) {
+	se := prog.src
+	switch se.Kind(x) {
+	case ast.Record:
+		_, fields := se.Record(x)
+		r, valued := v.(Record)
+		n := 0
+		sep := func() {
+			if n == 0 {
+				s.WriteString("{ ")
+			} else {
+				s.WriteString(", ")
+			}
+			n++
+		}
+		for i := 0; valued && i < len(r.values); i++ {
+			key := r.shape.labels[i]
+			sep()
+			name := p.labels.Name(key)
+			s.WriteString(name)
+			s.WriteString(" = ")
+			if f := field(se, fields, name); f != ast.None && prog.static.Has(f) {
+				p.withMembers(s, prog, names, f, r.values[i])
+			} else {
+				p.value(s, r.values[i], printer.Expr)
+			}
+		}
+		for i := range fields.Len() {
+			f := fields.Value(i)
+			if !prog.static.Has(f) || valued && r.shape.index(p.labels.Of(se.TokenText(fields.Key(i)))) >= 0 {
+				continue
+			}
+			// A member, which the value leaves out.
+			sep()
+			s.WriteString(se.TokenText(fields.Key(i)))
+			s.WriteString(" = ")
+			p.withMembers(s, prog, names, f, nil)
+		}
+		if n == 0 {
+			s.WriteString("{}")
+		} else {
+			s.WriteString(" }")
+		}
+	case ast.Where:
+		body, _ := se.Group(x)
+		p.withMembers(s, prog, names, body, v)
+	case ast.Ident, ast.Access, ast.Import:
+		if v == nil || se.Kind(x) == ast.Import {
+			pr := p.printer(se, names)
+			pr.Expr(x, printer.Expr)
+			s.WriteString(pr.String())
+			return
+		}
+		fallthrough
+	default:
+		p.value(s, v, printer.Expr)
+	}
+}
+
+// field returns the value of the field name of a record literal, or None.
+func field(se *ast.SourceExpr, fields ast.Fields, name string) ast.Node {
+	for i := range fields.Len() {
+		if se.TokenText(fields.Key(i)) == name {
+			return fields.Value(i)
+		}
+	}
+	return ast.None
 }
 
 // printer returns a Printer for code in src, which prints the free names

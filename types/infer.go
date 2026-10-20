@@ -56,6 +56,10 @@ type Result struct {
 	// nodes of a where-group, whose type is at its outermost one. A use of a
 	// polymorphic name has the type it is instantiated to there.
 	Nodes []TypeRef
+	// The nodes with a static part: of the values of where-bindings, and of
+	// the parts of those that the static part comes from, such as a record
+	// literal's fields.
+	Static NodeSet
 }
 
 // A Param is a parameter of an exported type constructor.
@@ -84,6 +88,8 @@ type context struct {
 	// The groups of the where nodes met, and their indices by node.
 	groupList []group
 	groups    map[ast.Node]int32
+	// The nodes found to have a static part.
+	statics NodeSet
 	// The match functions, and their argument types, to check for
 	// exhaustiveness once the whole scrap is inferred.
 	matches []match
@@ -138,9 +144,11 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, imports Imports) (
 	for _, m := range context.matches {
 		context.exhaustive(m.node, m.args)
 	}
+	context.valueStatics()
 	reg.exit()
 	reg.generalize(res.Type)
 	res.Nodes = context.nodes
+	res.Static = context.statics
 	return res, err
 }
 

@@ -89,6 +89,60 @@ var printed = []struct{ source, result string }{
 ; list/map' = x -> x`},
 }
 
+// Type members print with the record literals that they belong to, and the
+// bindings that paths in types reach print as their static parts.
+var printedMembers = []struct{ source, result string }{
+	// A record literal's value keeps its members.
+	{`{ option = option, none = #none } ; option : type -> type = a => [#some a, #none]`,
+		`{ none = #none, option = option }
+; option : type -> type = a => [ #some a, #none ]`},
+	{`({ t = t, v = 1 } ; t : type = int)`, `{ v = 1, t = t }
+; t : type = int`},
+	// So does a binding's, nested ones too.
+	{`f ; f : l.s.t -> int = n -> n + l.v ; l = { s = { t = t, w = 2 }, v = 1 } ; t : type = int`,
+		`f
+; f : l.s.t -> int = n -> n + l.v
+; t : type = int
+; l = { s = { w = 2, t = t }, v = 1 }`},
+	// A binding that only types refer to prints as its members.
+	{`f ; f : l.option int -> int = | #some n -> n | #none -> 0 ; l = { option = option, none = #none } ; option : type -> type = a => [#some a, #none]`,
+		`f
+; f : l.option int -> int =
+  | #some n -> n
+  | #none -> 0
+; l = { option = option }
+; option : type -> type = a => [ #some a, #none ]`},
+	{`f ; f : l.option int -> int = | #some n -> n | #none -> 0 ; l = ({ option = option, none = #none } ; option : type -> type = a => [#some a, #none])`,
+		`f
+; f : l.option int -> int =
+  | #some n -> n
+  | #none -> 0
+; l = { option = option }
+; option : type -> type = a => [ #some a, #none ]`},
+	// Through a name, to a binding with a value.
+	{`f ; f : m.t -> int = n -> n + l.v ; m = l ; l = { t = t, v = 1 } ; t : type = int`,
+		`f
+; f : m.t -> int = n -> n + l.v
+; m = l
+; t : type = int
+; l = { v = 1, t = t }`},
+}
+
+func TestPrintedMembers(t *testing.T) {
+	for _, ex := range printedMembers {
+		env := NewEnvironment()
+		scrap, err := env.Read([]byte(ex.source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := env.PrintScrap(scrap); err != nil {
+			t.Errorf("%s: %v", ex.source, err)
+		} else if got != ex.result {
+			t.Errorf("%s: expected %q, got %q", ex.source, ex.result, got)
+		}
+	}
+}
+
 func TestPrinted(t *testing.T) {
 	for _, ex := range printed {
 		evalString(t, ex.source, ex.result)
@@ -104,6 +158,9 @@ func TestRoundTrip(t *testing.T) {
 		sources = append(sources, ex.source)
 	}
 	sources = append(sources, roundTrips...)
+	for _, ex := range printedMembers {
+		sources = append(sources, ex.source)
+	}
 
 	for _, source := range sources {
 		if _, ok := brokenRoundTrips[source]; ok {
@@ -126,18 +183,21 @@ func TestRoundTrip(t *testing.T) {
 // roundTrip evaluates source, then evaluates the printed result again. It
 // returns both printed results, or the first error.
 func roundTrip(source string) (first, second string, err error) {
-	env := NewEnvironment()
-	val, err := eval(env, source)
+	first, err = printScrapString(source)
 	if err != nil {
 		return "", "", err
 	}
-	first = env.Print(val)
-	env = NewEnvironment()
-	val, err = eval(env, first)
+	second, err = printScrapString(first)
+	return first, second, err
+}
+
+func printScrapString(source string) (string, error) {
+	env := NewEnvironment()
+	scrap, err := env.Read([]byte(source))
 	if err != nil {
-		return first, "", err
+		return "", err
 	}
-	return first, env.Print(val), nil
+	return env.PrintScrap(scrap)
 }
 
 func TestPrintedImports(t *testing.T) {

@@ -491,6 +491,23 @@ func TestImportTypeMember(t *testing.T) {
 	if val, err := env.Eval(scrap); err != nil || env.Print(val) != "0" {
 		t.Errorf("Expected 0, got %v, %v", val, err)
 	}
+
+	// Printed as a scrap, the library keeps its members, through an import
+	// too. A binding that only types refer to prints as the import.
+	for _, ex := range []struct{ source, result string }{
+		{`$source:` + lib, "{ none = #none, option = option }\n; option = a => [ #some a, #none ]"},
+		{`f ; f : l.option int -> int = | #some n -> n | #none -> 0 ; l = $source:` + lib,
+			"f\n; f : l.option int -> int =\n  | #some n -> n\n  | #none -> 0\n; l = $source:" + lib},
+		{`f ; f = x -> l.none ; l = $source:` + lib, "f\n; f = x -> l.none\n; l = $source:" + lib},
+	} {
+		scrap, err := env.Read([]byte(ex.source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := env.PrintScrap(scrap); err != nil || got != ex.result {
+			t.Errorf("%s: expected %q, got %q, %v", ex.source, ex.result, got, err)
+		}
+	}
 }
 
 type MapFetcher map[string]string

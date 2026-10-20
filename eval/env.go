@@ -39,6 +39,7 @@ type Scrap struct {
 	inferred        bool
 	result          types.Result
 	value           Value
+	prog            *program
 }
 
 func (s Scrap) Sha256() string {
@@ -278,7 +279,7 @@ func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
 		return nil, fmt.Errorf("cannot evaluate a type")
 	}
 	if s.value == nil {
-		c, err := compile(&s.expr, res.Nodes, e.vars, e.shapes)
+		c, err := compile(&s.expr, res.Nodes, res.Static, e.vars, e.shapes)
 		if err != nil {
 			return nil, err
 		}
@@ -291,7 +292,10 @@ func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
 				return sf, err
 			}
 			return v, err
+		}, imported: func(n ast.Node) *program {
+			return s.deps[n].prog
 		}}
+		s.prog = p
 		value, err := p.eval()
 		if err != nil {
 			return nil, err
@@ -346,6 +350,17 @@ func (e *Environment) Infer(s *Scrap) (string, error) {
 // and prints the same.
 func (e *Environment) Print(v Value) string {
 	return printValue(e.reg.Labels(), v)
+}
+
+// PrintScrap evaluates s, and returns a scrap that evaluates to its value
+// and prints the same, as Print does. If s is a record literal, the printed
+// record keeps its type members, so that it is the same scrap.
+func (e *Environment) PrintScrap(s *Scrap) (string, error) {
+	v, err := e.Eval(s)
+	if err != nil {
+		return "", err
+	}
+	return printScrap(e.reg.Labels(), v, s.prog), nil
 }
 
 // Label returns the ID of the record label or enum tag name in this

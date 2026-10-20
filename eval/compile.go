@@ -114,10 +114,34 @@ type core struct {
 	// those refer to, by index here.
 	binders []binder
 	uses    []uses
+	// The nodes with a static part, and the uses of the static part of each
+	// where-group's body that has one, by Where node.
+	static types.NodeSet
+	wheres []whereStatic
 
 	// The node evaluated, and the number of slots in its frame.
 	root cnode
 	top  int
+	// The index in uses of what the static part of the node evaluated
+	// refers to, or -1 if it has none. A where-group's is in wheres.
+	rootStatic int32
+}
+
+// A whereStatic is the uses of the static part of a where-group's body.
+type whereStatic struct {
+	x ast.Node
+	u int32
+}
+
+// whereUses returns the uses of the static part of the body of the
+// where-group x, or -1 if it has none.
+func (c *core) whereUses(x ast.Node) int32 {
+	for _, w := range c.wheres {
+		if w.x == x {
+			return w.u
+		}
+	}
+	return -1
 }
 
 // A binder is a name that a frame binds.
@@ -129,6 +153,10 @@ type binder struct {
 	// The index in uses of what its annotation, or a sort binding's type,
 	// refers to.
 	types int32
+	// The index in uses of what its value's static part refers to, or -1
+	// if it has none. Its members print from it, as does the binding
+	// itself when only types refer to it.
+	static int32
 }
 
 // A ref is what an Ident node in printed code refers to: a binder, or a
@@ -217,9 +245,9 @@ func (c *core) elems(n cnode) (rest cnode, elems []int32) {
 //
 // typed is the type of each node, from type checking, or nil to compile
 // every record field as a value.
-func compile(se *ast.SourceExpr, typed []types.TypeRef, globals Vars, shapes *shapeTable) (*core, error) {
+func compile(se *ast.SourceExpr, typed []types.TypeRef, static types.NodeSet, globals Vars, shapes *shapeTable) (*core, error) {
 	c := compiler{
-		core:     core{src: se, labels: shapes.labels, table: shapes},
+		core:     core{src: se, labels: shapes.labels, table: shapes, static: static},
 		typed:    typed,
 		globals:  globals,
 		builtins: make(map[string]int32),
@@ -227,6 +255,12 @@ func compile(se *ast.SourceExpr, typed []types.TypeRef, globals Vars, shapes *sh
 	c.node(opNone, 0, 0, ast.None)
 	c.fns = [][]capture{nil}
 	c.root = c.expr(se.Expr)
+	c.rootStatic = -1
+	if static.Has(se.Expr) {
+		c.rootStatic = c.open(false)
+		c.staticPart(se.Expr)
+		c.close()
+	}
 	if c.err != nil {
 		return nil, c.err
 	}
@@ -389,13 +423,15 @@ func (c *compiler) use(name string) {
 	}
 }
 
-// refer records that the Ident x refers to the i'th entry of scope, or to a
-// builtin if i is -1, in the code that it is free in.
-func (c *compiler) refer(x ast.Node, scope []entry, i int, types bool) {
+// refer records that the Ident x refers to the i'th entry of the values in
+// scope, or of the types, or to a builtin if i is -1, in the code that it
+// is free in. A lambda captures a value that it refers to, unless only its
+// static part is used, as in a type.
+func (c *compiler) refer(x ast.Node, i int, values, capture bool) {
 	for _, r := range c.roots {
-		mark := r.values
-		if types {
-			mark = r.types
+		scope, mark := c.types, r.types
+		if values {
+			scope, mark = c.values, r.values
 		}
 		u := &c.uses[r.u]
 		if i < 0 {
@@ -403,7 +439,7 @@ func (c *compiler) refer(x ast.Node, scope []entry, i int, types bool) {
 		} else if i < mark {
 			e := scope[i]
 			cap := int32(-1)
-			if r.lambda && !types {
+			if r.lambda && capture {
 				cap = c.capture(r.level+1, e)
 			}
 			u.free = append(u.free, ref{x, e.b, cap})
@@ -473,7 +509,7 @@ func (c *compiler) expr(x ast.Node) cnode {
 		name := c.name(se.Main(x))
 		c.use(name)
 		i := lookup(c.values, name)
-		c.refer(x, c.values, i, false)
+		c.refer(x, i, true, true)
 		if i < 0 {
 			return c.node(opConst, c.builtin(x, name), 0, x)
 		}
@@ -715,10 +751,13 @@ func (c *compiler) group(x ast.Node) cnode {
 
 	byNode := make(map[ast.Node]int32, len(binds))
 	for _, w := range binds {
-		_, id, _, _ := se.Where(w)
-		b := binder{name: c.name(id), slot: -1, where: w, sort: se.Sort(w)}
+		_, id, _, val := se.Where(w)
+		b := binder{name: c.name(id), slot: -1, where: w, sort: se.Sort(w), static: -1}
 		if !b.sort {
 			b.slot = c.alloc()
+			if c.static.Has(val) {
+				b.static = 0 // its uses come below
+			}
 		}
 		byNode[w] = c.bind(b)
 	}
@@ -735,6 +774,18 @@ func (c *compiler) group(x ast.Node) cnode {
 		}
 		c.close()
 		c.binders[b].types = u
+		if c.binders[b].static >= 0 {
+			u := c.open(false)
+			c.staticPart(val)
+			c.close()
+			c.binders[b].static = u
+		}
+	}
+	if c.static.Has(body) {
+		u := c.open(false)
+		c.staticPart(body)
+		c.close()
+		c.wheres = append(c.wheres, whereStatic{x, u})
 	}
 
 	xs := []int32{0}
@@ -772,6 +823,49 @@ func (c *compiler) group(x ast.Node) cnode {
 	return c.span(opWhere, xs, x)
 }
 
+// typeName resolves the Ident x in type position: a type variable, a sort
+// binding, or a value binding with a static part. As in the checker, a
+// value without one doesn't hide a type of the same name.
+func (c *compiler) typeName(x ast.Node) {
+	name := c.name(c.src.Main(x))
+	c.use(name)
+	t := lookup(c.types, name)
+	if t >= 0 && c.types[t].b < 0 {
+		return // a type variable
+	}
+	for v := len(c.values) - 1; v >= 0; v-- {
+		e := c.values[v]
+		if e.name != name || c.binders[e.b].static < 0 {
+			continue
+		}
+		// The innermost binder was bound last.
+		if t < 0 || e.b > c.types[t].b {
+			c.refer(x, v, true, false)
+			return
+		}
+		break
+	}
+	c.refer(x, t, false, false)
+}
+
+// staticPart resolves the names that the static part of the expression x
+// refers to, for printing: the parts of x that its members come from. The
+// static part of a where-group's body has its own uses, in wheres.
+func (c *compiler) staticPart(x ast.Node) {
+	se := c.src
+	switch se.Kind(x) {
+	case ast.Ident, ast.Access:
+		c.typ(x)
+	case ast.Record:
+		_, fields := se.Record(x)
+		for i := range fields.Len() {
+			if v := fields.Value(i); c.static.Has(v) {
+				c.staticPart(v)
+			}
+		}
+	}
+}
+
 // fill makes the value v of a recursive binding in slot fill in the
 // closure made for it before, instead of making one, and returns it and
 // its lambda. The checker only lets functions be recursive, so the value
@@ -796,7 +890,7 @@ func (c *compiler) param(x ast.Node, i, arity, scope int) cnode {
 	if lookup(c.values, name) >= scope {
 		c.error(x, fmt.Sprintf("cannot bind %s twice", name))
 	}
-	c.bind(binder{name: name, slot: i, where: ast.None, types: -1})
+	c.bind(binder{name: name, slot: i, where: ast.None, types: -1, static: -1})
 	return c.node(patArg, int32(i), 0, x)
 }
 
@@ -815,7 +909,7 @@ func (c *compiler) pattern(x ast.Node, scope int) cnode {
 			c.error(x, fmt.Sprintf("cannot bind %s twice", name))
 		}
 		slot := c.alloc()
-		c.bind(binder{name: name, slot: slot, where: ast.None, types: -1})
+		c.bind(binder{name: name, slot: slot, where: ast.None, types: -1, static: -1})
 		return c.node(patBind, int32(slot), 0, x)
 
 	case ast.Literal:
@@ -888,13 +982,12 @@ func (c *compiler) typ(x ast.Node) {
 	se := c.src
 	switch se.Kind(x) {
 	case ast.Ident:
-		name := c.name(se.Main(x))
-		c.use(name)
-		i := lookup(c.types, name)
-		if i >= 0 && c.types[i].b < 0 {
-			return // a type variable
-		}
-		c.refer(x, c.types, i, true)
+		c.typeName(x)
+	case ast.Access:
+		// A path to a type member, which refers to the static part of
+		// the value at its head.
+		rec, _ := se.Access(x)
+		c.typ(rec)
 	case ast.Forall:
 		param, t := se.Forall(x)
 		name := c.name(param)

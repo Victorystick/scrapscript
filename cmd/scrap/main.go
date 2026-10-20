@@ -80,15 +80,12 @@ func evaluate(args []string) {
 	env := makeEnv()
 	scrap := must(env.Read(input))
 
-	var val eval.Value
 	if len(args) >= 2 && args[0] == "apply" {
 		fn := must(env.Read([]byte(args[1])))
-		val = must(env.Apply(fn, scrap))
-	} else {
-		val = must(env.Eval(scrap))
+		fmt.Println(env.Print(must(env.Apply(fn, scrap))))
+		return
 	}
-
-	fmt.Println(env.Print(val))
+	fmt.Println(must(env.PrintScrap(scrap)))
 }
 
 func inferType(args []string) {

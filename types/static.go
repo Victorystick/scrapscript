@@ -49,6 +49,7 @@ type group struct {
 	binds   []ast.Node
 	aliases *Scope[*alias]
 	sorts   []*alias
+	values  []alias // the value bindings that may have a static part
 }
 
 // group returns the group of the where node x. A where-group binds each of
@@ -105,6 +106,7 @@ func (c *context) group(x ast.Node) group {
 	for i := range values {
 		values[i].scope = g.aliases
 	}
+	g.values = values
 	if c.groups == nil {
 		c.groups = make(map[ast.Node]int32)
 	}
@@ -123,8 +125,20 @@ func (c *context) mayBeStatic(x ast.Node) bool {
 	return false
 }
 
-// static returns the static part of the expression x.
+// static returns the static part of the expression x, noting x in
+// c.statics if it has one.
 func (c *context) static(x ast.Node) static {
+	s := c.staticNode(x)
+	if !s.isNone() {
+		if c.statics == nil {
+			c.statics = make(NodeSet, (len(c.src.Kinds)+63)/64)
+		}
+		c.statics.add(x)
+	}
+	return s
+}
+
+func (c *context) staticNode(x ast.Node) static {
 	switch c.src.Kind(x) {
 	case ast.Ident:
 		return c.staticName(c.src.TokenBytes(c.src.Main(x)))
@@ -204,6 +218,32 @@ func (c *context) valueStatic(a *alias) static {
 	c.aliases, c.tvars = aliases, tvars
 	a.pending, a.resolved, *a.static = false, true, s
 	return s
+}
+
+// valueStatics resolves the static parts of all value bindings, so that
+// Result.Static has them all for printing, not only those that paths
+// reached.
+func (c *context) valueStatics() {
+	// Resolving may meet more groups, which go to the end of the list.
+	for i := 0; i < len(c.groupList); i++ {
+		values := c.groupList[i].values
+		for j := range values {
+			c.valueStatic(&values[j])
+		}
+	}
+}
+
+// A NodeSet is a set of nodes of an expression.
+type NodeSet []uint64
+
+// Has reports whether x is in s.
+func (s NodeSet) Has(x ast.Node) bool {
+	i := int(x / 64)
+	return i < len(s) && s[i]&(1<<(x%64)) != 0
+}
+
+func (s NodeSet) add(x ast.Node) {
+	s[x/64] |= 1 << (x % 64)
 }
 
 // typeOnly reports whether the record field value v denotes only a type, so

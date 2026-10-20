@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/label"
 )
 
@@ -12,6 +13,9 @@ import (
 type program struct {
 	*core
 	evalImport EvalImport
+	// The program of the scrap that an Import node refers to, once it is
+	// evaluated, for printing.
+	imported func(ast.Node) *program
 	compiled
 }
 
