@@ -974,20 +974,19 @@ func (c *compiler) arms(fn ast.Node) []ast.Node {
 
 // match compiles a function literal fn of one argument, applied to arg, as
 // a match in the current frame, which makes neither a closure nor a frame.
-// arms are fn's patterns and bodies. The arms' slots overlap, but not with
-// the slots of what follows the match, which closures made in an arm may
-// still read.
+// arms are fn's patterns and bodies. The arms' slots overlap each other and
+// what follows the match: only code in an arm reads them, and closures
+// copy what they capture.
 func (c *compiler) match(fn ast.Node, arg cnode, arms []ast.Node) cnode {
 	xs := []int32{int32(arg)}
-	start, end := c.next, c.next
+	start := c.next
 	for i := 0; i < len(arms); i += 2 {
 		c.next = start
 		scope := len(c.values)
 		xs = append(xs, int32(c.pattern(arms[i], scope)), int32(c.expr(arms[i+1])))
 		c.values = c.values[:scope]
-		end = max(end, c.next)
 	}
-	c.next = end
+	c.next = start
 	return c.span(opMatch, xs, fn)
 }
 
@@ -1016,6 +1015,15 @@ func (c *compiler) inline(fn ast.Node, args []ast.Node) (cnode, bool) {
 		c.use(c.name(c.src.Main(name)))
 		c.refer(name, i, true, true)
 	}
+	// The arguments of a function of more than one go in slots of their
+	// own, as in its frame, before the slots of code that computes them,
+	// since each is put there before the next is computed.
+	start := c.next
+	if in.arity > 1 {
+		for range args {
+			c.alloc()
+		}
+	}
 	vs := make([]int32, len(args))
 	for i, a := range args {
 		vs[i] = int32(c.expr(a))
@@ -1036,14 +1044,9 @@ func (c *compiler) inline(fn ast.Node, args []ast.Node) (cnode, bool) {
 	if in.arity == 1 {
 		n = c.match(in.val, cnode(vs[0]), c.arms(in.val))
 	} else {
-		// The arguments go in slots of their own, as in a function's
-		// frame.
-		base := c.next
-		for range args {
-			c.alloc()
-		}
-		xs := append([]int32{int32(base), int32(in.arity)}, vs...)
-		n = c.span(opMatchN, c.fnArms(xs, c.literal(in.val), base, c.next), in.val)
+		xs := append([]int32{int32(start), int32(in.arity)}, vs...)
+		n = c.span(opMatchN, c.fnArms(xs, c.literal(in.val), start, start+in.arity), in.val)
+		c.next = start
 	}
 	c.depth--
 	c.values, c.types, c.roots = values, types, roots
@@ -1161,9 +1164,8 @@ func (c *compiler) literal(x ast.Node) fnLiteral {
 // fnArms appends to xs the patterns and body of each arm of f, as a
 // function of one argument matches it, or else for arguments in the slots
 // from base. Each arm's own slots start at next and overlap the other
-// arms'; the frame's next free slot is after the largest.
+// arms'.
 func (c *compiler) fnArms(xs []int32, f fnLiteral, base, next int) []int32 {
-	end := next
 	for _, a := range f.arms {
 		c.next = next
 		scope := len(c.values)
@@ -1183,9 +1185,7 @@ func (c *compiler) fnArms(xs []int32, f fnLiteral, base, next int) []int32 {
 		}
 		xs = append(xs, int32(c.expr(body)))
 		c.values = c.values[:scope]
-		end = max(end, c.next)
 	}
-	c.next = end
 	return xs
 }
 
@@ -1194,7 +1194,7 @@ func (c *compiler) fnArms(xs []int32, f fnLiteral, base, next int) []int32 {
 func (c *compiler) group(x ast.Node) cnode {
 	se := c.src
 	body, binds := se.Group(x)
-	values, types := len(c.values), len(c.types)
+	values, types, start := len(c.values), len(c.types), c.next
 
 	byNode := make(map[ast.Node]int32, len(binds))
 	for _, w := range binds {
@@ -1273,6 +1273,12 @@ func (c *compiler) group(x ast.Node) cnode {
 	xs[0] = int32(c.expr(body))
 
 	c.values, c.types = c.values[:values], c.types[:types]
+	// Code after the group may reuse its slots, as after a match, but not
+	// at the top level, where other scraps' code that is inlined reads
+	// them.
+	if c.level > 0 {
+		c.next = start
+	}
 	return c.span(opWhere, xs, x)
 }
 

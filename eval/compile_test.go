@@ -415,10 +415,18 @@ func TestCompile(t *testing.T) {
 		// the current frame, without a closure or a frame of its own.
 		{`x -> x |> | #a y -> y | #b -> 0`, `(fn/2 | >0 -> (match @0 | (#a >1) -> @1 | #b -> 0))`, 0},
 		{`1 |> y -> y`, `(match 1 | >0 -> @0)`, 1},
-		// Its arms share slots, but what follows it doesn't, since a closure
-		// made in an arm reads them later.
+		// Its arms share slots, and so does what follows it, since closures
+		// made in an arm copy what they capture.
 		{`x -> [(x |> | #a y -> y | _ -> 0), (x |> z -> 1)]`,
-			`(fn/3 | >0 -> [(match @0 | (#a >1) -> @1 | _ -> 0), (match @0 | >2 -> 1)])`, 0},
+			`(fn/2 | >0 -> [(match @0 | (#a >1) -> @1 | _ -> 0), (match @0 | >1 -> 1)])`, 0},
+		{`x -> [(x |> | y -> (z -> y)), (x |> | w -> (v -> w))]`,
+			`(fn/2 | >0 -> [(match @0 | >1 -> (fn/1 [@1] ^y&0 | >0 -> &0)), (match @0 | >1 -> (fn/1 [@1] ^w&0 | >0 -> &0))])`, 0},
+		// So does what follows a where-group in a function.
+		{`x -> [(a ; a = x), (b ; b = x)]`, `(fn/2 | >0 -> [(@1 ; >1 @0), (@1 ; >1 @0)])`, 0},
+		// But not the arguments that an inlined call puts in slots before
+		// computing the next.
+		{`x -> f (g x) (g x) ; f = a -> b -> a + b ; g = y -> y + 1`,
+			`((fn/4 [@0, @1] ^f&0 ^g&1 ^g&1 | >0 -> (match@1 (match @0 | >3 -> (+ @3 1)) (match @0 | >3 -> (+ @3 1)) | >1 -> >2 -> (+ @1 @2))) ; >0 (fn/2 home=f | >0 -> >1 -> (+ @0 @1)) ; >1 (fn/1 home=g | >0 -> (+ @0 1)))`, 2},
 		{`1 |> y -> (g ; g = z -> y + z)`,
 			`(match 1 | >0 -> (@1 ; >1 (fn/1 [@0] ^y&0 home=g | >0 -> (+ &0 @0))))`, 2},
 		// A function of more arguments is still called.
