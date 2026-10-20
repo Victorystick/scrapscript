@@ -197,46 +197,50 @@ func (p *program) run(n cnode, f frame) Value {
 			}
 			return v
 
-		// The checker guarantees the operands' types. Overloaded operators still
-		// choose by the left operand at runtime, until types reach the core.
-		case opAdd, opSub, opMul:
-			l := p.value(cnode(d.a), &f)
-			r := p.value(cnode(d.b), &f)
-			if l, ok := l.(Int); ok {
-				return arith(p.ops[n], l, r.(Int))
-			}
-			return arith(p.ops[n], l.(Float), r.(Float))
+		// The checker settled the operands' types, which the op says.
+		case opAddInt:
+			return p.value(cnode(d.a), &f).(Int) + p.value(cnode(d.b), &f).(Int)
+		case opSubInt:
+			return p.value(cnode(d.a), &f).(Int) - p.value(cnode(d.b), &f).(Int)
+		case opMulInt:
+			return p.value(cnode(d.a), &f).(Int) * p.value(cnode(d.b), &f).(Int)
+		case opAddFloat:
+			return p.value(cnode(d.a), &f).(Float) + p.value(cnode(d.b), &f).(Float)
+		case opSubFloat:
+			return p.value(cnode(d.a), &f).(Float) - p.value(cnode(d.b), &f).(Float)
+		case opMulFloat:
+			return p.value(cnode(d.a), &f).(Float) * p.value(cnode(d.b), &f).(Float)
 
 		// Values are immutable, so appending clips the left operand first:
 		// append must copy rather than write into spare capacity that other
 		// values share.
-		case opAppend:
-			l := p.value(cnode(d.a), &f)
-			r := p.value(cnode(d.b), &f)
-			if l, ok := l.(Bytes); ok {
-				return append(slices.Clip(l), byte(r.(Byte)))
-			}
-			ls := l.(List).elements
-			return List{append(slices.Clip(ls), r)}
+		case opAppendList:
+			l := p.value(cnode(d.a), &f).(List)
+			return List{append(slices.Clip(l.elements), p.value(cnode(d.b), &f))}
 
-		case opPrepend:
-			r := p.value(cnode(d.b), &f)
-			l := p.value(cnode(d.a), &f)
-			if r, ok := r.(Bytes); ok {
-				return append(Bytes{byte(l.(Byte))}, r...)
-			}
-			return List{append([]Value{l}, r.(List).elements...)}
+		case opAppendBytes:
+			l := p.value(cnode(d.a), &f).(Bytes)
+			return append(slices.Clip(l), byte(p.value(cnode(d.b), &f).(Byte)))
 
-		case opConcat:
-			l := p.value(cnode(d.a), &f)
-			r := p.value(cnode(d.b), &f)
-			switch l := l.(type) {
-			case Bytes:
-				return append(slices.Clip(l), r.(Bytes)...)
-			case Text:
-				return l + r.(Text)
-			}
-			return List{append(slices.Clip(l.(List).elements), r.(List).elements...)}
+		case opPrependList:
+			r := p.value(cnode(d.b), &f).(List)
+			return List{append([]Value{p.value(cnode(d.a), &f)}, r.elements...)}
+
+		case opPrependBytes:
+			r := p.value(cnode(d.b), &f).(Bytes)
+			return append(Bytes{byte(p.value(cnode(d.a), &f).(Byte))}, r...)
+
+		case opConcatList:
+			l := p.value(cnode(d.a), &f).(List)
+			return List{append(slices.Clip(l.elements), p.value(cnode(d.b), &f).(List).elements...)}
+
+		case opConcatText:
+			l := p.value(cnode(d.a), &f).(Text)
+			return l + p.value(cnode(d.b), &f).(Text)
+
+		case opConcatBytes:
+			l := p.value(cnode(d.a), &f).(Bytes)
+			return append(slices.Clip(l), p.value(cnode(d.b), &f).(Bytes)...)
 
 		case opCompose:
 			first, second, _ := p.compose(n)
@@ -299,16 +303,6 @@ func (p *program) run(n cnode, f frame) Value {
 			panic(p.errorf(n, "unhandled op %d", p.ops[n]))
 		}
 	}
-}
-
-func arith[T ~int | ~float64](o op, a, b T) T {
-	switch o {
-	case opAdd:
-		return a + b
-	case opSub:
-		return a - b
-	}
-	return a * b
 }
 
 // apply calls the function fn with arg.

@@ -49,12 +49,23 @@ const (
 	opImport  // The value of the scrap that the AST node refers to.
 	opCall    // A: the function. B: the argument.
 	opCallN   // A..B: the function, then two or more arguments.
-	opAdd     // A, B: the operands; and so for the operators below.
-	opSub     //
-	opMul     //
-	opAppend  // a +< b
-	opPrepend // a >+ b
-	opConcat  // a ++ b
+
+	// Operators. A, B: the operands, of the types that the op names, which
+	// the checker settled on.
+	opAddInt
+	opSubInt
+	opMulInt
+	opAddFloat
+	opSubFloat
+	opMulFloat
+	opAppendList   // a +< b
+	opAppendBytes  //
+	opPrependList  // a >+ b
+	opPrependBytes //
+	opConcatList   // a ++ b
+	opConcatText   //
+	opConcatBytes  //
+
 	opCompose // A..B: the function applied first, then second, then its uses.
 	opLambda  // A..B: its frame's size, its uses, its arity n, its number of captures k, then k captures, then n patterns and a body per arm. If n > 1, its frame's first n slots are its arguments.
 	opMatch   // A..B: the value matched, then a pattern and a body per arm. Its patterns bind slots of the current frame.
@@ -243,11 +254,12 @@ func (c *core) elems(n cnode) (rest cnode, elems []int32) {
 // doesn't bind refer to globals. Tags and record keys are interned in the
 // label table of shapes, and the shapes of records in shapes.
 //
-// typed is the type of each node, from type checking, or nil to compile
-// every record field as a value.
-func compile(se *ast.SourceExpr, typed []types.TypeRef, static types.NodeSet, globals Vars, shapes *shapeTable) (*core, error) {
+// typed is the type of each node, from type checking, whose refs are in
+// reg. Only code without operators may be compiled without it.
+func compile(se *ast.SourceExpr, reg *types.Registry, typed []types.TypeRef, static types.NodeSet, globals Vars, shapes *shapeTable) (*core, error) {
 	c := compiler{
 		core:     core{src: se, labels: shapes.labels, table: shapes, static: static},
+		reg:      reg,
 		typed:    typed,
 		globals:  globals,
 		builtins: make(map[string]int32),
@@ -270,6 +282,7 @@ func compile(se *ast.SourceExpr, typed []types.TypeRef, static types.NodeSet, gl
 
 type compiler struct {
 	core
+	reg     *types.Registry
 	typed   []types.TypeRef
 	globals Vars
 	// The index in consts of each builtin referred to.
@@ -577,13 +590,27 @@ func (c *compiler) expr(x ast.Node) cnode {
 	return none
 }
 
-var binaryOps = map[token.Token]op{
-	token.ADD:     opAdd,
-	token.SUB:     opSub,
-	token.MUL:     opMul,
-	token.APPEND:  opAppend,
-	token.PREPEND: opPrepend,
-	token.CONCAT:  opConcat,
+// binaryOps gives the op of an operator by the type of its result, which
+// the checker settles: a primitive, or NoType for any list.
+var binaryOps = map[binaryOp]op{
+	{token.ADD, types.IntRef}:       opAddInt,
+	{token.SUB, types.IntRef}:       opSubInt,
+	{token.MUL, types.IntRef}:       opMulInt,
+	{token.ADD, types.FloatRef}:     opAddFloat,
+	{token.SUB, types.FloatRef}:     opSubFloat,
+	{token.MUL, types.FloatRef}:     opMulFloat,
+	{token.APPEND, types.NoType}:    opAppendList,
+	{token.APPEND, types.BytesRef}:  opAppendBytes,
+	{token.PREPEND, types.NoType}:   opPrependList,
+	{token.PREPEND, types.BytesRef}: opPrependBytes,
+	{token.CONCAT, types.NoType}:    opConcatList,
+	{token.CONCAT, types.TextRef}:   opConcatText,
+	{token.CONCAT, types.BytesRef}:  opConcatBytes,
+}
+
+type binaryOp struct {
+	tok    token.Token
+	result types.TypeRef
 }
 
 func (c *compiler) binary(x ast.Node) cnode {
@@ -604,7 +631,11 @@ func (c *compiler) binary(x ast.Node) cnode {
 		first, second := c.expr(left), c.expr(right)
 		return c.span(opCompose, []int32{int32(first), int32(second), u}, x)
 	}
-	o, ok := binaryOps[op]
+	result := c.reg.Resolve(c.typed[x])
+	if c.reg.Shape(result).Kind == types.ShapeList {
+		result = types.NoType
+	}
+	o, ok := binaryOps[binaryOp{op, result}]
 	if !ok {
 		c.error(x, fmt.Sprintf("unhandled %s operator", op))
 	}

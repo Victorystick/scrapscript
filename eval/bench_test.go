@@ -125,10 +125,11 @@ func BenchmarkEval(b *testing.B) {
 	for _, ex := range evalSources {
 		b.Run(ex.name, func(b *testing.B) {
 			e, scrap := readBench(b, ex.source)
-			if _, err := e.infer(scrap); err != nil {
+			res, err := e.infer(scrap)
+			if err != nil {
 				b.Fatal(err)
 			}
-			c, err := compile(&scrap.expr, nil, nil, e.vars, e.shapes)
+			c, err := compile(&scrap.expr, &e.reg, res.Nodes, nil, e.vars, e.shapes)
 			if err != nil {
 				b.Fatal(err)
 			}

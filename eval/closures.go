@@ -212,68 +212,88 @@ func (p *program) expr(n cnode) code {
 			return v
 		}
 
-	case opAdd:
+	case opAddInt:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
 		return func(f frame) Value {
-			a, b := l.get(f), r.get(f)
-			if a, ok := a.(Int); ok {
-				return a + b.(Int)
-			}
-			return a.(Float) + b.(Float)
+			return l.get(f).(Int) + r.get(f).(Int)
 		}
 
-	case opSub:
+	case opAddFloat:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
 		return func(f frame) Value {
-			a, b := l.get(f), r.get(f)
-			if a, ok := a.(Int); ok {
-				return a - b.(Int)
-			}
-			return a.(Float) - b.(Float)
+			return l.get(f).(Float) + r.get(f).(Float)
 		}
 
-	case opMul:
+	case opSubInt:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
 		return func(f frame) Value {
-			a, b := l.get(f), r.get(f)
-			if a, ok := a.(Int); ok {
-				return a * b.(Int)
-			}
-			return a.(Float) * b.(Float)
+			return l.get(f).(Int) - r.get(f).(Int)
 		}
 
-	case opAppend:
+	case opSubFloat:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
 		return func(f frame) Value {
-			a, b := l.get(f), r.get(f)
-			if a, ok := a.(Bytes); ok {
-				return append(slices.Clip(a), byte(b.(Byte)))
-			}
-			return List{append(slices.Clip(a.(List).elements), b)}
+			return l.get(f).(Float) - r.get(f).(Float)
 		}
 
-	case opPrepend:
+	case opMulInt:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
 		return func(f frame) Value {
-			b := r.get(f)
-			a := l.get(f)
-			if b, ok := b.(Bytes); ok {
-				return append(Bytes{byte(a.(Byte))}, b...)
-			}
-			return List{append([]Value{a}, b.(List).elements...)}
+			return l.get(f).(Int) * r.get(f).(Int)
 		}
 
-	case opConcat:
+	case opMulFloat:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
 		return func(f frame) Value {
-			a, b := l.get(f), r.get(f)
-			switch a := a.(type) {
-			case Bytes:
-				return append(slices.Clip(a), b.(Bytes)...)
-			case Text:
-				return a + b.(Text)
-			}
-			return List{append(slices.Clip(a.(List).elements), b.(List).elements...)}
+			return l.get(f).(Float) * r.get(f).(Float)
+		}
+
+	case opAppendList:
+		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
+		return func(f frame) Value {
+			a := l.get(f).(List)
+			return List{append(slices.Clip(a.elements), r.get(f))}
+		}
+
+	case opAppendBytes:
+		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
+		return func(f frame) Value {
+			a := l.get(f).(Bytes)
+			return append(slices.Clip(a), byte(r.get(f).(Byte)))
+		}
+
+	case opPrependList:
+		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
+		return func(f frame) Value {
+			b := r.get(f).(List)
+			return List{append([]Value{l.get(f)}, b.elements...)}
+		}
+
+	case opPrependBytes:
+		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
+		return func(f frame) Value {
+			b := r.get(f).(Bytes)
+			return append(Bytes{byte(l.get(f).(Byte))}, b...)
+		}
+
+	case opConcatList:
+		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
+		return func(f frame) Value {
+			a := l.get(f).(List)
+			return List{append(slices.Clip(a.elements), r.get(f).(List).elements...)}
+		}
+
+	case opConcatText:
+		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
+		return func(f frame) Value {
+			return l.get(f).(Text) + r.get(f).(Text)
+		}
+
+	case opConcatBytes:
+		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
+		return func(f frame) Value {
+			a := l.get(f).(Bytes)
+			return append(slices.Clip(a), r.get(f).(Bytes)...)
 		}
 
 	case opCompose:

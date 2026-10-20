@@ -28,9 +28,12 @@ multi-pattern arms, where-groups and pattern operators separately.
 ## 3. Types are dropped before evaluation
 
 - [ ] Carry the checker's types into the IR. Next up: it is evaluator
-      independent, and decides closures against `run` (section 5).
-- [ ] Choose `++` (list, text or bytes) statically instead of by the runtime
-      value.
+      independent, and decides closures against `run` (section 5). The
+      compiler reads them to choose ops, so the core keeps no types; next,
+      static field indices where a record's type is closed.
+- [x] Choose operators (`+ - *` on int or float; `+< >+` on lists or
+      bytes; `++` on lists, text or bytes) statically instead of by the
+      runtime value.
 - [ ] Use them to specialise functions per record shape (SPEC.md section 12).
 
 ## 4. Errors everywhere after type checking

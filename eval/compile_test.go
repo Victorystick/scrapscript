@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/parser"
 	"github.com/Victorystick/scrapscript/types"
@@ -75,8 +76,11 @@ import (
 //	(x -> x + n) ; n = 1     (fn/1 [@0] ^n&0 | >0 -> (+ @0 &0))
 
 var opStrings = map[op]string{
-	opAdd: "+", opSub: "-", opMul: "*",
-	opAppend: "+<", opPrepend: ">+", opConcat: "++",
+	opAddInt: "+", opSubInt: "-", opMulInt: "*",
+	opAddFloat: "+float", opSubFloat: "-float", opMulFloat: "*float",
+	opAppendList: "+<", opAppendBytes: "+<bytes",
+	opPrependList: ">+", opPrependBytes: ">+bytes",
+	opConcatList: "++", opConcatText: "++text", opConcatBytes: "++bytes",
 	patCons: ">+", patSnoc: "+<",
 }
 
@@ -100,7 +104,9 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 			ns = append(ns, cnode(x))
 		}
 		c.list(s, "(", ")", "", ns...)
-	case opAdd, opSub, opMul, opAppend, opPrepend, opConcat, patCons, patSnoc:
+	case opAddInt, opSubInt, opMulInt, opAddFloat, opSubFloat, opMulFloat,
+		opAppendList, opAppendBytes, opPrependList, opPrependBytes,
+		opConcatList, opConcatText, opConcatBytes, patCons, patSnoc:
 		c.list(s, "("+opStrings[o]+" ", ")", "", cnode(d.a), cnode(d.b))
 	case opCompose:
 		first, second, u := c.compose(n)
@@ -269,8 +275,20 @@ func compileString(t *testing.T, source string) *core {
 		t.Fatalf("parse %q: %v", source, err)
 	}
 	var reg types.Registry
-	_, globals := bindBuiltIns(&reg)
-	c, err := compile(&se, nil, nil, globals, newShapeTable(reg.Labels()))
+	scope, globals := bindBuiltIns(&reg)
+	// Imports are ints.
+	imports := make(types.Imports)
+	for n, k := range se.Kinds {
+		if k == ast.Import {
+			imports[ast.Node(n)] = types.Result{Type: types.IntRef}
+		}
+	}
+	res, err := types.Infer(&reg, scope, se, imports)
+	if err != nil {
+		t.Errorf("check %q: %v", source, err)
+		return nil
+	}
+	c, err := compile(&se, &reg, res.Nodes, nil, globals, newShapeTable(reg.Labels()))
 	if err != nil {
 		t.Fatalf("compile %q: %v", source, err)
 	}
@@ -333,17 +351,18 @@ func TestCompile(t *testing.T) {
 			`(fn/2 | [] -> 0 | [>0, _] -> @0 | (>+ >0 >1) -> @0 | (+< >0 >1) -> @1)`, 0},
 		// A function of more than one argument keeps them in its first
 		// slots, where names bind them.
-		{`| #a -> n -> n | _ -> [x] -> x`, `(fn/3 | #a -> >1 -> @1 | _ -> [>2] -> @2)`, 0},
-		{`| [a] ++ r -> a | r ++ [a] -> a | { ..r, a = x } -> x`,
-			`(fn/2 | (++ [>0] >1) -> @0 | (++ >0 [>1]) -> @1 | { a = >0 ..>1 } -> @0)`, 0},
+		{`| #a -> n -> 0 | _ -> { x = x } -> x`, `(fn/3 | #a -> >1 -> 0 | _ -> { x = >2 } -> @2)`, 0},
+		{`| [a] ++ r -> a | r ++ [a] -> a | _ -> 0`,
+			`(fn/2 | (++ [>0] >1) -> @0 | (++ >0 [>1]) -> @1 | _ -> 0)`, 0},
+		{`| { ..r, a = x } -> x`, `(fn/2 | { a = >0 ..>1 } -> @0)`, 0},
 		// A function literal of one argument applied directly is a match in
 		// the current frame, without a closure or a frame of its own.
 		{`x -> x |> | #a y -> y | #b -> 0`, `(fn/2 | >0 -> (match @0 | (#a >1) -> @1 | #b -> 0))`, 0},
 		{`1 |> y -> y`, `(match 1 | >0 -> @0)`, 1},
 		// Its arms share slots, but what follows it doesn't, since a closure
 		// made in an arm reads them later.
-		{`x -> [(x |> | #a y -> y | _ -> 0), (x |> z -> z)]`,
-			`(fn/3 | >0 -> [(match @0 | (#a >1) -> @1 | _ -> 0), (match @0 | >2 -> @2)])`, 0},
+		{`x -> [(x |> | #a y -> y | _ -> 0), (x |> z -> 1)]`,
+			`(fn/3 | >0 -> [(match @0 | (#a >1) -> @1 | _ -> 0), (match @0 | >2 -> 1)])`, 0},
 		{`1 |> y -> (g ; g = z -> y + z)`,
 			`(match 1 | >0 -> (@1 ; >1 (fn/1 [@0] ^y&0 home=g | >0 -> (+ &0 @0))))`, 2},
 		// A function of more arguments is still called.
@@ -352,10 +371,17 @@ func TestCompile(t *testing.T) {
 		{`{ ..r, a = 1 }.a ; r = { a = 2 }`, `({ a = 1 ..@0 }.a ; >0 { a = 2 })`, 1},
 		{`$"lib.scrap"`, `$"lib.scrap"`, 0},
 		{`#a (#b ())`, `(#a (#b ()))`, 0},
-		{`"a" ++ "b"`, `(++ "a" "b")`, 0},
+		{`"a" ++ "b"`, `(++text "a" "b")`, 0},
+		{`[1] ++ [2]`, `(++ [1] [2])`, 0},
+		{`1.0 * 2.0`, `(*float 1.0 2.0)`, 0},
+		{`~~aGk= ++ ~~aGk=`, `(++bytes ~~aGk= ~~aGk=)`, 0},
+		{`~00 >+ ~~aGk= +< ~21`, `(>+bytes ~00 (+<bytes ~~aGk= ~21))`, 0},
 	}
 	for _, tt := range tests {
 		c := compileString(t, tt.source)
+		if c == nil {
+			continue
+		}
 		var s strings.Builder
 		c.dump(&s, c.root)
 		if s.String() != tt.core {
@@ -409,7 +435,7 @@ func TestCompileErrors(t *testing.T) {
 		}
 		var reg types.Registry
 		_, globals := bindBuiltIns(&reg)
-		_, err = compile(&se, nil, nil, globals, newShapeTable(reg.Labels()))
+		_, err = compile(&se, nil, nil, nil, globals, newShapeTable(reg.Labels()))
 		if err == nil || !strings.Contains(err.Error(), tt.err) {
 			t.Errorf("%s: got %v, want %q", tt.source, err, tt.err)
 		}
