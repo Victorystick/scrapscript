@@ -6,12 +6,15 @@ import (
 	"github.com/Victorystick/scrapscript/label"
 )
 
-// The core compiled to Go closures: each node becomes a function that
-// evaluates it, made once, with what run decodes on every evaluation (the
-// op, its operands, the arms of a match) decided when it is made.
+// The evaluator: the core compiled to Go closures. Each node becomes a
+// function that evaluates it, made once, with what an interpreter would
+// decode on every evaluation (the op, its operands, the arms of a match)
+// decided when it is made.
 //
 // A function's body is compiled when it is first entered, and kept per
-// program, by node.
+// program, by node. Code in tail position returns the body it calls
+// instead of calling it, for trampoline to run, so that calls in tail
+// position don't grow the Go stack.
 
 // code evaluates an expression in the frame f.
 type code func(f frame) Value
@@ -25,10 +28,9 @@ type tcode func(f frame) (v Value, next tcode, g frame)
 // slots f.
 type mcode func(v Value, f []Value) bool
 
-// compiled holds a program's compiled bodies and patterns, by node.
+// compiled holds a program's compiled bodies and lambdas, by node.
 type compiled struct {
 	bodies  []tcode
-	pats    []mcode
 	lambdas []*lambdaCode
 }
 
@@ -87,9 +89,7 @@ func (l *lambdaCode) enterN(sf ScriptFunc, g frame) tcode {
 			return a.body
 		}
 	}
-	// Report it as the interpreter does.
-	sf.prog.arm(sf, g)
-	return nil
+	panic(sf.prog.noArm(sf.node, g.slots[:l.arity]))
 }
 
 // trampoline runs the body c in f, and the bodies that it calls in tail
@@ -108,22 +108,11 @@ func trampoline(c tcode, f frame) Value {
 func (p *program) body(n cnode) tcode {
 	if p.bodies == nil {
 		p.bodies = make([]tcode, len(p.ops))
-		p.pats = make([]mcode, len(p.ops))
 	}
 	c := p.bodies[n]
 	if c == nil {
 		c = p.tail(n)
 		p.bodies[n] = c
-	}
-	return c
-}
-
-// pat returns the compiled pattern n of a lambda's arm.
-func (p *program) pat(n cnode) mcode {
-	c := p.pats[n]
-	if c == nil {
-		c = p.pattern(n)
-		p.pats[n] = c
 	}
 	return c
 }
@@ -195,11 +184,11 @@ func (p *program) expr(n cnode) code {
 					return trampoline(l.enter1(sf, arg))
 				}
 			}
-			q, body, g, v := enter(fn, arg)
+			body, g, v := enter(fn, arg)
 			if v != nil {
 				return v
 			}
-			return trampoline(q.body(body), g)
+			return trampoline(body, g)
 		}
 
 	case opCallN:
@@ -250,11 +239,11 @@ func (p *program) expr(n cnode) code {
 			for i, c := range acs {
 				args[i] = c.get(f)
 			}
-			q, body, g, v := enterN(fn, args)
+			body, g, v := enterN(fn, args)
 			if v != nil {
 				return v
 			}
-			return trampoline(q.body(body), g)
+			return trampoline(body, g)
 		}
 
 	case opMatch:
@@ -526,11 +515,11 @@ func (p *program) tail(n cnode) tcode {
 					return nil, body, g
 				}
 			}
-			q, body, g, v := enter(fn, arg)
+			body, g, v := enter(fn, arg)
 			if v != nil {
 				return done(v)
 			}
-			return nil, q.body(body), g
+			return nil, body, g
 		}
 
 	case opCallN:
@@ -581,11 +570,11 @@ func (p *program) tail(n cnode) tcode {
 			for i, c := range acs {
 				args[i] = c.get(f)
 			}
-			q, body, g, v := enterN(fn, args)
+			body, g, v := enterN(fn, args)
 			if v != nil {
 				return done(v)
 			}
-			return nil, q.body(body), g
+			return nil, body, g
 		}
 
 	case opMatch:

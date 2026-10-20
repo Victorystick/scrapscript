@@ -27,8 +27,7 @@ multi-pattern arms, where-groups and pattern operators separately.
 
 ## 3. Types are dropped before evaluation
 
-- [ ] Carry the checker's types into the IR. Next up: it is evaluator
-      independent, and decides closures against `run` (section 5). The
+- [ ] Carry the checker's types into the IR. The
       compiler reads them to choose ops and static field indices (access,
       spreads and rest patterns on records of a closed type), so the core
       keeps no types. Open rows still look labels up.
@@ -75,18 +74,12 @@ builtins now return plain values and panic with a `runtimeError`, which
         `enter` must not return slots of its caller's buffer: it and
         `run` call each other, so Go moves the buffer to the heap.
 
-      What costs now is per-node overhead: `run` has a ~1.5 KB Go frame
-      and is called for every subexpression. Reading slot operands
-      without calling `run` saved 6%.
-- [ ] Decide between `run` and the core compiled to Go closures
-      (eval/closures.go, built with `-tags closures`). Untyped, closures
-      beat `run` by 4% on AccessLog: dispatch was not the cost, decoding
-      each lambda on every call was, which a compiled table of arms per
-      lambda removes. fib is still 9% slower (`apply`/`enter` decode the
-      lambda; a non-tail call takes two hops). Next: types in core
-      (section 3), then specialise in closures only (int arithmetic,
-      access on a known shape, jump tables on closed enums) and compare.
-      Without the tag, `run` is as fast as before the prototype.
+- [x] Decide between `run` and the core compiled to Go closures: the
+      closures, eval/closures.go, are the only evaluator. With calls out
+      of non-tail code made directly, they beat `run` by 14% on AccessLog
+      and 10% on Eval, even on fib and the higher-order lib/access-log,
+      and recurse 2-2.6x deeper on the same Go stack (~0.6-0.8 KB per
+      level against `run`'s ~1.6 KB frame). Allocation is the same.
 - [ ] Explore lambda set inference (as in Roc): the checker tracks which
       closures can reach each function type, so calls compile to a switch
       over known closures instead of an indirect call. Likely a lot of work.
