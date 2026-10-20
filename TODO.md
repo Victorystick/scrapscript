@@ -133,6 +133,13 @@ builtins now return plain values and panic with a `runtimeError`, which
       arguments handled at runtime, so that a call with all its arguments
       makes no intermediate closures and calls builtins and host functions
       once.
+- [ ] Printed types are hard to read. `scrap type < lib/avl.scrap` prints
+      the library's record type on one 500-character line, with type
+      variables named a to r across fields although each field is
+      polymorphic on its own. Options: one field per line once a record
+      or enum doesn't fit the width, variables named from `a` per field,
+      and syntax highlighting on a terminal (as errors already colour
+      only when stdout is one).
 
 ## 8. Printing closures
 
