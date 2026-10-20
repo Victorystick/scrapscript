@@ -11,9 +11,6 @@ import (
 	"github.com/Victorystick/scrapscript/token"
 )
 
-// EvalImport returns the value of the scrap that an Import node refers to.
-type EvalImport func(ref ast.Node) (Value, error)
-
 type Vars interface {
 	Get(name string) Value
 }

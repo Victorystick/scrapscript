@@ -43,30 +43,29 @@ func printValue(labels *label.Table, v Value) string {
 }
 
 // printScrap prints v, the value of prog, as printValue does, with the
-// members of prog's static part. An import's are those of its scrap.
+// members of the static part of its main source: the root scrap's, or if
+// that is an import, those of the scrap it refers to.
 func printScrap(labels *label.Table, v Value, prog *program) string {
-	x := prog.src.Expr
-	for prog.src.Kind(x) == ast.Import {
-		prog = prog.imported(x)
-		x = prog.src.Expr
-	}
-	u := prog.rootStatic
-	if prog.src.Kind(x) == ast.Where {
-		u = prog.whereUses(x)
+	src := prog.main
+	main := prog.srcs[src]
+	x := main.se.Expr
+	u := main.rootStatic
+	if main.se.Kind(x) == ast.Where {
+		u = prog.whereUses(src, x)
 	}
 	if u < 0 {
 		return printValue(labels, v)
 	}
 	p := newValuePrinter(labels)
 	p.collect(v)
-	if prog.rootStatic >= 0 {
-		p.refs(prog, prog.rootStatic, nil)
+	if main.rootStatic >= 0 {
+		p.refs(prog, main.rootStatic, nil)
 	}
-	wheres(prog, x, func(u int32) { p.refs(prog, u, nil) })
+	wheres(prog, src, x, func(u int32) { p.refs(prog, u, nil) })
 	p.merge()
 	p.name()
 	var s strings.Builder
-	p.withMembers(&s, prog, p.staticNames(prog, prog.rootStatic, x), x, v)
+	p.withMembers(&s, prog, src, p.staticNames(prog, src, main.rootStatic, x), x, v)
 	p.where(&s)
 	return s.String()
 }
@@ -114,6 +113,29 @@ func (b *binding) binder() binder {
 	return b.prog.binders[b.b]
 }
 
+// se returns the source of b's binder.
+func (b *binding) se() *ast.SourceExpr {
+	return b.prog.srcs[b.binder().src].se
+}
+
+// se returns the source of sf's code.
+func (sf ScriptFunc) se() *ast.SourceExpr {
+	return sf.prog.srcs[sf.prog.uses[sf.uses()].src].se
+}
+
+// published returns the reference to the published scrap whose value sf
+// is, if it is one.
+func (sf ScriptFunc) published() (string, bool) {
+	if len(sf.args) > 0 {
+		return "", false
+	}
+	i := sf.prog.uses[sf.uses()].published
+	if i < 0 {
+		return "", false
+	}
+	return sf.prog.srcs[i].ref, true
+}
+
 // uses returns the index in sf.prog.uses of what sf's code refers to.
 func (sf ScriptFunc) uses() int32 {
 	if sf.composition() {
@@ -126,8 +148,8 @@ func (sf ScriptFunc) uses() int32 {
 
 // home returns the binder that defines sf, if its value is sf itself.
 func home(sf ScriptFunc) (binderKey, bool) {
-	h := sf.prog.uses[sf.uses()].home
-	return binderKey{sf.prog, h}, h >= 0 && sf.ref == ""
+	u := sf.prog.uses[sf.uses()]
+	return binderKey{sf.prog, u.home}, u.home >= 0 && u.published < 0
 }
 
 // collect finds the bindings that v refers to.
@@ -157,7 +179,7 @@ func (p *valuePrinter) collect(v Value) {
 			p.collect(arg)
 		}
 		v.args = nil
-		if v.ref != "" {
+		if _, ok := v.published(); ok {
 			return
 		}
 		if key, ok := home(v); ok {
@@ -196,12 +218,12 @@ func (p *valuePrinter) need(key binderKey, v Value) *binding {
 			return b
 		}
 		if bd.static >= 0 {
-			_, _, _, val := key.prog.src.Where(bd.where)
+			_, _, _, val := b.se().Where(bd.where)
 			if v == nil || p.members(b) {
 				p.refs(key.prog, bd.static, nil)
-				wheres(key.prog, val, func(u int32) { p.refs(key.prog, u, nil) })
+				wheres(key.prog, bd.src, val, func(u int32) { p.refs(key.prog, u, nil) })
 			}
-			if v == nil || key.prog.src.Kind(val) == ast.Import {
+			if v == nil || b.se().Kind(val) == ast.Import {
 				return b
 			}
 		}
@@ -215,32 +237,32 @@ func (p *valuePrinter) need(key binderKey, v Value) *binding {
 }
 
 // wheres calls f with the uses of the static part of each where-group in
-// the static part of x, which have uses of their own.
-func wheres(prog *program, x ast.Node, f func(u int32)) {
-	se := prog.src
+// the static part of x, in the source src, which have uses of their own.
+func wheres(prog *program, src int32, x ast.Node, f func(u int32)) {
+	se, static := prog.srcs[src].se, prog.srcs[src].static
 	switch se.Kind(x) {
 	case ast.Record:
 		_, fields := se.Record(x)
 		for i := range fields.Len() {
-			if v := fields.Value(i); prog.static.Has(v) {
-				wheres(prog, v, f)
+			if v := fields.Value(i); static.Has(v) {
+				wheres(prog, src, v, f)
 			}
 		}
 	case ast.Where:
 		body, _ := se.Group(x)
-		f(prog.whereUses(x))
-		wheres(prog, body, f)
+		f(prog.whereUses(src, x))
+		wheres(prog, src, body, f)
 	}
 }
 
 // staticNames returns the printed names of the free names of the static
-// part of x in prog, whose uses are u, or -1 for none.
-func (p *valuePrinter) staticNames(prog *program, u int32, x ast.Node) map[ast.Node]string {
+// part of x in the source src of prog, whose uses are u, or -1 for none.
+func (p *valuePrinter) staticNames(prog *program, src, u int32, x ast.Node) map[ast.Node]string {
 	names := make(map[ast.Node]string)
 	if u >= 0 {
 		p.renames(names, prog, u, nil)
 	}
-	wheres(prog, x, func(u int32) { p.renames(names, prog, u, nil) })
+	wheres(prog, src, x, func(u int32) { p.renames(names, prog, u, nil) })
 	return names
 }
 
@@ -251,8 +273,8 @@ func (p *valuePrinter) members(b *binding) bool {
 	if b.value == nil || bd.static < 0 {
 		return false
 	}
-	_, _, _, val := b.prog.src.Where(bd.where)
-	switch b.prog.src.Kind(val) {
+	_, _, _, val := b.se().Where(bd.where)
+	switch b.se().Kind(val) {
 	case ast.Import, ast.Record:
 		return true
 	}
@@ -305,12 +327,13 @@ func (p *valuePrinter) code(sf ScriptFunc) {
 // values of its free names taken from caps.
 func (p *valuePrinter) refs(prog *program, u int32, caps []Value) {
 	us := prog.uses[u]
+	se := prog.srcs[us.src].se
 	for _, name := range us.names {
 		p.idents[name] = true
 	}
 	for _, r := range us.free {
 		if r.b < 0 {
-			p.names[prog.src.TokenText(prog.src.Main(r.ident))] = true
+			p.names[se.TokenText(se.Main(r.ident))] = true
 			continue
 		}
 		var v Value
@@ -349,7 +372,7 @@ func same(a, b Value) bool {
 		return b == nil
 	case ScriptFunc:
 		o, ok := b.(ScriptFunc)
-		return ok && a.prog == o.prog && a.node == o.node && a.ref == o.ref &&
+		return ok && a.prog == o.prog && a.node == o.node &&
 			len(a.caps) == len(o.caps) && (len(a.caps) == 0 || &a.caps[0] == &o.caps[0]) &&
 			slices.EqualFunc(a.args, o.args, same)
 	case Partial:
@@ -410,8 +433,8 @@ func (p *valuePrinter) where(s *strings.Builder) {
 			continue
 		}
 		names := p.renames(nil, b.prog, bd.types, nil)
-		pr := p.printer(b.prog.src, names)
-		_, _, typ, val := b.prog.src.Where(bd.where)
+		pr := p.printer(b.se(), names)
+		_, _, typ, val := b.se().Where(bd.where)
 		if p.defines(b) {
 			if sf := b.value.(ScriptFunc); !sf.composition() {
 				p.renames(names, sf.prog, sf.uses(), sf.caps)
@@ -437,20 +460,20 @@ func (p *valuePrinter) where(s *strings.Builder) {
 			continue
 		}
 		if v == nil || p.members(b) {
-			names := p.staticNames(b.prog, bd.static, val)
-			p.withMembers(s, b.prog, names, val, v)
+			names := p.staticNames(b.prog, bd.src, bd.static, val)
+			p.withMembers(s, b.prog, bd.src, names, val, v)
 			continue
 		}
 		p.value(s, v, printer.Body)
 	}
 }
 
-// withMembers prints v, the value of x in prog, with the members of x's
-// static part. An import prints as itself, a record literal as v's fields
+// withMembers prints v, the value of x in the source src of prog, with the
+// members of x's static part. An import prints as itself, a record literal as v's fields
 // and its members. Without v, x prints as its static part alone. names are
 // the printed names of the static part's free names.
-func (p *valuePrinter) withMembers(s *strings.Builder, prog *program, names map[ast.Node]string, x ast.Node, v Value) {
-	se := prog.src
+func (p *valuePrinter) withMembers(s *strings.Builder, prog *program, src int32, names map[ast.Node]string, x ast.Node, v Value) {
+	se, static := prog.srcs[src].se, prog.srcs[src].static
 	switch se.Kind(x) {
 	case ast.Record:
 		_, fields := se.Record(x)
@@ -470,22 +493,22 @@ func (p *valuePrinter) withMembers(s *strings.Builder, prog *program, names map[
 			name := p.labels.Name(key)
 			s.WriteString(name)
 			s.WriteString(" = ")
-			if f := field(se, fields, name); f != ast.None && prog.static.Has(f) {
-				p.withMembers(s, prog, names, f, r.values[i])
+			if f := field(se, fields, name); f != ast.None && static.Has(f) {
+				p.withMembers(s, prog, src, names, f, r.values[i])
 			} else {
 				p.value(s, r.values[i], printer.Expr)
 			}
 		}
 		for i := range fields.Len() {
 			f := fields.Value(i)
-			if !prog.static.Has(f) || valued && r.shape.index(p.labels.Of(se.TokenText(fields.Key(i)))) >= 0 {
+			if !static.Has(f) || valued && r.shape.index(p.labels.Of(se.TokenText(fields.Key(i)))) >= 0 {
 				continue
 			}
 			// A member, which the value leaves out.
 			sep()
 			s.WriteString(se.TokenText(fields.Key(i)))
 			s.WriteString(" = ")
-			p.withMembers(s, prog, names, f, nil)
+			p.withMembers(s, prog, src, names, f, nil)
 		}
 		if n == 0 {
 			s.WriteString("{}")
@@ -494,7 +517,7 @@ func (p *valuePrinter) withMembers(s *strings.Builder, prog *program, names map[
 		}
 	case ast.Where:
 		body, _ := se.Group(x)
-		p.withMembers(s, prog, names, body, v)
+		p.withMembers(s, prog, src, names, body, v)
 	case ast.Ident, ast.Access, ast.Import:
 		if v == nil || se.Kind(x) == ast.Import {
 			pr := p.printer(se, names)
@@ -534,7 +557,7 @@ func (p *valuePrinter) compose(s *strings.Builder, sf ScriptFunc, ctx printer.Co
 		defer s.WriteByte(')')
 	}
 	first, second, op := sf.caps[0], sf.caps[1], " >> "
-	if bin, _, _ := sf.prog.src.Binary(sf.prog.at[sf.node]); bin == token.LCOMP {
+	if bin, _, _ := sf.se().Binary(sf.prog.at[sf.node]); bin == token.LCOMP {
 		first, second, op = second, first, " << "
 	}
 	p.value(s, first, printer.Arg)
@@ -610,14 +633,14 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 			var head strings.Builder
 			p.value(&head, fn, printer.Arg)
 			p.app(s, ctx, head.String(), v.args...)
-		} else if v.ref != "" {
-			s.WriteString(v.ref)
+		} else if ref, ok := v.published(); ok {
+			s.WriteString(ref)
 		} else if key, ok := home(v); ok {
 			s.WriteString(p.find(key, v).printed)
 		} else if v.composition() {
 			p.compose(s, v, ctx)
 		} else {
-			pr := p.printer(v.prog.src, p.renames(nil, v.prog, v.uses(), v.caps))
+			pr := p.printer(v.se(), p.renames(nil, v.prog, v.uses(), v.caps))
 			pr.Expr(v.prog.at[v.node], ctx)
 			s.WriteString(pr.String())
 		}

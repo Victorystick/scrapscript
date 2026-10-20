@@ -6,7 +6,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/types"
 )
 
@@ -119,8 +118,8 @@ func readBench(b *testing.B, source string) (*Environment, *Scrap) {
 	return e, scrap
 }
 
-// BenchmarkEval measures evaluating a compiled program. Only the root is
-// evaluated each time; the values of the drafts it refers to are cached.
+// BenchmarkEval measures evaluating a compiled program: the root and the
+// drafts it refers to.
 func BenchmarkEval(b *testing.B) {
 	for _, ex := range evalSources {
 		b.Run(ex.name, func(b *testing.B) {
@@ -129,14 +128,14 @@ func BenchmarkEval(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			c, err := compile(&scrap.expr, &e.reg, res.Nodes, nil, e.vars, e.shapes)
+			if res.Sort {
+				b.Fatal("cannot evaluate a type")
+			}
+			c, err := compile(e.units(scrap), &e.reg, e.vars, e.shapes)
 			if err != nil {
 				b.Fatal(err)
 			}
-			p := &program{core: c, evalImport: func(n ast.Node) (Value, error) {
-				dep := scrap.deps[n]
-				return e.eval(dep, dep.result)
-			}}
+			p := &program{core: c}
 			b.ReportAllocs()
 			for b.Loop() {
 				if _, err := p.eval(); err != nil {

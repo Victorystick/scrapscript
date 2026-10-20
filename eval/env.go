@@ -26,8 +26,10 @@ type Pusher interface {
 
 // A Scrap is a parsed scrap: a draft, or a published scrap fetched by hash.
 type Scrap struct {
-	expr      ast.SourceExpr
-	published bool
+	expr ast.SourceExpr
+	// The reference that a published scrap was fetched by, $source:…; empty
+	// for a draft.
+	ref string
 	// The path of a draft read from a file, which its own paths are relative
 	// to. A draft read otherwise, as from standard input, is an unnamed file
 	// at the root.
@@ -160,7 +162,7 @@ func (e *Environment) load(s *Scrap) error {
 // resolve returns the scrap that the Import node n of s refers to.
 func (e *Environment) resolve(s *Scrap, n ast.Node) (*Scrap, error) {
 	if path, ok := s.expr.Path(n); ok {
-		if s.published {
+		if s.ref != "" {
 			return nil, s.expr.Error(n, "a published scrap cannot refer to a path")
 		}
 		dep, err := e.draft(s, path)
@@ -231,7 +233,7 @@ func (e *Environment) fetch(scheme, digest string) (*Scrap, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.published = true
+	s.ref = "$" + scheme + ":" + digest
 	e.scraps[key] = s
 	return s, nil
 }
@@ -264,8 +266,7 @@ func (e *Environment) check(s *Scrap) (types.Result, error) {
 	return res, nil
 }
 
-// Eval type-checks and evaluates a Scrap. The scraps it refers to are
-// evaluated when first used.
+// Eval type-checks and evaluates a Scrap, after the scraps it refers to.
 func (e *Environment) Eval(s *Scrap) (Value, error) {
 	res, err := e.infer(s)
 	if err != nil {
@@ -279,30 +280,42 @@ func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
 		return nil, fmt.Errorf("cannot evaluate a type")
 	}
 	if s.value == nil {
-		c, err := compile(&s.expr, &e.reg, res.Nodes, res.Static, e.vars, e.shapes)
+		c, err := compile(e.units(s), &e.reg, e.vars, e.shapes)
 		if err != nil {
 			return nil, err
 		}
-		p := &program{core: c, evalImport: func(n ast.Node) (Value, error) {
-			dep := s.deps[n]
-			v, err := e.eval(dep, dep.result)
-			// A published function prints as the reference to it.
-			if sf, ok := v.(ScriptFunc); ok && dep.published {
-				sf.ref = s.expr.NodeText(n)
-				return sf, err
-			}
-			return v, err
-		}, imported: func(n ast.Node) *program {
-			return s.deps[n].prog
-		}}
-		s.prog = p
+		p := &program{core: c}
 		value, err := p.eval()
 		if err != nil {
 			return nil, err
 		}
-		s.value = value
+		s.prog, s.value = p, value
 	}
 	return s.value, nil
+}
+
+// units returns the units to compile s with, which must be checked: the
+// scraps it refers to, directly or not, each once and after the scraps they
+// refer to, and then s.
+func (e *Environment) units(s *Scrap) []unit {
+	var units []unit
+	index := make(map[*Scrap]int32)
+	var visit func(s *Scrap) int32
+	visit = func(s *Scrap) int32 {
+		if i, ok := index[s]; ok {
+			return i
+		}
+		deps := make(map[ast.Node]int32, len(s.deps))
+		for _, n := range s.expr.Imports() {
+			deps[n] = visit(s.deps[n])
+		}
+		u := unit{se: &s.expr, typed: s.result.Nodes, static: s.result.Static, sort: s.result.Sort, ref: s.ref, deps: deps}
+		index[s] = int32(len(units))
+		units = append(units, u)
+		return index[s]
+	}
+	visit(s)
+	return units
 }
 
 // Apply type-checks and evaluates the function fn applied to arg, as if fn

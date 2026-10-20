@@ -47,8 +47,8 @@ the same machine; each milestone below names it.
 | `Eval/echo` | A terminal-platform program, run on 1000 lines by its reference semantics. |
 | `AccessLog` | A realistic program, in `cmd/example/scrap-terminal`: per-path stats of 10k access-log lines in an AVL tree, loaded through the generated bindings and run by the example's `Run` loop. |
 
-`Eval` evaluates only the root scrap each time; the values of the drafts it
-refers to are cached.
+`Eval` evaluates the root scrap and the drafts it refers to each time; until
+`1570ae6` it evaluated only the root, with the drafts' values cached.
 
 ## Milestones
 

@@ -101,8 +101,6 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 		fmt.Fprintf(s, "@%d", d.a)
 	case opCapture:
 		fmt.Fprintf(s, "&%d", d.a)
-	case opImport:
-		s.WriteString(c.src.NodeText(c.at[n]))
 	case opCall:
 		c.list(s, "(", ")", "", cnode(d.a), cnode(d.b))
 	case opCallN:
@@ -214,8 +212,9 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 		s.WriteString("." + c.labels.Name(label.ID(d.b)))
 	case opField:
 		c.dump(s, cnode(d.a))
-		_, key := c.src.Access(c.at[n])
-		fmt.Fprintf(s, ".%s[%d]", c.src.TokenText(key), d.b)
+		se := c.source(n)
+		_, key := se.Access(c.at[n])
+		fmt.Fprintf(s, ".%s[%d]", se.TokenText(key), d.b)
 	case opList, patList:
 		c.list(s, "[", "]", ", ", nodes(c.range_(n))...)
 	case opVariant, patVariant:
@@ -284,7 +283,7 @@ func (c *core) uses_(s *strings.Builder, u int32) {
 	us := c.uses[u]
 	for _, r := range us.free {
 		if r.b < 0 {
-			s.WriteString(" ^" + c.src.NodeText(r.ident))
+			s.WriteString(" ^" + c.srcs[us.src].se.NodeText(r.ident))
 		} else if b := c.binders[r.b]; r.cap < 0 {
 			fmt.Fprintf(s, " ^%s:", b.name)
 		} else {
@@ -304,19 +303,29 @@ func compileString(t *testing.T, source string) *core {
 	}
 	var reg types.Registry
 	scope, globals := bindBuiltIns(&reg)
-	// Imports are ints.
+	// Imports are scraps of the int 0.
+	var units []unit
 	imports := make(types.Imports)
-	for n, k := range se.Kinds {
-		if k == ast.Import {
-			imports[ast.Node(n)] = types.Result{Type: types.IntRef}
+	deps := make(map[ast.Node]int32)
+	for _, n := range se.Imports() {
+		dep, err := parser.ParseExpr("0")
+		if err != nil {
+			t.Fatal(err)
 		}
+		res, err := types.Infer(&reg, scope, dep, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		imports[n], deps[n] = res, int32(len(units))
+		units = append(units, unit{se: &dep, typed: res.Nodes})
 	}
 	res, err := types.Infer(&reg, scope, se, imports)
 	if err != nil {
 		t.Errorf("check %q: %v", source, err)
 		return nil
 	}
-	c, err := compile(&se, &reg, res.Nodes, nil, globals, newShapeTable(reg.Labels()))
+	units = append(units, unit{se: &se, typed: res.Nodes, deps: deps})
+	c, err := compile(units, &reg, globals, newShapeTable(reg.Labels()))
 	if err != nil {
 		t.Fatalf("compile %q: %v", source, err)
 	}
@@ -403,7 +412,11 @@ func TestCompile(t *testing.T) {
 		// Otherwise, they are looked up by label.
 		{`r -> { ..r, a = 1 }.a`, `(fn/1 | >0 -> { a = 1 ..@0 }.a)`, 0},
 		{`| { ..r, b = x } -> x + r.c`, `(fn/2 | { b = >0 ..>1 } -> (+ @0 @1.c))`, 0},
-		{`$"lib.scrap"`, `$"lib.scrap"`, 0},
+		// The scraps it refers to are bindings around it.
+		{`$"lib.scrap"`, `(@0 ; >0 0)`, 1},
+		{`$"a.scrap" + $"b.scrap"`, `((+ @0 @1) ; >0 0 ; >1 0)`, 2},
+		// A function captures them.
+		{`x -> x + $"lib.scrap"`, `((fn/1 [@0] | >0 -> (+ @0 &0)) ; >0 0)`, 1},
 		{`#a (#b ())`, `(#a (#b ()))`, 0},
 		{`"a" ++ "b"`, `(++text "a" "b")`, 0},
 		{`[1] ++ [2]`, `(++ [1] [2])`, 0},
@@ -469,7 +482,7 @@ func TestCompileErrors(t *testing.T) {
 		}
 		var reg types.Registry
 		_, globals := bindBuiltIns(&reg)
-		_, err = compile(&se, nil, nil, nil, globals, newShapeTable(reg.Labels()))
+		_, err = compile([]unit{{se: &se}}, nil, globals, newShapeTable(reg.Labels()))
 		if err == nil || !strings.Contains(err.Error(), tt.err) {
 			t.Errorf("%s: got %v, want %q", tt.source, err, tt.err)
 		}

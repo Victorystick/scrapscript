@@ -202,9 +202,15 @@ func printScrapString(source string) (string, error) {
 
 func TestPrintedImports(t *testing.T) {
 	const add = "$source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445"
+	const named = "$source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a446"
+	const again = "$source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447"
 	examples := []struct{ source, result string }{
 		// A published function prints as the reference to it.
 		{`{ f = ` + add + ` }`, `{ f = ` + add + ` }`},
+		// Also if a binding of the scrap defines it.
+		{`{ f = ` + named + ` }`, `{ f = ` + named + ` }`},
+		// A scrap that is another's value prints as that one.
+		{`{ f = ` + again + ` }`, `{ f = ` + add + ` }`},
 		// Applying it gives a function of its code, with what it captures.
 		{add + ` 1`, add + ` 1`},
 		// Code that refers to it keeps the reference.
@@ -212,7 +218,11 @@ func TestPrintedImports(t *testing.T) {
 	}
 	for _, ex := range examples {
 		env := NewEnvironment()
-		env.UseFetcher(MapFetcher{add[len("$source:"):]: `a -> b -> a + b`})
+		env.UseFetcher(MapFetcher{
+			add[len("$source:"):]:   `a -> b -> a + b`,
+			named[len("$source:"):]: `add ; add = a -> b -> a + b`,
+			again[len("$source:"):]: add,
+		})
 		val, err := eval(env, ex.source)
 		if err != nil {
 			t.Errorf("%s: %v", ex.source, err)

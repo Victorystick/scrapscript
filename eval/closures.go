@@ -203,15 +203,6 @@ func (p *program) expr(n cnode) code {
 		i := d.a
 		return func(f frame) Value { return f.caps[i] }
 
-	case opImport:
-		return func(frame) Value {
-			v, err := p.evalImport(p.at[n])
-			if err != nil {
-				panic(runtimeError{err})
-			}
-			return v
-		}
-
 	case opAddInt:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
 		return func(f frame) Value {

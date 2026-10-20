@@ -5,17 +5,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/label"
 )
 
 // A program is a compiled scrap, ready to run.
 type program struct {
 	*core
-	evalImport EvalImport
-	// The program of the scrap that an Import node refers to, once it is
-	// evaluated, for printing.
-	imported func(ast.Node) *program
 	compiled
 }
 
@@ -32,7 +27,7 @@ type runtimeError struct {
 }
 
 func (p *program) errorf(n cnode, format string, args ...any) runtimeError {
-	return runtimeError{p.src.Error(p.at[n], fmt.Sprintf(format, args...))}
+	return runtimeError{p.source(n).Error(p.at[n], fmt.Sprintf(format, args...))}
 }
 
 // catch recovers a runtimeError into *err. Other panics carry on.
@@ -189,13 +184,6 @@ func (p *program) run(n cnode, f frame) Value {
 
 		case opCapture:
 			return f.caps[d.a]
-
-		case opImport:
-			v, err := p.evalImport(p.at[n])
-			if err != nil {
-				panic(runtimeError{err})
-			}
-			return v
 
 		// The checker settled the operands' types, which the op says.
 		case opAddInt:

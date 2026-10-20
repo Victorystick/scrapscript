@@ -79,9 +79,6 @@ type ScriptFunc struct {
 	// For a lambda, the arguments it has been applied to, fewer than its
 	// arity.
 	args []Value
-	// The hash reference that it was imported by, which it prints as, if it
-	// is the value of a published scrap.
-	ref string
 }
 
 // composition returns true if sf is a composition rather than a lambda.

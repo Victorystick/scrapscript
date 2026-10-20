@@ -10,9 +10,15 @@ import (
 	"github.com/Victorystick/scrapscript/types"
 )
 
-// The core that eval runs: a SourceExpr after type checking, with names
-// resolved to frame slots, literals decoded, pipes turned into calls and
-// both kinds of function turned into lambdas with arms.
+// The core that eval runs: a scrap and the scraps it refers to, after type
+// checking, as one program, with names resolved to frame slots, literals
+// decoded, pipes turned into calls and both kinds of function turned into
+// lambdas with arms.
+//
+// Scraps are partial programs: the scraps that a scrap refers to are
+// bindings of an outer where-group, in the order that they depend on each
+// other, and each of its Import nodes reads one, as a name would. A scrap
+// that is referred to more than once is bound once.
 //
 // A frame holds the values that one call of a function binds: its
 // parameter, the names its match arms bind and the where-bindings in its
@@ -46,7 +52,6 @@ const (
 	opConst   // A: the index of a literal or builtin in consts.
 	opLocal   // A: the slot in the current frame.
 	opCapture // A: the index of the capture of the running function.
-	opImport  // The value of the scrap that the AST node refers to.
 	opCall    // A: the function. B: the argument.
 	opCallN   // A..B: the function, then two or more arguments.
 
@@ -97,11 +102,13 @@ type data struct {
 	a, b int32
 }
 
-// A core is a compiled scrap. Its nodes are expressions and patterns; the
+// A core is a compiled program. Its nodes are expressions and patterns; the
 // other arrays are pools that nodes refer to by index, as their op says.
 type core struct {
-	// The source it was compiled from, which at refers into.
-	src *ast.SourceExpr
+	// The scraps it was compiled from, and the runs of nodes compiled from
+	// each, which at refers into.
+	srcs  []source
+	spans []span
 
 	// Per node, indexed by cnode. Node 0 is none.
 	ops  []op
@@ -127,30 +134,58 @@ type core struct {
 	// those refer to, by index here.
 	binders []binder
 	uses    []uses
-	// The nodes with a static part, and the uses of the static part of each
-	// where-group's body that has one, by Where node.
-	static types.NodeSet
+	// The uses of the static part of each where-group's body that has one,
+	// by source and Where node.
 	wheres []whereStatic
 
 	// The node evaluated, and the number of slots in its frame.
 	root cnode
 	top  int
-	// The index in uses of what the static part of the node evaluated
-	// refers to, or -1 if it has none. A where-group's is in wheres.
+	// The source whose static part the value of root has: the root
+	// scrap's, or if that is an import, the source it refers to.
+	main int32
+}
+
+// A source is a scrap that a core was compiled from.
+type source struct {
+	se *ast.SourceExpr
+	// The nodes with a static part.
+	static types.NodeSet
+	// The index in uses of what the static part of its expression refers
+	// to, or -1 if it has none. A where-group's is in wheres.
 	rootStatic int32
+	// The reference to a published scrap, $source:…, which its value
+	// prints as if it is a function; empty for a draft.
+	ref string
+}
+
+// A span is a run of nodes compiled from the source src, from start up to
+// the next span's start.
+type span struct {
+	start cnode
+	src   int32
+}
+
+// source returns the source that the node n was compiled from.
+func (c *core) source(n cnode) *ast.SourceExpr {
+	i, _ := slices.BinarySearchFunc(c.spans, n+1, func(s span, n cnode) int {
+		return int(s.start - n)
+	})
+	return c.srcs[c.spans[i-1].src].se
 }
 
 // A whereStatic is the uses of the static part of a where-group's body.
 type whereStatic struct {
-	x ast.Node
-	u int32
+	src int32
+	x   ast.Node
+	u   int32
 }
 
 // whereUses returns the uses of the static part of the body of the
-// where-group x, or -1 if it has none.
-func (c *core) whereUses(x ast.Node) int32 {
+// where-group x in the source src, or -1 if it has none.
+func (c *core) whereUses(src int32, x ast.Node) int32 {
 	for _, w := range c.wheres {
-		if w.x == x {
+		if w.src == src && w.x == x {
 			return w.u
 		}
 	}
@@ -161,7 +196,8 @@ func (c *core) whereUses(x ast.Node) int32 {
 type binder struct {
 	name  string
 	slot  int      // -1 for a sort binding, which has no value
-	where ast.Node // its Where node, or None for a parameter or pattern name
+	src   int32    // the source it is in
+	where ast.Node // its Where node, or None for a parameter, pattern name or scrap
 	sort  bool
 	// The index in uses of what its annotation, or a sort binding's type,
 	// refers to.
@@ -186,6 +222,10 @@ type uses struct {
 	free  []ref    // its free names, from outside the code
 	names []string // every name in it, bound or free
 	home  int32    // the binder whose value it is, which it prints as, or -1
+	src   int32    // the source of the code
+	// The source of the published scrap whose value it is, which it
+	// prints as the reference to, or -1.
+	published int32
 }
 
 func (c *core) range_(n cnode) []int32 {
@@ -263,28 +303,74 @@ func (c *core) elems(n cnode) (rest cnode, elems []int32) {
 	return cnode(r[0]), r[1:]
 }
 
-// compile lowers se, which must have been type-checked. Free names that it
-// doesn't bind refer to globals. Tags and record keys are interned in the
-// label table of shapes, and the shapes of records in shapes.
-//
-// typed is the type of each node, from type checking, whose refs are in
-// reg. Only code without operators may be compiled without it.
-func compile(se *ast.SourceExpr, reg *types.Registry, typed []types.TypeRef, static types.NodeSet, globals Vars, shapes *shapeTable) (*core, error) {
+// A unit is a scrap to compile, which must have been type-checked.
+type unit struct {
+	se *ast.SourceExpr
+	// The type of each node, from type checking, whose refs are in the
+	// registry. Only code without operators may be compiled without it.
+	typed []types.TypeRef
+	// The nodes with a static part.
+	static types.NodeSet
+	// Whether it denotes a type, which has no value.
+	sort bool
+	// The reference to it if it is published, $source:…, or empty.
+	ref string
+	// The index among the units of the scrap that each Import node refers
+	// to, which comes before it.
+	deps map[ast.Node]int32
+}
+
+// compile lowers the last of units and the scraps it refers to, the units
+// before it, in the order that they depend on each other, into one core.
+// Free names that they don't bind refer to globals. Tags and record keys
+// are interned in the label table of shapes, and the shapes of records in
+// shapes.
+func compile(units []unit, reg *types.Registry, globals Vars, shapes *shapeTable) (*core, error) {
+	root := int32(len(units) - 1)
 	c := compiler{
-		core:     core{src: se, labels: shapes.labels, table: shapes, static: static},
+		core:     core{labels: shapes.labels, table: shapes, spans: []span{{0, root}}},
+		units:    units,
 		reg:      reg,
-		typed:    typed,
 		globals:  globals,
 		builtins: make(map[string]int32),
+		scraps:   make([]int32, len(units)),
+	}
+	c.srcs = make([]source, len(units))
+	for i, u := range units {
+		c.srcs[i] = source{se: u.se, static: u.static, rootStatic: -1, ref: u.ref}
 	}
 	c.node(opNone, 0, 0, ast.None)
 	c.fns = [][]capture{nil}
-	c.root = c.expr(se.Expr)
-	c.rootStatic = -1
-	if static.Has(se.Expr) {
-		c.rootStatic = c.open(false)
-		c.staticPart(se.Expr)
-		c.close()
+
+	// Each scrap that the root refers to is a binding of a where-group
+	// around it, unless it is a type.
+	var binds []int32
+	for i := range root {
+		c.scraps[i] = -1
+		if units[i].sort {
+			continue
+		}
+		restore := c.enter(i)
+		v := c.scrap()
+		if units[i].ref != "" {
+			if u := c.result(v); u >= 0 {
+				c.uses[u].published = i
+			}
+		}
+		slot := c.alloc()
+		c.scraps[i] = int32(len(c.binders))
+		c.binders = append(c.binders, binder{slot: slot, src: i, where: ast.None, types: -1, static: -1})
+		binds = append(binds, int32(slot), int32(v))
+		restore()
+	}
+	c.enter(root)
+	c.root = c.scrap()
+	if binds != nil {
+		c.root = c.span(opWhere, append([]int32{int32(c.root)}, binds...), units[root].se.Expr)
+	}
+	c.main = root
+	for x := units[root].se.Expr; units[c.main].se.Kind(x) == ast.Import; x = units[c.main].se.Expr {
+		c.main = units[c.main].deps[x]
 	}
 	if c.err != nil {
 		return nil, c.err
@@ -293,14 +379,91 @@ func compile(se *ast.SourceExpr, reg *types.Registry, typed []types.TypeRef, sta
 	return &c.core, nil
 }
 
+// scrap compiles the expression of the current source, and resolves its
+// static part for printing.
+func (c *compiler) scrap() cnode {
+	x := c.src.Expr
+	v := c.expr(x)
+	if c.static.Has(x) {
+		c.srcs[c.cur].rootStatic = c.open(false)
+		c.staticPart(x)
+		c.close()
+	}
+	return v
+}
+
+// enter starts compiling the source i, and returns a function that goes
+// back to the source before it.
+func (c *compiler) enter(i int32) (restore func()) {
+	prev := c.cur
+	c.switchTo(i)
+	return func() { c.switchTo(prev) }
+}
+
+func (c *compiler) switchTo(i int32) {
+	c.cur = i
+	u := c.units[i]
+	c.src, c.typed, c.static = u.se, u.typed, u.static
+	n := cnode(len(c.ops))
+	if last := &c.spans[len(c.spans)-1]; last.start == n {
+		last.src = i
+	} else {
+		c.spans = append(c.spans, span{n, i})
+	}
+}
+
+// result returns the index in uses of the function that the top-level
+// expression v evaluates to, if it is made once, as the value of a scrap or
+// of a binding of a where-group around it; otherwise -1.
+func (c *compiler) result(v cnode) int32 {
+	var binds []int32
+	for {
+		switch c.ops[v] {
+		case opWhere:
+			var bs []int32
+			v, bs = c.where(v)
+			binds = append(binds, bs...)
+		case opFill:
+			v = cnode(c.data[v].a)
+		case opLocal:
+			slot, found := c.data[v].a, false
+			for i := 0; i < len(binds); i += 2 {
+				if binds[i] == slot {
+					v, found = cnode(binds[i+1]), true
+				}
+			}
+			if !found {
+				return -1
+			}
+		case opLambda:
+			_, u, _, _ := c.lambda(v)
+			return u
+		case opCompose:
+			_, _, u := c.compose(v)
+			return u
+		default:
+			return -1
+		}
+	}
+}
+
 type compiler struct {
 	core
+	units   []unit
 	reg     *types.Registry
-	typed   []types.TypeRef
 	globals Vars
 	// The index in consts of each builtin referred to.
 	builtins map[string]int32
 	err      error
+
+	// The source being compiled: its index, its expression, the types of
+	// its nodes and its nodes with a static part.
+	cur    int32
+	src    *ast.SourceExpr
+	typed  []types.TypeRef
+	static types.NodeSet
+	// The binder of each unit's value, or -1 for a type.
+	scraps []int32
 
 	// The frame being compiled: how deeply it is nested, its next free
 	// slot and its size so far.
@@ -457,7 +620,7 @@ func (c *compiler) closed(x ast.Node) *shape {
 // code is a lambda.
 func (c *compiler) open(lambda bool) int32 {
 	u := int32(len(c.uses))
-	c.uses = append(c.uses, uses{home: -1})
+	c.uses = append(c.uses, uses{home: -1, src: c.cur, published: -1})
 	c.roots = append(c.roots, root{u, c.level, len(c.values), len(c.types), lambda})
 	return u
 }
@@ -535,6 +698,7 @@ func (c *compiler) alloc() int {
 // value.
 func (c *compiler) bind(b binder) int32 {
 	i := int32(len(c.binders))
+	b.src = c.cur
 	c.binders = append(c.binders, b)
 	c.use(b.name)
 	if b.sort {
@@ -631,7 +795,16 @@ func (c *compiler) expr(x ast.Node) cnode {
 		return c.fn(x)
 
 	case ast.Import:
-		return c.node(opImport, 0, 0, x)
+		// It reads the binding of the scrap that it refers to.
+		b := c.scraps[c.units[c.cur].deps[x]]
+		if b < 0 {
+			c.error(x, "cannot evaluate a type")
+			return none
+		}
+		if c.level > 0 {
+			return c.node(opCapture, c.capture(c.level, entry{level: 0, b: b}), 0, x)
+		}
+		return c.node(opLocal, int32(c.binders[b].slot), 0, x)
 	}
 
 	c.error(x, fmt.Sprintf("unhandled node %s", se.Kind(x)))
@@ -675,7 +848,7 @@ func (c *compiler) binary(x ast.Node) cnode {
 		// A composition prints as its functions, so its uses has only its
 		// home.
 		u := int32(len(c.uses))
-		c.uses = append(c.uses, uses{home: -1})
+		c.uses = append(c.uses, uses{home: -1, src: c.cur, published: -1})
 		first, second := c.expr(left), c.expr(right)
 		return c.span(opCompose, []int32{int32(first), int32(second), u}, x)
 	}
@@ -864,7 +1037,7 @@ func (c *compiler) group(x ast.Node) cnode {
 		u := c.open(false)
 		c.staticPart(body)
 		c.close()
-		c.wheres = append(c.wheres, whereStatic{x, u})
+		c.wheres = append(c.wheres, whereStatic{c.cur, x, u})
 	}
 
 	xs := []int32{0}

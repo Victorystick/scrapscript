@@ -129,6 +129,46 @@ func TestPathImports(t *testing.T) {
 	}
 }
 
+func TestScrapsAreBoundOnce(t *testing.T) {
+	env := pathEnv(pathFiles)
+	// sub/two.scrap refers to inc.scrap too.
+	scrap, err := env.Read([]byte(`$"./inc.scrap" $"./sub/two.scrap"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	val, err := env.Eval(scrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env.Print(val); got != "3" {
+		t.Errorf("expected 3, got %s", got)
+	}
+	if n := len(scrap.prog.srcs); n != 3 {
+		t.Errorf("expected 3 sources, got %d", n)
+	}
+	if _, binds := scrap.prog.where(scrap.prog.root); len(binds) != 4 {
+		t.Errorf("expected a binding per scrap referred to, 2, got %d", len(binds)/2)
+	}
+}
+
+func TestErrorsInScrapsReferredTo(t *testing.T) {
+	env := pathEnv(map[string]string{"pick.scrap": `| #a -> 1`})
+	scrap, err := env.Read([]byte(`$"./pick.scrap"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn, err := env.Eval(scrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hosts call functions unchecked, so this can fail at runtime, in the
+	// scrap that the function is from.
+	_, err = Call(fn, NewVariant(env.Label("b"), nil))
+	if err == nil || !strings.Contains(err.Error(), "| #a -> 1") {
+		t.Errorf("expected an error in pick.scrap, got %v", err)
+	}
+}
+
 func TestPathImportFailures(t *testing.T) {
 	examples := []struct{ source, error string }{
 		{`$"./a.scrap"`, `$"./a.scrap" refers back to this scrap`},
