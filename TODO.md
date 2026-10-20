@@ -29,8 +29,9 @@ multi-pattern arms, where-groups and pattern operators separately.
 
 - [ ] Carry the checker's types into the IR. Next up: it is evaluator
       independent, and decides closures against `run` (section 5). The
-      compiler reads them to choose ops, so the core keeps no types; next,
-      static field indices where a record's type is closed.
+      compiler reads them to choose ops and static field indices (access,
+      spreads and rest patterns on records of a closed type), so the core
+      keeps no types. Open rows still look labels up.
 - [x] Choose operators (`+ - *` on int or float; `+< >+` on lists or
       bytes; `++` on lists, text or bytes) statically instead of by the
       runtime value.

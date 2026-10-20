@@ -342,6 +342,15 @@ func (p *program) expr(n cnode) code {
 			}
 		}
 		bc := p.expr(base)
+		if s != nil {
+			return func(f frame) Value {
+				values := slices.Clone(bc(f).(Record).values)
+				for i, c := range vals {
+					values[keys[i]] = c(f)
+				}
+				return Record{s, values}
+			}
+		}
 		return func(f frame) Value {
 			r := bc(f).(Record)
 			values := slices.Clone(r.values)
@@ -357,6 +366,12 @@ func (p *program) expr(n cnode) code {
 		return func(f frame) Value {
 			r := rc.get(f).(Record)
 			return r.values[r.shape.index(key)]
+		}
+
+	case opField:
+		rc := p.operand(cnode(d.a))
+		return func(f frame) Value {
+			return rc.get(f).(Record).values[d.b]
 		}
 
 	case opList:
@@ -622,6 +637,32 @@ func (p *program) pattern(n cnode) mcode {
 				}
 			}
 			return rm(Record{p.table.without(r.shape, s), values}, f)
+		}
+
+	case patSplit:
+		rest, _, rs, from, fields := p.split(n)
+		keys := make([]int32, len(fields)/2)
+		ms := make([]mcode, len(fields)/2)
+		for i := range keys {
+			keys[i] = fields[2*i]
+			ms[i] = p.pattern(cnode(fields[2*i+1]))
+		}
+		rm := p.pattern(rest)
+		return func(v Value, f []Value) bool {
+			r, ok := v.(Record)
+			if !ok {
+				return false
+			}
+			for i, m := range ms {
+				if !m(r.values[keys[i]], f) {
+					return false
+				}
+			}
+			values := make([]Value, len(from))
+			for i, j := range from {
+				values[i] = r.values[j]
+			}
+			return rm(Record{rs, values}, f)
 		}
 
 	case patList:

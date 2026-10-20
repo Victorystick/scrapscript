@@ -21,9 +21,14 @@ import (
 //	@s                   reads slot s of the current frame
 //	&i                   reads capture i of the running function
 //	(f x)                a call; pipes are calls too
-//	(+ a b)              an operator: + - * +< >+ ++
+//	(+ a b)              an operator: + - * +< >+ ++, suffixed with float,
+//	                     text or bytes unless on ints or lists
 //	{ k = v ..r }        a record, based on r if ..r is there
+//	{ k[i] = v ..r }     a record based on r of a closed type, whose field k
+//	                     is at index i
 //	r.k                  a field access
+//	r.k[i]               an access of the field k of a record of a closed
+//	                     type, at index i
 //	[a, b]               a list
 //	#t, (#t p)           a tag, without and with a payload
 //	(body ; >s v ; …)    a where: each binding writes the value v into slot
@@ -48,6 +53,8 @@ import (
 //	1, "a"               matches a literal
 //	(#t p)               matches a tag, and its payload with p
 //	{ k = p ..r }        matches fields, and the remaining record with r
+//	{ k[i] = p ..r }     the same, on a record of a closed type, whose field
+//	                     k is at index i
 //	[p, q]               matches a list of exactly that length
 //	(>+ h t), (+< i l)   matches a non-empty list by head and tail, or by
 //	                     init and last element
@@ -173,13 +180,30 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 			if sh != nil {
 				key = sh.labels[fields[i]]
 			}
-			fmt.Fprintf(s, " %s = ", c.labels.Name(key))
+			fmt.Fprintf(s, " %s", c.labels.Name(key))
+			if o == opRecord && rest != none && sh != nil {
+				fmt.Fprintf(s, "[%d]", fields[i])
+			}
+			s.WriteString(" = ")
 			c.dump(s, cnode(fields[i+1]))
 		}
 		if rest != none {
 			s.WriteString(" ..")
 			c.dump(s, rest)
 		}
+		s.WriteString(" }")
+	case patSplit:
+		rest, sh, _, _, fields := c.split(n)
+		s.WriteString("{")
+		for i := 0; i < len(fields); i += 2 {
+			if i > 0 {
+				s.WriteString(",")
+			}
+			fmt.Fprintf(s, " %s[%d] = ", c.labels.Name(sh.labels[fields[i]]), fields[i])
+			c.dump(s, cnode(fields[i+1]))
+		}
+		s.WriteString(" ..")
+		c.dump(s, rest)
 		s.WriteString(" }")
 	case opFill:
 		fmt.Fprintf(s, "(fill @%d ", d.b)
@@ -188,6 +212,10 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 	case opAccess:
 		c.dump(s, cnode(d.a))
 		s.WriteString("." + c.labels.Name(label.ID(d.b)))
+	case opField:
+		c.dump(s, cnode(d.a))
+		_, key := c.src.Access(c.at[n])
+		fmt.Fprintf(s, ".%s[%d]", c.src.TokenText(key), d.b)
 	case opList, patList:
 		c.list(s, "[", "]", ", ", nodes(c.range_(n))...)
 	case opVariant, patVariant:
@@ -368,7 +396,13 @@ func TestCompile(t *testing.T) {
 		// A function of more arguments is still called.
 		{`1 |> | a -> b -> a`, `((fn/2 | >0 -> >1 -> @0) 1)`, 0},
 		// Values.
-		{`{ ..r, a = 1 }.a ; r = { a = 2 }`, `({ a = 1 ..@0 }.a ; >0 { a = 2 })`, 1},
+		// On records of a closed type, fields are at static indices.
+		{`{ ..r, a = 1 }.a ; r = { a = 2 }`, `({ a[0] = 1 ..@0 }.a[0] ; >0 { a = 2 })`, 1},
+		{`{ a = 1, b = 2, c = 3 } |> | { ..r, b = x } -> x + r.c`,
+			`(match { a = 1, b = 2, c = 3 } | { b[1] = >0 ..>1 } -> (+ @0 @1.c[1]))`, 2},
+		// Otherwise, they are looked up by label.
+		{`r -> { ..r, a = 1 }.a`, `(fn/1 | >0 -> { a = 1 ..@0 }.a)`, 0},
+		{`| { ..r, b = x } -> x + r.c`, `(fn/2 | { b = >0 ..>1 } -> (+ @0 @1.c))`, 0},
 		{`$"lib.scrap"`, `$"lib.scrap"`, 0},
 		{`#a (#b ())`, `(#a (#b ()))`, 0},
 		{`"a" ++ "b"`, `(++text "a" "b")`, 0},

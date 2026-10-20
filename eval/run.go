@@ -276,13 +276,20 @@ func (p *program) run(n cnode, f frame) Value {
 			r := p.value(base, &f).(Record)
 			values := slices.Clone(r.values)
 			for i := 0; i < len(fields); i += 2 {
-				values[r.shape.index(label.ID(fields[i]))] = p.value(cnode(fields[i+1]), &f)
+				key := int(fields[i])
+				if s == nil {
+					key = r.shape.index(label.ID(key))
+				}
+				values[key] = p.value(cnode(fields[i+1]), &f)
 			}
 			return Record{r.shape, values}
 
 		case opAccess:
 			r := p.value(cnode(d.a), &f).(Record)
 			return r.values[r.shape.index(label.ID(d.b))]
+
+		case opField:
+			return p.value(cnode(d.a), &f).(Record).values[d.b]
 
 		case opList:
 			elems := p.range_(n)
@@ -517,6 +524,23 @@ func (p *program) match(n cnode, v Value, f []Value) bool {
 			}
 		}
 		return p.match(rest, Record{p.table.without(r.shape, s), values}, f)
+
+	case patSplit:
+		r, ok := v.(Record)
+		if !ok {
+			return false
+		}
+		rest, _, rs, from, fields := p.split(n)
+		for i := 0; i < len(fields); i += 2 {
+			if !p.match(cnode(fields[i+1]), r.values[fields[i]], f) {
+				return false
+			}
+		}
+		values := make([]Value, len(from))
+		for i, j := range from {
+			values[i] = r.values[j]
+		}
+		return p.match(rest, Record{rs, values}, f)
 
 	case patList:
 		l, ok := v.(List)

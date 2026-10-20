@@ -71,8 +71,9 @@ const (
 	opMatch   // A..B: the value matched, then a pattern and a body per arm. Its patterns bind slots of the current frame.
 	opWhere   // A..B: the body, then a slot and value per binding, in evaluation order, with recursive ones' closures made first.
 	opFill    // A: a lambda. B: the slot of the closure made for it before, whose captures it fills in.
-	opRecord  // A..B: the record it is based on or none, its shape or -1 if it has a base, then a key and value per field.
+	opRecord  // A..B: the record it is based on or none, its shape or -1, then a key and value per field.
 	opAccess  // A: the record. B: the key, a label.ID.
+	opField   // A: the record, of a closed type. B: the index of the field's value.
 	opList    // A..B: the elements.
 	opVariant // A: the tag, a label.ID. B: the payload, or none.
 
@@ -83,6 +84,7 @@ const (
 	patLiteral // A: the index of the value in consts.
 	patVariant // A: the tag, a label.ID. B: the payload, or none.
 	patRecord  // A..B: the rest or none, the shape of its fields, then a key and pattern per field.
+	patSplit   // A..B: the rest, the shape of the record, of a closed type, and of the rest, the index in the record of each of the rest's values, then a key and pattern per field.
 	patList    // A..B: the elements.
 	patCons    // head >+ tail. A: head. B: tail.
 	patSnoc    // init +< last. A: init. B: last.
@@ -229,8 +231,8 @@ func (c *core) where(n cnode) (body cnode, binds []int32) {
 //
 // A record without a base has the shape of its fields, and a key is the
 // index of its value in the record. A record with a base has the base's
-// shape, which is not known until it runs, so a key is a label.ID, and the
-// shape is nil.
+// shape. If the base's type is closed, the shape is known, and a key is an
+// index too; otherwise the shape is nil, and a key is a label.ID.
 //
 // A record pattern's shape is the shape of its fields, and a key is the
 // index of its label in that shape. Without a rest, the record it matches
@@ -241,6 +243,17 @@ func (c *core) record(n cnode) (rest cnode, s *shape, fields []int32) {
 		s = c.shapes[r[1]]
 	}
 	return cnode(r[0]), s, r[2:]
+}
+
+// split returns the rest of a patSplit, the shapes of the record it matches
+// and of the rest, the index in the record of each of the rest's values,
+// and its fields as pairs of the index of a value in the record and its
+// pattern.
+func (c *core) split(n cnode) (rest cnode, s, rs *shape, from, fields []int32) {
+	r := c.range_(n)
+	s, rs = c.shapes[r[1]], c.shapes[r[2]]
+	k := 3 + len(rs.labels)
+	return cnode(r[0]), s, rs, r[3:k], r[k:]
 }
 
 // Elems returns the rest pattern of a prefix or suffix pattern, and its
@@ -411,8 +424,32 @@ func (c *compiler) shape(fields ast.Fields) (int32, []int32) {
 	for i, l := range labels {
 		keys[i] = int32(s.index(l))
 	}
+	return c.addShape(s), keys
+}
+
+// addShape adds s to the shapes, returning its index.
+func (c *compiler) addShape(s *shape) int32 {
 	c.shapes = append(c.shapes, s)
-	return int32(len(c.shapes) - 1), keys
+	return int32(len(c.shapes) - 1)
+}
+
+// closed returns the shape of the records that x evaluates to or matches,
+// if the checker closed their type, so that they have just its labels;
+// otherwise nil.
+func (c *compiler) closed(x ast.Node) *shape {
+	if c.typed == nil {
+		return nil
+	}
+	t := c.reg.Shape(c.typed[x])
+	if t.Kind != types.ShapeRecord || t.Open {
+		return nil
+	}
+	labels := make([]label.ID, len(t.Labels))
+	for i, l := range t.Labels {
+		labels[i] = c.labels.Of(l.Name)
+	}
+	c.table.sort(labels)
+	return c.table.of(labels)
 }
 
 // open starts collecting what code in the current frame refers to into a
@@ -555,8 +592,16 @@ func (c *compiler) expr(x ast.Node) cnode {
 		fields = c.valueFields(fields)
 		if rest != ast.None {
 			xs := []int32{int32(c.expr(rest)), -1}
+			s := c.closed(rest)
+			if s != nil {
+				xs[1] = c.addShape(s)
+			}
 			for i := range fields.Len() {
-				xs = append(xs, c.label(fields.Key(i)), int32(c.expr(fields.Value(i))))
+				key := c.label(fields.Key(i))
+				if s != nil {
+					key = int32(s.index(label.ID(key)))
+				}
+				xs = append(xs, key, int32(c.expr(fields.Value(i))))
 			}
 			return c.span(opRecord, xs, x)
 		}
@@ -569,6 +614,9 @@ func (c *compiler) expr(x ast.Node) cnode {
 
 	case ast.Access:
 		rec, key := se.Access(x)
+		if s := c.closed(rec); s != nil {
+			return c.node(opField, int32(c.expr(rec)), int32(s.index(label.ID(c.label(key)))), x)
+		}
 		return c.node(opAccess, int32(c.expr(rec)), c.label(key), x)
 
 	case ast.List:
@@ -925,6 +973,25 @@ func (c *compiler) param(x ast.Node, i, arity, scope int) cnode {
 	return c.node(patArg, int32(i), 0, x)
 }
 
+// split compiles the record pattern x, with a rest, that matches records
+// of the closed shape s: its fields and the rest's values are at static
+// indices.
+func (c *compiler) split(x ast.Node, s *shape, rest ast.Node, fields ast.Fields, scope int) cnode {
+	labels := make([]label.ID, fields.Len())
+	pairs := make([]int32, 0, 2*fields.Len())
+	for i := range labels {
+		labels[i] = label.ID(c.label(fields.Key(i)))
+		pairs = append(pairs, int32(s.index(labels[i])), int32(c.pattern(fields.Value(i), scope)))
+	}
+	c.table.sort(labels)
+	rs := c.table.without(s, c.table.of(labels))
+	xs := []int32{int32(c.pattern(rest, scope)), c.addShape(s), c.addShape(rs)}
+	for _, l := range rs.labels {
+		xs = append(xs, int32(s.index(l)))
+	}
+	return c.span(patSplit, append(xs, pairs...), x)
+}
+
 // pattern compiles a pattern, binding its names in the current frame.
 // Names in c.values from scope onwards are bound by the same pattern.
 func (c *compiler) pattern(x ast.Node, scope int) cnode {
@@ -963,6 +1030,9 @@ func (c *compiler) pattern(x ast.Node, scope int) cnode {
 
 	case ast.Record:
 		rest, fields := se.Record(x)
+		if s := c.closed(x); rest != ast.None && s != nil {
+			return c.split(x, s, rest, fields, scope)
+		}
 		s, keys := c.shape(fields)
 		xs := []int32{int32(none), s}
 		for i := range fields.Len() {
