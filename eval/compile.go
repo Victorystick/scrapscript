@@ -336,6 +336,8 @@ func compile(units []unit, reg *types.Registry, globals Vars, shapes *shapeTable
 		builtins: make(map[string]int32),
 		scraps:   make([]int32, len(units)),
 		inlines:  make(map[int32]inlinable),
+		imported: make(map[int32]int32),
+		exports:  make([]map[string]int32, len(units)),
 	}
 	c.srcs = make([]source, len(units))
 	for i, u := range units {
@@ -386,6 +388,10 @@ func compile(units []unit, reg *types.Registry, globals Vars, shapes *shapeTable
 func (c *compiler) scrap() cnode {
 	x := c.src.Expr
 	c.budget = inlineBudget
+	c.export = x
+	for c.src.Kind(c.export) == ast.Where {
+		c.export, _ = c.src.Group(c.export)
+	}
 	v := c.expr(x)
 	if c.static.Has(x) {
 		c.srcs[c.cur].rootStatic = c.open(false)
@@ -485,6 +491,13 @@ type compiler struct {
 	inlines map[int32]inlinable
 	depth   int
 	budget  int
+	// The unit that each binder bound to an import refers to, and the
+	// binder of each field of each unit whose value is a record literal,
+	// which other scraps may inline calls to.
+	imported map[int32]int32
+	exports  []map[string]int32
+	// The record literal that the current unit's value is, if it is one.
+	export ast.Node
 }
 
 // The most tokens that a function may have to be inlined by size, and the
@@ -500,11 +513,19 @@ const (
 type inlinable struct {
 	val   ast.Node
 	arity int
+	src   int32
 	// The number of names in scope where it is bound, of values and of
 	// types, which its body sees.
 	values, types int
+	// The names in scope where it is bound, if that is at the top level of
+	// its scrap, where other scraps may call it from.
+	scope *scope
 	// Whether one call is the only reference to it.
 	once bool
+}
+
+type scope struct {
+	values, types []entry
 }
 
 type entry struct {
@@ -799,6 +820,9 @@ func (c *compiler) expr(x ast.Node) cnode {
 			}
 			return c.span(opRecord, xs, x)
 		}
+		if x == c.export && c.level == 0 && c.depth == 0 {
+			c.exportFields(fields)
+		}
 		s, keys := c.shape(fields)
 		xs := []int32{int32(none), s}
 		for i := range fields.Len() {
@@ -971,38 +995,40 @@ func (c *compiler) match(fn ast.Node, arg cnode, arms []ast.Node) cnode {
 // an inlined body are inlined by size alone, so that its copies stay
 // bounded.
 func (c *compiler) inline(fn ast.Node, args []ast.Node) (cnode, bool) {
-	if c.src.Kind(fn) != ast.Ident {
-		return none, false
-	}
-	name := c.name(c.src.Main(fn))
-	i := lookup(c.values, name)
-	if i < 0 {
-		return none, false
-	}
-	in, ok := c.inlines[c.values[i].b]
+	in, name, i, ok := c.callee(fn)
 	if !ok || in.arity != len(args) {
 		return none, false
 	}
-	size := int(c.src.Last(in.val)-c.src.First(in.val)) + 1
+	se := c.units[in.src].se
+	size := int(se.Last(in.val)-se.First(in.val)) + 1
 	switch {
-	case in.once && c.depth == 0:
+	case in.once && c.depth == 0 && in.src == c.cur:
 	case size <= inlineMax && size <= c.budget:
 		c.budget -= size
 	default:
 		return none, false
 	}
-	// The call prints as itself, so it still refers to fn.
-	c.use(name)
-	c.refer(fn, i, true, true)
+	// The call prints as itself, so it still refers to the name it calls
+	// by.
+	if name != ast.None {
+		c.use(c.name(c.src.Main(name)))
+		c.refer(name, i, true, true)
+	}
 	vs := make([]int32, len(args))
 	for i, a := range args {
 		vs[i] = int32(c.expr(a))
 	}
 
-	// The body sees the names in scope where fn is bound. It refers to them
-	// from this frame, but prints only as part of fn's value.
+	// The body sees the names in scope where fn is bound, in its own
+	// scrap. It refers to them from this frame, but prints only as part of
+	// fn's value.
 	values, types, roots := c.values, c.types, c.roots
-	c.values, c.types, c.roots = slices.Clip(values[:in.values]), slices.Clip(types[:in.types]), nil
+	outer := scope{values, types}
+	if in.src != c.cur {
+		outer = *in.scope
+		defer c.enter(in.src)()
+	}
+	c.values, c.types, c.roots = slices.Clip(outer.values[:in.values]), slices.Clip(outer.types[:in.types]), nil
 	c.depth++
 	var n cnode
 	if in.arity == 1 {
@@ -1020,6 +1046,53 @@ func (c *compiler) inline(fn ast.Node, args []ast.Node) (cnode, bool) {
 	c.depth--
 	c.values, c.types, c.roots = values, types, roots
 	return n, true
+}
+
+// callee returns the inlinable function that fn names, if any: a binding
+// in scope, or a field of another scrap whose value is a record literal,
+// through an import or a name bound to one. name is the Ident that fn
+// refers to it by, the i'th value in scope, or None.
+func (c *compiler) callee(fn ast.Node) (in inlinable, name ast.Node, i int, ok bool) {
+	se := c.src
+	var key string
+	if se.Kind(fn) == ast.Access {
+		rec, k := se.Access(fn)
+		fn, key = rec, c.name(k)
+	}
+	switch se.Kind(fn) {
+	case ast.Ident:
+		name, i = fn, lookup(c.values, c.name(se.Main(fn)))
+		if i < 0 {
+			return in, ast.None, 0, false
+		}
+		b := c.values[i].b
+		if key == "" {
+			in, ok = c.inlines[b]
+			return in, name, i, ok
+		}
+		u, ok := c.imported[b]
+		if !ok {
+			return in, ast.None, 0, false
+		}
+		in, ok = c.exported(u, key)
+		return in, name, i, ok
+	case ast.Import:
+		if key != "" {
+			in, ok = c.exported(c.units[c.cur].deps[fn], key)
+		}
+	}
+	return in, ast.None, 0, ok
+}
+
+// exported returns the inlinable function that the field key of the unit u
+// is, if it is a top-level binding there.
+func (c *compiler) exported(u int32, key string) (inlinable, bool) {
+	b, ok := c.exports[u][key]
+	if !ok {
+		return inlinable{}, false
+	}
+	in, ok := c.inlines[b]
+	return in, ok && in.scope != nil
 }
 
 // fn compiles a function, a Func node or a match function, in a new frame,
@@ -1132,6 +1205,9 @@ func (c *compiler) group(x ast.Node) cnode {
 			}
 		}
 		byNode[w] = c.bind(b)
+		if se.Kind(val) == ast.Import {
+			c.imported[byNode[w]] = c.units[c.cur].deps[val]
+		}
 	}
 
 	for _, w := range binds {
@@ -1202,6 +1278,7 @@ func (c *compiler) group(x ast.Node) cnode {
 // function literals that aren't recursive.
 func (c *compiler) inlinable(body ast.Node, binds []ast.Node, comps []ast.Component, byNode map[ast.Node]int32) {
 	var counts []int
+	var sc *scope
 	for _, comp := range comps {
 		w := comp.Binds[0]
 		_, _, _, val := c.src.Where(w)
@@ -1210,11 +1287,30 @@ func (c *compiler) inlinable(body ast.Node, binds []ast.Node, comps []ast.Compon
 		}
 		if counts == nil {
 			counts = c.src.References(body, binds)
+			if c.level == 0 {
+				sc = &scope{slices.Clone(c.values), slices.Clone(c.types)}
+			}
 		}
 		// The group's binders are in the order of binds.
 		b := byNode[w]
-		c.inlines[b] = inlinable{val, c.literal(val).arity, len(c.values), len(c.types), counts[b-byNode[binds[0]]] == 1}
+		c.inlines[b] = inlinable{val, c.literal(val).arity, c.cur, len(c.values), len(c.types), sc, counts[b-byNode[binds[0]]] == 1}
 	}
+}
+
+// exportFields notes the binder of each field of the record literal that
+// the current unit's value is, whose value is a name.
+func (c *compiler) exportFields(fields ast.Fields) {
+	m := make(map[string]int32)
+	for i := range fields.Len() {
+		v := fields.Value(i)
+		if c.src.Kind(v) != ast.Ident {
+			continue
+		}
+		if j := lookup(c.values, c.name(c.src.Main(v))); j >= 0 {
+			m[c.name(fields.Key(i))] = c.values[j].b
+		}
+	}
+	c.exports[c.cur] = m
 }
 
 // typeName resolves the Ident x in type position: a type variable, a sort

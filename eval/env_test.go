@@ -321,3 +321,42 @@ func TestApply(t *testing.T) {
 		}
 	}
 }
+
+// Calls to the functions that a scrap exports as fields of its record are
+// inlined, through an import or a name bound to one, and still print as
+// calls.
+func TestInliningAcrossScraps(t *testing.T) {
+	env := pathEnv(map[string]string{
+		"lib.scrap": `{ inc = inc, add = add } ; inc = x -> x + n ; add = a -> b -> inc a + b ; n = 1`,
+	})
+	scrap, err := env.Read([]byte(`[lib.inc 2, lib.add 3 4, $"./lib.scrap".inc 5, f 6] ; f = y -> lib.inc y ; lib = $"./lib.scrap"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := env.PrintScrap(scrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "[ 3, 8, 6, 7 ]"; got != want {
+		t.Errorf("expected %s, got %s", want, got)
+	}
+	p := scrap.prog
+	for n, o := range p.ops {
+		if (o == opCall || o == opCallN) && p.source(cnode(n)) == &scrap.expr {
+			t.Errorf("a call is left in the root: %s", scrap.expr.NodeText(p.at[n]))
+		}
+	}
+
+	scrap, err = env.Read([]byte(`y -> lib.add y 1 ; lib = $"./lib.scrap"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = env.PrintScrap(scrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A draft prints as its value.
+	if want := "y -> lib.add y 1\n; lib = { add = add, inc = inc }\n; add = a -> b -> inc a + b\n; inc = x -> x + n\n; n = 1"; got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
