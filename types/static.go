@@ -125,20 +125,8 @@ func (c *context) mayBeStatic(x ast.Node) bool {
 	return false
 }
 
-// static returns the static part of the expression x, noting x in
-// c.statics if it has one.
+// static returns the static part of the expression x.
 func (c *context) static(x ast.Node) static {
-	s := c.staticNode(x)
-	if !s.isNone() {
-		if c.statics == nil {
-			c.statics = make(NodeSet, (len(c.src.Kinds)+63)/64)
-		}
-		c.statics.add(x)
-	}
-	return s
-}
-
-func (c *context) staticNode(x ast.Node) static {
 	switch c.src.Kind(x) {
 	case ast.Ident:
 		return c.staticName(c.src.TokenBytes(c.src.Main(x)))
@@ -146,7 +134,7 @@ func (c *context) staticNode(x ast.Node) static {
 		g := c.group(x)
 		aliases := c.aliases
 		c.aliases = g.aliases
-		s := c.static(g.body)
+		s := c.noted(g.body)
 		c.aliases = aliases
 		return s
 	case ast.Import:
@@ -161,7 +149,7 @@ func (c *context) staticNode(x ast.Node) static {
 		}
 		var members map[string]static
 		for i := range fields.Len() {
-			if s := c.static(fields.Value(i)); !s.isNone() {
+			if s := c.noted(fields.Value(i)); !s.isNone() {
 				if members == nil {
 					members = make(map[string]static)
 				}
@@ -214,9 +202,23 @@ func (c *context) valueStatic(a *alias) static {
 	a.pending = true
 	aliases, tvars := c.aliases, c.tvars
 	c.aliases, c.tvars = a.scope, nil
-	s := c.static(a.value)
+	s := c.noted(a.value)
 	c.aliases, c.tvars = aliases, tvars
 	a.pending, a.resolved, *a.static = false, true, s
+	return s
+}
+
+// noted returns the static part of x, as static does, and notes x in
+// c.statics if it has one. Printing reads the static parts of values, so
+// these are noted, and not those of paths in types.
+func (c *context) noted(x ast.Node) static {
+	s := c.static(x)
+	if !s.isNone() {
+		if c.statics == nil {
+			c.statics = make(NodeSet, (len(c.src.Kinds)+63)/64)
+		}
+		c.statics.add(x)
+	}
 	return s
 }
 

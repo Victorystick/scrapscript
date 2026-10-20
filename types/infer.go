@@ -254,7 +254,7 @@ func (c *context) scrap(x ast.Node) Result {
 		}
 	}
 	res := Result{Type: c.infer(x)}
-	if s := c.static(x); !s.isNone() && !s.isType() {
+	if s := c.noted(x); !s.isNone() && !s.isType() {
 		res.Members = c.exports(x, s)
 	}
 	return res
