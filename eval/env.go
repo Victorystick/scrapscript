@@ -278,19 +278,19 @@ func (e *Environment) Eval(s *Scrap) (Value, error) {
 
 func (e *Environment) eval(s *Scrap, res types.Result) (value, error) {
 	if res.Sort {
-		return nil, fmt.Errorf("cannot evaluate a type")
+		return value{}, fmt.Errorf("cannot evaluate a type")
 	}
-	if s.value == nil {
+	if !s.value.valid() {
 		c, err := compile(e.units(s), &e.reg, e.vars, e.shapes)
 		if err != nil {
-			return nil, err
+			return value{}, err
 		}
 		p := &program{core: c}
-		value, err := p.eval()
+		v, err := p.eval()
 		if err != nil {
-			return nil, err
+			return value{}, err
 		}
-		s.prog, s.value = p, value
+		s.prog, s.value = p, v
 	}
 	return s.value, nil
 }

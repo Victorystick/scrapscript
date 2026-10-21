@@ -182,7 +182,7 @@ func TestPathImportFailures(t *testing.T) {
 	for _, ex := range examples {
 		env := pathEnv(pathFiles)
 		if val, err := eval(env, ex.source); err == nil {
-			t.Errorf("%s: expected an error, got %s", ex.source, val)
+			t.Errorf("%s: expected an error, got %s", ex.source, env.Print(val))
 		} else if !strings.Contains(err.Error(), ex.error) {
 			t.Errorf("%s: expected '%s' in error:\n%s", ex.source, ex.error, err)
 		}

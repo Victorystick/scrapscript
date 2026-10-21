@@ -58,7 +58,7 @@ func (p *program) eval() (v value, err error) {
 // apply calls the function fn with arg.
 func apply(fn, arg value) value {
 	body, f, v := enter(fn, arg)
-	if v != nil {
+	if v.valid() {
 		return v
 	}
 	return trampoline(body, f)
@@ -68,7 +68,7 @@ func apply(fn, arg value) value {
 // many or not.
 func call(fn value, args ...value) value {
 	body, f, v := enterN(fn, args)
-	if v != nil {
+	if v.valid() {
 		return v
 	}
 	return trampoline(body, f)
@@ -77,13 +77,13 @@ func call(fn value, args ...value) value {
 // call2 is call for two arguments, which a builtin or a script function
 // that takes exactly two gets without a slice.
 func call2(fn, a, b value) value {
-	switch g := fn.(type) {
-	case builtinFunc:
-		if g.two != nil {
+	switch fn.boxedKind() {
+	case kindBuiltin:
+		if g := fn.asBuiltin(); g.two != nil {
 			return g.two(a, b)
 		}
-	case scriptFunc:
-		if len(g.args) == 0 && !g.composition() {
+	case kindScript:
+		if g := fn.asScript(); len(g.args) == 0 && !g.composition() {
 			if l := g.prog.lam(g.node); l.arity == 2 {
 				f := g.frame(l.size)
 				f.slots[0], f.slots[1] = a, b
@@ -101,21 +101,23 @@ func call2(fn, a, b value) value {
 // applies its first function and enters its second.
 func enter(fn, arg value) (body tcode, f frame, v value) {
 	for {
-		switch g := fn.(type) {
-		case builtinFunc:
+		switch fn.boxedKind() {
+		case kindBuiltin:
+			g := fn.asBuiltin()
 			if g.arity == 1 {
 				return nil, f, g.one(arg)
 			}
-			return nil, f, partial{g, []value{arg}}
-		case partial:
+			return nil, f, partialVal(&partial{g, []value{arg}})
+		case kindPartial:
 			// Each partial application has its own arguments.
+			g := fn.asPartial()
 			args := append(g.args[:len(g.args):len(g.args)], arg)
 			if len(args) == g.fn.arity {
 				return nil, f, g.fn.invoke(args)
 			}
-			return nil, f, partial{g.fn, args}
+			return nil, f, partialVal(&partial{g.fn, args})
 		}
-		sf := fn.(scriptFunc)
+		sf := fn.asScript()
 		if sf.composition() {
 			arg = apply(sf.caps[0], arg)
 			fn = sf.caps[1]
@@ -124,16 +126,17 @@ func enter(fn, arg value) (body tcode, f frame, v value) {
 		l := sf.prog.lam(sf.node)
 		if l.arity == 1 {
 			body, f = l.enter1(sf, arg)
-			return body, f, nil
+			return body, f, value{}
 		}
 		if len(sf.args)+1 < l.arity {
-			sf.args = append(sf.args[:len(sf.args):len(sf.args)], arg)
-			return nil, f, sf
+			applied := *sf
+			applied.args = append(sf.args[:len(sf.args):len(sf.args)], arg)
+			return nil, f, scriptVal(&applied)
 		}
 		f = sf.frame(l.size)
 		copy(f.slots, sf.args)
 		f.slots[l.arity-1] = arg
-		return l.enterN(sf, f), f, nil
+		return l.enterN(sf, f), f, value{}
 	}
 }
 
@@ -141,17 +144,17 @@ func enter(fn, arg value) (body tcode, f frame, v value) {
 // takes exactly as many is called with all of them, without applying it to
 // one at a time.
 func enterN(fn value, args []value) (body tcode, f frame, v value) {
-	switch g := fn.(type) {
-	case builtinFunc:
-		if g.arity == len(args) && g.arity > 1 {
+	switch fn.boxedKind() {
+	case kindBuiltin:
+		if g := fn.asBuiltin(); g.arity == len(args) && g.arity > 1 {
 			return nil, f, g.invoke(args)
 		}
-	case scriptFunc:
-		if len(g.args) == 0 && len(args) > 1 && !g.composition() {
+	case kindScript:
+		if g := fn.asScript(); len(g.args) == 0 && len(args) > 1 && !g.composition() {
 			if l := g.prog.lam(g.node); l.arity == len(args) {
 				f = g.frame(l.size)
 				copy(f.slots, args)
-				return l.enterN(g, f), f, nil
+				return l.enterN(g, f), f, value{}
 			}
 		}
 	}
@@ -164,7 +167,7 @@ func enterN(fn value, args []value) (body tcode, f frame, v value) {
 
 // frame returns a new frame of size slots for a call of the lambda sf,
 // which takes more than one argument.
-func (sf scriptFunc) frame(size int) frame {
+func (sf *scriptFunc) frame(size int) frame {
 	return frame{slots: make([]value, size), caps: sf.caps}
 }
 

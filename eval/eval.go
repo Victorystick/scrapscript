@@ -19,36 +19,36 @@ func literal(src *ast.SourceExpr, x ast.Node) (value, error) {
 	t := src.Main(x)
 	switch kind := src.LiteralKind(x); kind {
 	case token.HOLE:
-		return holeValue{}, nil
+		return hole, nil
 	case token.INT:
 		i, err := strconv.Atoi(src.TokenText(t))
 		if err != nil {
-			return nil, err
+			return value{}, err
 		}
-		return intValue(i), nil
+		return intVal(i), nil
 	case token.FLOAT:
 		f, err := strconv.ParseFloat(src.TokenText(t), 64)
 		if err != nil {
-			return nil, err
+			return value{}, err
 		}
-		return floatValue(f), nil
+		return floatVal(f), nil
 	case token.TEXT:
-		return textValue(scanner.Unquote(src.TokenText(t))), nil
+		return textVal(scanner.Unquote(src.TokenText(t))), nil
 	case token.BYTES:
 		str := src.Source.GetString(src.TokenSpan(t).TrimStart(2))
 		dst := make([]byte, base64.StdEncoding.DecodedLen(len(str)))
 		n, err := base64.StdEncoding.Decode(dst, []byte(str))
 		if err != nil {
-			return nil, err
+			return value{}, err
 		}
-		return bytesValue(dst[:n]), nil
+		return bytesVal(dst[:n]), nil
 	case token.BYTE:
 		val, err := strconv.ParseUint(src.Source.GetString(src.TokenSpan(t).TrimStart(1)), 16, 8)
 		if err != nil {
-			return nil, err
+			return value{}, err
 		}
-		return byteValue(byte(val)), nil
+		return byteVal(byte(val)), nil
 	default:
-		return nil, src.Error(x, fmt.Sprintf("unhandled literal kind %s", kind))
+		return value{}, src.Error(x, fmt.Sprintf("unhandled literal kind %s", kind))
 	}
 }

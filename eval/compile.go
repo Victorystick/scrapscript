@@ -587,8 +587,8 @@ func (c *compiler) constant(v value) int32 {
 func (c *compiler) builtin(x ast.Node, name string) int32 {
 	i, ok := c.builtins[name]
 	if !ok {
-		v := c.globals[name]
-		if v == nil {
+		v, ok := c.globals[name]
+		if !ok {
 			c.error(x, fmt.Sprintf("unknown variable %s", name))
 		}
 		i = c.constant(v)
@@ -1434,7 +1434,7 @@ func (c *compiler) pattern(x ast.Node, scope int) cnode {
 		if err != nil {
 			c.error(x, err.Error())
 		}
-		if _, ok := v.(floatValue); ok {
+		if v.kind() == kindFloat {
 			c.error(x, ErrNoFloatMatch.Error())
 		}
 		return c.node(patLiteral, c.constant(v), 0, x)

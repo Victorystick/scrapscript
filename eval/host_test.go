@@ -187,3 +187,12 @@ func must(v eval.Value, err error) eval.Value {
 	}
 	return v
 }
+
+func TestReadAsOtherKind(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil || r != "eval: reading text as int" {
+			t.Errorf("expected reading text as int to panic, got %v", r)
+		}
+	}()
+	eval.Text("x").Int()
+}

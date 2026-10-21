@@ -56,13 +56,13 @@ func (s *Shape) New(values ...Value) Value {
 		panic(fmt.Sprintf("eval.Shape.New: %d values for %d labels", len(values), len(s.shape.labels)))
 	}
 	if s.order == nil {
-		return Value{Record{&record{s.shape, fromHost(values)}}}
+		return Value{recordVal(&record{s.shape, fromHost(values)})}
 	}
 	r := newRecord(s.shape)
 	for i, v := range values {
 		r.values[s.order[i]] = v.v
 	}
-	return Value{r}
+	return Value{recordVal(r)}
 }
 
 // A Value is a value of a scrap, as a host sees it. The host knows its type
@@ -74,113 +74,136 @@ type Value struct {
 
 // IsValid returns true if v is a value, rather than the zero Value.
 func (v Value) IsValid() bool {
-	return v.v != nil
+	return v.v.valid()
+}
+
+// as panics unless v is of the kind k.
+func (v Value) as(k kind) value {
+	if got := v.v.kind(); got != k {
+		panic(fmt.Sprintf("eval: reading %s as %s", got, k))
+	}
+	return v.v
 }
 
 // Hole returns ().
 func Hole() Value {
-	return Value{holeValue{}}
+	return Value{hole}
 }
 
 // Int returns the int i.
 func Int(i int64) Value {
-	return Value{intValue(i)}
+	return Value{intVal(int(i))}
 }
 
 // Int returns the int that v is.
 func (v Value) Int() int64 {
-	return int64(v.v.(intValue))
+	return int64(v.as(kindInt).asInt())
 }
 
 // Float returns the float f.
 func Float(f float64) Value {
-	return Value{floatValue(f)}
+	return Value{floatVal(f)}
 }
 
 // Float returns the float that v is.
 func (v Value) Float() float64 {
-	return float64(v.v.(floatValue))
+	return v.as(kindFloat).asFloat()
 }
 
 // Text returns the text t.
 func Text(t string) Value {
-	return Value{textValue(t)}
+	return Value{textVal(t)}
 }
 
 // Text returns the text that v is.
 func (v Value) Text() string {
-	return string(v.v.(textValue))
+	return v.as(kindText).asText()
 }
 
 // Byte returns the byte b.
 func Byte(b byte) Value {
-	return Value{byteValue(b)}
+	return Value{byteVal(b)}
 }
 
 // Byte returns the byte that v is.
 func (v Value) Byte() byte {
-	return byte(v.v.(byteValue))
+	return v.as(kindByte).asByte()
 }
 
 // Bytes returns the bytes b, which it takes ownership of.
 func Bytes(b []byte) Value {
-	return Value{bytesValue(b)}
+	return Value{bytesVal(b)}
 }
 
 // Bytes returns the bytes that v is, which the caller must not modify.
 func (v Value) Bytes() []byte {
-	return v.v.(bytesValue)
+	return v.as(kindBytes).asBytes()
+}
+
+// A Record is a record, as a host reads it.
+type Record struct {
+	r *record
 }
 
 // Record returns the record that v is.
 func (v Value) Record() Record {
-	return v.v.(Record)
+	return Record{v.as(kindRecord).asRecord()}
 }
 
 // Get returns the value of a record's field, or the zero Value if it has
 // none.
 func (r Record) Get(l label.ID) Value {
-	if i := r.shape.index(l); i >= 0 {
-		return Value{r.values[i]}
+	if i := r.r.shape.index(l); i >= 0 {
+		return Value{r.r.values[i]}
 	}
 	return Value{}
 }
 
 // NewList returns a list of the elements, which it takes ownership of.
 func NewList(elems ...Value) Value {
-	return Value{List{fromHost(elems)}}
+	return Value{listVal(fromHost(elems))}
+}
+
+// A List is a list, as a host reads it.
+type List struct {
+	elems []value
 }
 
 // List returns the list that v is.
 func (v Value) List() List {
-	return v.v.(List)
+	return List{v.as(kindList).asList()}
 }
 
 // Elements returns the elements of a list, which the caller must not
 // modify.
 func (l List) Elements() []Value {
-	return toHost(l.elements)
+	return toHost(l.elems)
 }
 
 // NewVariant returns the tag with a payload, or without one if payload is
 // the zero Value.
 func NewVariant(tag label.ID, payload Value) Value {
-	return Value{Variant{tag, payload.v}}
+	return Value{variantVal(tag, payload.v)}
+}
+
+// A Variant is a tag with a payload or without one, as a host reads it.
+type Variant struct {
+	v value
 }
 
 // Variant returns the variant that v is.
 func (v Value) Variant() Variant {
-	return v.v.(Variant)
+	return Variant{v.as(kindVariant)}
 }
 
 // Tag returns a variant's tag.
 func (v Variant) Tag() label.ID {
-	return v.tag
+	return v.v.tag()
 }
 
 // Payload returns a variant's payload, or the zero Value if it has none.
 func (v Variant) Payload() Value {
-	return Value{v.value}
+	return Value{v.v.payload()}
 }
 
 // NewFunc returns a function implemented by the host, which takes arity
@@ -199,11 +222,11 @@ func NewFunc(name string, arity int, fn func(args []Value) (Value, error)) Value
 		return v.v
 	}
 	if arity == 1 {
-		return Value{builtinFunc{name: name, arity: 1, one: func(arg value) value {
+		return Value{builtinVal(&builtinFunc{name: name, arity: 1, one: func(arg value) value {
 			return call([]value{arg})
-		}}}
+		}})}
 	}
-	return Value{builtinFunc{name: name, arity: arity, many: call}}
+	return Value{builtinVal(&builtinFunc{name: name, arity: arity, many: call})}
 }
 
 // Call applies the function fn to args, all at once if it takes as many,
