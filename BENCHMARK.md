@@ -46,6 +46,7 @@ the same machine; each milestone below names it.
 | `Eval/text` | Text concatenation. |
 | `Eval/echo` | A terminal-platform program, run on 1000 lines by its reference semantics. |
 | `AccessLog` | A realistic program, in `cmd/example/scrap-terminal`: per-path stats of 10k access-log lines in an AVL tree, loaded through the generated bindings and run by the example's `Run` loop. |
+| `AccessLogLib` | The same program as `AccessLog`, but the version in `lib/`, which imports the parser and avl libraries and parses each line with parser combinators, one character at a time: a closure-heavy program, with many partial applications. |
 
 `Eval` evaluates the root scrap and the drafts it refers to each time; until
 `1570ae6` it evaluated only the root, with the drafts' values cached.

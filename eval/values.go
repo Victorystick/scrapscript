@@ -86,6 +86,48 @@ type scriptFunc struct {
 	args []value
 }
 
+// A partial application allocated together with its arguments.
+type appliedWith[A any] struct {
+	scriptFunc
+	buf A
+}
+
+// applied returns sf applied to n more arguments, after its own, which the
+// caller sets. A function applied to up to eight is one allocation.
+func (sf *scriptFunc) applied(n int) *scriptFunc {
+	var a *scriptFunc
+	switch len(sf.args) + n {
+	case 1:
+		a = withArgs(sf, func(b *[1]value) []value { return b[:] })
+	case 2:
+		a = withArgs(sf, func(b *[2]value) []value { return b[:] })
+	case 3:
+		a = withArgs(sf, func(b *[3]value) []value { return b[:] })
+	case 4:
+		a = withArgs(sf, func(b *[4]value) []value { return b[:] })
+	case 5:
+		a = withArgs(sf, func(b *[5]value) []value { return b[:] })
+	case 6:
+		a = withArgs(sf, func(b *[6]value) []value { return b[:] })
+	case 7:
+		a = withArgs(sf, func(b *[7]value) []value { return b[:] })
+	case 8:
+		a = withArgs(sf, func(b *[8]value) []value { return b[:] })
+	default:
+		c := *sf
+		c.args = make([]value, len(sf.args)+n)
+		a = &c
+	}
+	copy(a.args, sf.args)
+	return a
+}
+
+func withArgs[A any](sf *scriptFunc, args func(*A) []value) *scriptFunc {
+	a := &appliedWith[A]{scriptFunc: *sf}
+	a.args = args(&a.buf)
+	return &a.scriptFunc
+}
+
 // composition returns true if sf is a composition rather than a lambda.
 func (sf *scriptFunc) composition() bool {
 	return sf.prog.ops[sf.node] == opCompose

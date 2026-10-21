@@ -229,8 +229,17 @@ func (p *program) expr(n cnode) code {
 					return g.three(x, y, acs[2].get(f))
 				}
 			}
-			if sf, ok := fn.script(); ok && len(sf.args) == 0 && !sf.composition() {
-				if l := sf.prog.lam(sf.node); l.arity == k {
+			if sf, ok := fn.script(); ok && !sf.composition() {
+				l := sf.prog.lam(sf.node)
+				have := len(sf.args)
+				if have+k < l.arity {
+					a := sf.applied(k)
+					for i, c := range acs {
+						a.args[have+i] = c.get(f)
+					}
+					return scriptVal(a)
+				}
+				if have == 0 && l.arity == k {
 					g := sf.frame(l.size)
 					for i, c := range acs {
 						g.slots[i] = c.get(f)
@@ -560,8 +569,17 @@ func (p *program) tail(n cnode) tcode {
 					return done(g.three(x, y, acs[2].get(f)))
 				}
 			}
-			if sf, ok := fn.script(); ok && len(sf.args) == 0 && !sf.composition() {
-				if l := sf.prog.lam(sf.node); l.arity == k {
+			if sf, ok := fn.script(); ok && !sf.composition() {
+				l := sf.prog.lam(sf.node)
+				have := len(sf.args)
+				if have+k < l.arity {
+					a := sf.applied(k)
+					for i, c := range acs {
+						a.args[have+i] = c.get(f)
+					}
+					return done(scriptVal(a))
+				}
+				if have == 0 && l.arity == k {
 					g := sf.frame(l.size)
 					for i, c := range acs {
 						g.slots[i] = c.get(f)

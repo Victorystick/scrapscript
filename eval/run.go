@@ -129,9 +129,9 @@ func enter(fn, arg value) (body tcode, f frame, v value) {
 			return body, f, value{}
 		}
 		if len(sf.args)+1 < l.arity {
-			applied := *sf
-			applied.args = append(sf.args[:len(sf.args):len(sf.args)], arg)
-			return nil, f, scriptVal(&applied)
+			a := sf.applied(1)
+			a.args[len(sf.args)] = arg
+			return nil, f, scriptVal(a)
 		}
 		f = sf.frame(l.size)
 		copy(f.slots, sf.args)
@@ -156,9 +156,9 @@ func enterN(fn value, args []value) (body tcode, f frame, v value) {
 			case have < l.arity:
 				// Applied to all of args at once, rather than to one at a
 				// time.
-				applied := *g
-				applied.args = append(g.args[:len(g.args):len(g.args)], args...)
-				return nil, f, scriptVal(&applied)
+				a := g.applied(len(args))
+				copy(a.args[len(g.args):], args)
+				return nil, f, scriptVal(a)
 			case have == l.arity:
 				f = g.frame(l.size)
 				copy(f.slots[copy(f.slots, g.args):], args)

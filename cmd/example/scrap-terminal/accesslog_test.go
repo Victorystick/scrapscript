@@ -151,7 +151,16 @@ func testAccessLog(t *testing.T, p Program) {
 // BenchmarkAccessLog runs a realistic program on the host: parsing, a tree
 // of records, sorting and formatting, over 10000 lines and 200 paths.
 func BenchmarkAccessLog(b *testing.B) {
-	p := loadAccessLog(b)
+	benchmarkAccessLog(b, loadAccessLog(b))
+}
+
+// BenchmarkAccessLogLib runs the version in lib/, which parses each line
+// with parser combinators, one character at a time.
+func BenchmarkAccessLogLib(b *testing.B) {
+	benchmarkAccessLog(b, loadLibraryAccessLog(b))
+}
+
+func benchmarkAccessLog(b *testing.B, p Program) {
 	log := accessLog(10000, 200)
 	b.SetBytes(int64(len(log)))
 	b.ReportAllocs()
