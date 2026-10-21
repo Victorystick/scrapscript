@@ -56,13 +56,13 @@ func (s *Shape) New(values ...Value) Record {
 		panic(fmt.Sprintf("eval.Shape.New: %d values for %d labels", len(values), len(s.shape.labels)))
 	}
 	if s.order == nil {
-		return Record{s.shape, values}
+		return Record{&record{s.shape, values}}
 	}
-	ordered := make([]Value, len(values))
+	r := newRecord(s.shape)
 	for i, v := range values {
-		ordered[s.order[i]] = v
+		r.values[s.order[i]] = v
 	}
-	return Record{s.shape, ordered}
+	return r
 }
 
 // Get returns the value of a record's field, or nil if it has none.

@@ -429,30 +429,32 @@ func (p *program) expr(n cnode) code {
 		}
 		if base == none {
 			return func(f frame) Value {
-				values := make([]Value, len(vals))
+				r := newRecord(s)
 				for i, c := range vals {
-					values[keys[i]] = c(f)
+					r.values[keys[i]] = c(f)
 				}
-				return Record{s, values}
+				return r
 			}
 		}
 		bc := p.expr(base)
 		if s != nil {
 			return func(f frame) Value {
-				values := slices.Clone(bc(f).(Record).values)
+				r := newRecord(s)
+				copy(r.values, bc(f).(Record).values)
 				for i, c := range vals {
-					values[keys[i]] = c(f)
+					r.values[keys[i]] = c(f)
 				}
-				return Record{s, values}
+				return r
 			}
 		}
 		return func(f frame) Value {
-			r := bc(f).(Record)
-			values := slices.Clone(r.values)
+			b := bc(f).(Record)
+			r := newRecord(b.shape)
+			copy(r.values, b.values)
 			for i, c := range vals {
-				values[r.shape.index(label.ID(keys[i]))] = c(f)
+				r.values[b.shape.index(label.ID(keys[i]))] = c(f)
 			}
-			return Record{r.shape, values}
+			return r
 		}
 
 	case opAccess:
@@ -764,13 +766,15 @@ func (p *program) pattern(n cnode) mcode {
 					return false
 				}
 			}
-			values := make([]Value, 0, len(r.values)-len(s.labels))
+			rest := newRecord(p.table.without(r.shape, s))
+			j := 0
 			for i, l := range r.shape.labels {
 				if s.index(l) < 0 {
-					values = append(values, r.values[i])
+					rest.values[j] = r.values[i]
+					j++
 				}
 			}
-			return rm(Record{p.table.without(r.shape, s), values}, f)
+			return rm(rest, f)
 		}
 
 	case patSplit:
@@ -792,11 +796,11 @@ func (p *program) pattern(n cnode) mcode {
 					return false
 				}
 			}
-			values := make([]Value, len(from))
+			rest := newRecord(rs)
 			for i, j := range from {
-				values[i] = r.values[j]
+				rest.values[i] = r.values[j]
 			}
-			return rm(Record{rs, values}, f)
+			return rm(rest, f)
 		}
 
 	case patList:

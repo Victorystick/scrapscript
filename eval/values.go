@@ -23,10 +23,51 @@ type Text string
 type Byte byte
 type Bytes []byte
 
-// A record holds its values in the order of its shape's labels.
+// A record holds its values in the order of its shape's labels. Record
+// is a pointer, so that a Value holds one without boxing it.
 type Record struct {
+	*record
+}
+
+type record struct {
 	shape  *shape
 	values []Value
+}
+
+// A record allocated together with its values.
+type recordWith[A any] struct {
+	record
+	buf A
+}
+
+// newRecord returns a record of the shape s, whose values the caller sets.
+// A record of up to eight values is one allocation.
+func newRecord(s *shape) Record {
+	switch len(s.labels) {
+	case 1:
+		return inlineRecord(s, func(a *[1]Value) []Value { return a[:] })
+	case 2:
+		return inlineRecord(s, func(a *[2]Value) []Value { return a[:] })
+	case 3:
+		return inlineRecord(s, func(a *[3]Value) []Value { return a[:] })
+	case 4:
+		return inlineRecord(s, func(a *[4]Value) []Value { return a[:] })
+	case 5:
+		return inlineRecord(s, func(a *[5]Value) []Value { return a[:] })
+	case 6:
+		return inlineRecord(s, func(a *[6]Value) []Value { return a[:] })
+	case 7:
+		return inlineRecord(s, func(a *[7]Value) []Value { return a[:] })
+	case 8:
+		return inlineRecord(s, func(a *[8]Value) []Value { return a[:] })
+	}
+	return Record{&record{s, make([]Value, len(s.labels))}}
+}
+
+func inlineRecord[A any](s *shape, values func(*A) []Value) Record {
+	r := &recordWith[A]{}
+	r.shape, r.values = s, values(&r.buf)
+	return Record{&r.record}
 }
 
 type List struct {
