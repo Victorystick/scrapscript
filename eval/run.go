@@ -150,10 +150,18 @@ func enterN(fn value, args []value) (body tcode, f frame, v value) {
 			return nil, f, g.invoke(args)
 		}
 	case kindScript:
-		if g := fn.asScript(); len(g.args) == 0 && len(args) > 1 && !g.composition() {
-			if l := g.prog.lam(g.node); l.arity == len(args) {
+		if g := fn.asScript(); len(args) > 1 && !g.composition() {
+			l := g.prog.lam(g.node)
+			switch have := len(g.args) + len(args); {
+			case have < l.arity:
+				// Applied to all of args at once, rather than to one at a
+				// time.
+				applied := *g
+				applied.args = append(g.args[:len(g.args):len(g.args)], args...)
+				return nil, f, scriptVal(&applied)
+			case have == l.arity:
 				f = g.frame(l.size)
-				copy(f.slots, args)
+				copy(f.slots[copy(f.slots, g.args):], args)
 				return l.enterN(g, f), f, value{}
 			}
 		}
