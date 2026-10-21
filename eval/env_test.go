@@ -163,7 +163,7 @@ func TestErrorsInScrapsReferredTo(t *testing.T) {
 	}
 	// Hosts call functions unchecked, so this can fail at runtime, in the
 	// scrap that the function is from.
-	_, err = Call(fn, NewVariant(env.Label("b"), nil))
+	_, err = Call(fn, NewVariant(env.Label("b"), Value{}))
 	if err == nil || !strings.Contains(err.Error(), "| #a -> 1") {
 		t.Errorf("expected an error in pick.scrap, got %v", err)
 	}

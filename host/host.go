@@ -130,7 +130,7 @@ func readScript(env *eval.Environment, arg string) (*eval.Scrap, error) {
 
 // ListFrom converts a list value with the conversion of its elements.
 func ListFrom[T any](v eval.Value, from func(eval.Value) T) []T {
-	elems := v.(eval.List).Elements()
+	elems := v.List().Elements()
 	xs := make([]T, len(elems))
 	for i, e := range elems {
 		xs[i] = from(e)

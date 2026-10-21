@@ -340,16 +340,16 @@ func (g *generator) from(t *gotype, v string) string {
 		case "()":
 			return "struct{}{}"
 		case "int":
-			return fmt.Sprintf("int64(%s.(eval.Int))", v)
+			return fmt.Sprintf("%s.Int()", v)
 		case "float":
-			return fmt.Sprintf("float64(%s.(eval.Float))", v)
+			return fmt.Sprintf("%s.Float()", v)
 		case "text":
-			return fmt.Sprintf("string(%s.(eval.Text))", v)
+			return fmt.Sprintf("%s.Text()", v)
 		case "byte":
-			return fmt.Sprintf("byte(%s.(eval.Byte))", v)
+			return fmt.Sprintf("%s.Byte()", v)
 		case "bytes":
 			g.usesBytes = true
-			return fmt.Sprintf("bytes.Clone([]byte(%s.(eval.Bytes)))", v)
+			return fmt.Sprintf("bytes.Clone(%s.Bytes())", v)
 		}
 	case t.param:
 		return fmt.Sprintf("%s{%s}", t.expr, v)
@@ -382,7 +382,7 @@ func (g *generator) to(t *gotype, x string) string {
 	case t.prim != "":
 		switch t.prim {
 		case "()":
-			return "eval.Hole{}"
+			return "eval.Hole()"
 		case "int":
 			return fmt.Sprintf("eval.Int(%s)", x)
 		case "float":
@@ -410,7 +410,7 @@ func (g *generator) to(t *gotype, x string) string {
 	return fmt.Sprintf(`eval.NewFunc(%q, %d, func(args []eval.Value) (eval.Value, error) {
 	r, err := %s(%s)
 	if err != nil {
-		return nil, err
+		return eval.Value{}, err
 	}
 	return %s, nil
 })`, lower(t.hint), len(t.args), x, strings.Join(args, ", "), g.to(t.result, "r"))
@@ -523,7 +523,7 @@ func (g *generator) record(w func(string, ...any), d *decl) {
 	if len(d.fields) == 0 {
 		w("\treturn %s{}\n}\n", d.name)
 	} else {
-		w("\tr := v.(eval.Record)\n\treturn %s{\n", d.name)
+		w("\tr := v.Record()\n\treturn %s{\n", d.name)
 		for _, f := range d.fields {
 			w("\t\t%s: %s,\n", f.name, g.from(f.typ, fmt.Sprintf("r.Get(%s)", g.label(f.label))))
 		}
@@ -584,7 +584,7 @@ func (g *generator) enum(w func(string, ...any), d *decl) {
 		w("func (x %s) %s() %s {\n\tx.must(%s)\n\treturn %sx.%s\n}\n", d.name, f.name, f.typ.expr, const_, deref(f.typ), storage(f))
 	}
 
-	w("\nfunc %sFromValue(l *labels, v eval.Value) %s {\n\tt := v.(eval.Variant)\n\tswitch t.Tag() {\n", lower(d.name), d.name)
+	w("\nfunc %sFromValue(l *labels, v eval.Value) %s {\n\tt := v.Variant()\n\tswitch t.Tag() {\n", lower(d.name), d.name)
 	for _, f := range d.fields {
 		if f.typ == nil {
 			w("\tcase %s:\n\t\treturn New%s%s()\n", g.label(f.label), d.name, f.name)
@@ -599,7 +599,7 @@ func (g *generator) enum(w func(string, ...any), d *decl) {
 		if f.typ != nil {
 			w("\tcase %s%s:\n\t\treturn eval.NewVariant(%s, %s)\n", d.name, f.name, g.label(f.label), g.to(f.typ, payload(f)))
 		} else {
-			w("\tcase %s%s:\n\t\treturn eval.NewVariant(%s, nil)\n", d.name, f.name, g.label(f.label))
+			w("\tcase %s%s:\n\t\treturn eval.NewVariant(%s, eval.Value{})\n", d.name, f.name, g.label(f.label))
 		}
 	}
 	w("\t}\n\tpanic(\"%s: invalid tag\")\n}\n", d.name)

@@ -55,7 +55,7 @@ var evalSources = []struct{ name, source string }{
 ; build : int -> tree = | 0 -> #leaf | n -> #node { left = build (n - 1), right = build (n - 1) }
 ; size : tree -> int = | #leaf -> 0 | #node t -> 1 + size t.left + size t.right
 ; tree : type = [#leaf, #node { left : tree, right : tree }]`},
-	// Text concatenation.
+	// textValue concatenation.
 	{"text", `text/length (list/fold "" cat (list/repeat 1000 "ab"))
 ; cat : text -> text -> text = a -> b -> a ++ b`},
 	// A program on the terminal platform, run by its reference semantics.

@@ -72,20 +72,20 @@ func TestRunProgram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prog := v.(eval.Record)
-	turn := prog.Get(e.Label("init")).(eval.Record)
+	prog := v.Record()
+	turn := prog.Get(e.Label("init")).Record()
 	var out strings.Builder
 	input := []string{"a", "b"}
 	for {
-		out.WriteString(string(turn.Get(e.Label("out")).(eval.Text)))
-		next := turn.Get(e.Label("next")).(eval.Variant)
+		out.WriteString(turn.Get(e.Label("out")).Text())
+		next := turn.Get(e.Label("next")).Variant()
 		if next.Tag() == e.Label("exit") {
-			if status := next.Payload().(eval.Int); status != 2 {
+			if status := next.Payload().Int(); status != 2 {
 				t.Errorf("expected status 2, got %d", status)
 			}
 			break
 		}
-		event := eval.NewVariant(e.Label("eof"), nil)
+		event := eval.NewVariant(e.Label("eof"), eval.Value{})
 		if len(input) > 0 {
 			event, input = eval.NewVariant(e.Label("line"), eval.Text(input[0])), input[1:]
 		}
@@ -93,7 +93,7 @@ func TestRunProgram(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		turn = res.(eval.Record)
+		turn = res.Record()
 	}
 	if out.String() != "a\nb\n" {
 		t.Errorf("expected %q, got %q", "a\nb\n", out.String())
@@ -103,7 +103,7 @@ func TestRunProgram(t *testing.T) {
 func TestHostFunc(t *testing.T) {
 	e := environment()
 	add := eval.NewFunc("add", 2, func(args []eval.Value) (eval.Value, error) {
-		return args[0].(eval.Int) + args[1].(eval.Int), nil
+		return eval.Int(args[0].Int() + args[1].Int()), nil
 	})
 	// Partial applications of one function keep their own arguments.
 	fv, err := e.Eval(read(t, e, `f -> ([f 1 2, g 3, g 4] ; g = f 10)`))
@@ -122,7 +122,7 @@ func TestHostFunc(t *testing.T) {
 	}
 
 	fail := eval.NewFunc("fail", 1, func([]eval.Value) (eval.Value, error) {
-		return nil, errors.New("no")
+		return eval.Value{}, errors.New("no")
 	})
 	if _, err := eval.Call(fv, fail); err == nil || err.Error() != "fail: no" {
 		t.Errorf("expected the host function's error, got %v", err)
@@ -135,7 +135,7 @@ func TestShape(t *testing.T) {
 	if got := e.Print(r); got != `{ a = "x", b = 1 }` {
 		t.Errorf("expected { a = \"x\", b = 1 }, got %s", got)
 	}
-	if r.Get(e.Label("b")) != eval.Int(1) || r.Get(e.Label("c")) != nil {
+	if r.Record().Get(e.Label("b")).Int() != 1 || r.Record().Get(e.Label("c")).IsValid() {
 		t.Errorf("expected b = 1 and no c")
 	}
 	// A scrap reads the record's fields as those of its own records, which
@@ -145,8 +145,8 @@ func TestShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, err := eval.Call(fn, r)
-	if err != nil || v != eval.Text("xy") {
-		t.Errorf("expected \"xy\", got %v, %v", v, err)
+	if err != nil || v.Text() != "xy" {
+		t.Errorf("expected \"xy\", got %s, %v", e.Print(v), err)
 	}
 	// Labels given in the record's order need no reordering.
 	if got := e.Print(e.Shape(e.Label("a"), e.Label("b")).New(eval.Text("x"), eval.Int(1))); got != `{ a = "x", b = 1 }` {
@@ -169,14 +169,14 @@ func TestCallFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eval.Call(fn, eval.NewVariant(e.Label("b"), nil)); err == nil || !strings.Contains(err.Error(), "no arm matches #b") {
+	if _, err := eval.Call(fn, eval.NewVariant(e.Label("b"), eval.Value{})); err == nil || !strings.Contains(err.Error(), "no arm matches #b") {
 		t.Errorf("expected no arm to match, got %v", err)
 	}
 	fn, err = e.Eval(read(t, e, `| #a -> #c -> 2`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eval.Call(fn, eval.NewVariant(e.Label("a"), nil), eval.NewVariant(e.Label("d"), nil)); err == nil || !strings.Contains(err.Error(), "no arm matches #a, #d") {
+	if _, err := eval.Call(fn, eval.NewVariant(e.Label("a"), eval.Value{}), eval.NewVariant(e.Label("d"), eval.Value{})); err == nil || !strings.Contains(err.Error(), "no arm matches #a, #d") {
 		t.Errorf("expected no arm to match, got %v", err)
 	}
 }

@@ -51,43 +51,126 @@ func (e *Environment) Shape(labels ...label.ID) *Shape {
 // New returns a record of the shape with the values, one per label, in
 // the order that Shape was given the labels in. It takes ownership of
 // values.
-func (s *Shape) New(values ...Value) Record {
+func (s *Shape) New(values ...Value) Value {
 	if len(values) != len(s.shape.labels) {
 		panic(fmt.Sprintf("eval.Shape.New: %d values for %d labels", len(values), len(s.shape.labels)))
 	}
 	if s.order == nil {
-		return Record{&record{s.shape, values}}
+		return Value{Record{&record{s.shape, fromHost(values)}}}
 	}
 	r := newRecord(s.shape)
 	for i, v := range values {
-		r.values[s.order[i]] = v
+		r.values[s.order[i]] = v.v
 	}
-	return r
+	return Value{r}
 }
 
-// Get returns the value of a record's field, or nil if it has none.
+// A Value is a value of a scrap, as a host sees it. The host knows its type
+// from the interface it checked the scrap against, and reads it as that
+// type; reading it as another panics. The zero Value is no value.
+type Value struct {
+	v value
+}
+
+// IsValid returns true if v is a value, rather than the zero Value.
+func (v Value) IsValid() bool {
+	return v.v != nil
+}
+
+// Hole returns ().
+func Hole() Value {
+	return Value{holeValue{}}
+}
+
+// Int returns the int i.
+func Int(i int64) Value {
+	return Value{intValue(i)}
+}
+
+// Int returns the int that v is.
+func (v Value) Int() int64 {
+	return int64(v.v.(intValue))
+}
+
+// Float returns the float f.
+func Float(f float64) Value {
+	return Value{floatValue(f)}
+}
+
+// Float returns the float that v is.
+func (v Value) Float() float64 {
+	return float64(v.v.(floatValue))
+}
+
+// Text returns the text t.
+func Text(t string) Value {
+	return Value{textValue(t)}
+}
+
+// Text returns the text that v is.
+func (v Value) Text() string {
+	return string(v.v.(textValue))
+}
+
+// Byte returns the byte b.
+func Byte(b byte) Value {
+	return Value{byteValue(b)}
+}
+
+// Byte returns the byte that v is.
+func (v Value) Byte() byte {
+	return byte(v.v.(byteValue))
+}
+
+// Bytes returns the bytes b, which it takes ownership of.
+func Bytes(b []byte) Value {
+	return Value{bytesValue(b)}
+}
+
+// Bytes returns the bytes that v is, which the caller must not modify.
+func (v Value) Bytes() []byte {
+	return v.v.(bytesValue)
+}
+
+// Record returns the record that v is.
+func (v Value) Record() Record {
+	return v.v.(Record)
+}
+
+// Get returns the value of a record's field, or the zero Value if it has
+// none.
 func (r Record) Get(l label.ID) Value {
 	if i := r.shape.index(l); i >= 0 {
-		return r.values[i]
+		return Value{r.values[i]}
 	}
-	return nil
+	return Value{}
 }
 
 // NewList returns a list of the elements, which it takes ownership of.
-func NewList(elems ...Value) List {
-	return List{elems}
+func NewList(elems ...Value) Value {
+	return Value{List{fromHost(elems)}}
+}
+
+// List returns the list that v is.
+func (v Value) List() List {
+	return v.v.(List)
 }
 
 // Elements returns the elements of a list, which the caller must not
 // modify.
 func (l List) Elements() []Value {
-	return l.elements
+	return toHost(l.elements)
 }
 
 // NewVariant returns the tag with a payload, or without one if payload is
-// nil.
-func NewVariant(tag label.ID, payload Value) Variant {
-	return Variant{tag, payload}
+// the zero Value.
+func NewVariant(tag label.ID, payload Value) Value {
+	return Value{Variant{tag, payload.v}}
+}
+
+// Variant returns the variant that v is.
+func (v Value) Variant() Variant {
+	return v.v.(Variant)
 }
 
 // Tag returns a variant's tag.
@@ -95,9 +178,9 @@ func (v Variant) Tag() label.ID {
 	return v.tag
 }
 
-// Payload returns a variant's payload, or nil if it has none.
+// Payload returns a variant's payload, or the zero Value if it has none.
 func (v Variant) Payload() Value {
-	return v.value
+	return Value{v.value}
 }
 
 // NewFunc returns a function implemented by the host, which takes arity
@@ -108,19 +191,19 @@ func NewFunc(name string, arity int, fn func(args []Value) (Value, error)) Value
 	if arity < 1 {
 		panic(fmt.Sprintf("eval.NewFunc: %s has arity %d", name, arity))
 	}
-	call := func(args []Value) Value {
-		v, err := fn(args)
+	call := func(args []value) value {
+		v, err := fn(toHost(args))
 		if err != nil {
 			panic(runtimeError{fmt.Errorf("%s: %w", name, err)})
 		}
-		return v
+		return v.v
 	}
 	if arity == 1 {
-		return BuiltInFunc{name: name, arity: 1, one: func(arg Value) Value {
-			return call([]Value{arg})
-		}}
+		return Value{builtinFunc{name: name, arity: 1, one: func(arg value) value {
+			return call([]value{arg})
+		}}}
 	}
-	return BuiltInFunc{name: name, arity: arity, many: call}
+	return Value{builtinFunc{name: name, arity: arity, many: call}}
 }
 
 // Call applies the function fn to args, all at once if it takes as many,
@@ -131,7 +214,7 @@ func Call(fn Value, args ...Value) (v Value, err error) {
 	if len(args) == 0 {
 		return fn, nil
 	}
-	return call(fn, args...), nil
+	return Value{call(fn.v, fromHost(args)...)}, nil
 }
 
 // Check checks that the value of the scrap s has the type that the type

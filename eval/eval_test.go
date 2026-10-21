@@ -94,7 +94,7 @@ var expressions = []struct {
 	{`#just 2 |> | #just 2 -> "two" | #just _ -> "other" | #no -> "x"`, `"two"`},
 	// {`| "hey" -> ""
 	// 	| "hello " ++ name -> name
-	// 	| _ -> "<empty>" <| "hello Oseg"`, Text("Oseg")},
+	// 	| _ -> "<empty>" <| "hello Oseg"`, textValue("Oseg")},
 	{`#empty`, `#empty`},
 	{`#a |> | #a () -> 1`, `1`},
 	{`#fun (x -> x * 2)`, `#fun (x -> x * 2)`},
@@ -366,7 +366,7 @@ func TestFailures(t *testing.T) {
 func eval(e *Environment, source string) (Value, error) {
 	scrap, err := e.Read([]byte(source))
 	if err != nil {
-		return nil, err
+		return Value{}, err
 	}
 	return e.Eval(scrap)
 }

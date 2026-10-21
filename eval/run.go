@@ -14,7 +14,7 @@ type program struct {
 // A frame holds the slots of one call of a function, or of the top level,
 // and the captures of the function.
 type frame struct {
-	slots, caps []Value
+	slots, caps []value
 }
 
 // A runtimeError is a failure during evaluation. It unwinds to the edge of
@@ -39,7 +39,7 @@ func catch(err *error) {
 }
 
 // capture copies what a lambda captures, from, out of f into caps.
-func (f frame) capture(caps []Value, from []int32) {
+func (f frame) capture(caps []value, from []int32) {
 	for i, x := range from {
 		if x >= 0 {
 			caps[i] = f.slots[x]
@@ -50,13 +50,13 @@ func (f frame) capture(caps []Value, from []int32) {
 }
 
 // eval runs the program in a new top frame.
-func (p *program) eval() (v Value, err error) {
+func (p *program) eval() (v value, err error) {
 	defer catch(&err)
-	return trampoline(p.body(p.root), frame{slots: make([]Value, p.top)}), nil
+	return trampoline(p.body(p.root), frame{slots: make([]value, p.top)}), nil
 }
 
 // apply calls the function fn with arg.
-func apply(fn, arg Value) Value {
+func apply(fn, arg value) value {
 	body, f, v := enter(fn, arg)
 	if v != nil {
 		return v
@@ -66,7 +66,7 @@ func apply(fn, arg Value) Value {
 
 // call calls the function fn with args, one or more, whether it takes as
 // many or not.
-func call(fn Value, args ...Value) Value {
+func call(fn value, args ...value) value {
 	body, f, v := enterN(fn, args)
 	if v != nil {
 		return v
@@ -76,13 +76,13 @@ func call(fn Value, args ...Value) Value {
 
 // call2 is call for two arguments, which a builtin or a script function
 // that takes exactly two gets without a slice.
-func call2(fn, a, b Value) Value {
+func call2(fn, a, b value) value {
 	switch g := fn.(type) {
-	case BuiltInFunc:
+	case builtinFunc:
 		if g.two != nil {
 			return g.two(a, b)
 		}
-	case ScriptFunc:
+	case scriptFunc:
 		if len(g.args) == 0 && !g.composition() {
 			if l := g.prog.lam(g.node); l.arity == 2 {
 				f := g.frame(l.size)
@@ -99,23 +99,23 @@ func call2(fn, a, b Value) Value {
 // has. Otherwise, enter returns the body of a script function's first arm
 // that matches all its arguments, in a new frame f, to run. A composition
 // applies its first function and enters its second.
-func enter(fn, arg Value) (body tcode, f frame, v Value) {
+func enter(fn, arg value) (body tcode, f frame, v value) {
 	for {
 		switch g := fn.(type) {
-		case BuiltInFunc:
+		case builtinFunc:
 			if g.arity == 1 {
 				return nil, f, g.one(arg)
 			}
-			return nil, f, Partial{g, []Value{arg}}
-		case Partial:
+			return nil, f, partial{g, []value{arg}}
+		case partial:
 			// Each partial application has its own arguments.
 			args := append(g.args[:len(g.args):len(g.args)], arg)
 			if len(args) == g.fn.arity {
 				return nil, f, g.fn.invoke(args)
 			}
-			return nil, f, Partial{g.fn, args}
+			return nil, f, partial{g.fn, args}
 		}
-		sf := fn.(ScriptFunc)
+		sf := fn.(scriptFunc)
 		if sf.composition() {
 			arg = apply(sf.caps[0], arg)
 			fn = sf.caps[1]
@@ -140,13 +140,13 @@ func enter(fn, arg Value) (body tcode, f frame, v Value) {
 // enterN is enter for one or more arguments args at once. A function that
 // takes exactly as many is called with all of them, without applying it to
 // one at a time.
-func enterN(fn Value, args []Value) (body tcode, f frame, v Value) {
+func enterN(fn value, args []value) (body tcode, f frame, v value) {
 	switch g := fn.(type) {
-	case BuiltInFunc:
+	case builtinFunc:
 		if g.arity == len(args) && g.arity > 1 {
 			return nil, f, g.invoke(args)
 		}
-	case ScriptFunc:
+	case scriptFunc:
 		if len(g.args) == 0 && len(args) > 1 && !g.composition() {
 			if l := g.prog.lam(g.node); l.arity == len(args) {
 				f = g.frame(l.size)
@@ -164,13 +164,13 @@ func enterN(fn Value, args []Value) (body tcode, f frame, v Value) {
 
 // frame returns a new frame of size slots for a call of the lambda sf,
 // which takes more than one argument.
-func (sf ScriptFunc) frame(size int) frame {
-	return frame{slots: make([]Value, size), caps: sf.caps}
+func (sf scriptFunc) frame(size int) frame {
+	return frame{slots: make([]value, size), caps: sf.caps}
 }
 
 // noArm returns the error that no arm of the function or match n matches
 // the arguments args.
-func (p *program) noArm(n cnode, args []Value) runtimeError {
+func (p *program) noArm(n cnode, args []value) runtimeError {
 	strs := make([]string, len(args))
 	for i, a := range args {
 		strs[i] = printValue(p.labels, a)

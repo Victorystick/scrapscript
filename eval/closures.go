@@ -18,16 +18,16 @@ import (
 // position don't grow the Go stack.
 
 // code evaluates an expression in the frame f.
-type code func(f frame) Value
+type code func(f frame) value
 
 // tcode evaluates an expression in tail position. If it ends in a call of
 // a script function, it returns that function's body as next, with its new
 // frame g, for the caller to continue with; otherwise it returns its value.
-type tcode func(f frame) (v Value, next tcode, g frame)
+type tcode func(f frame) (v value, next tcode, g frame)
 
 // mcode matches v against a pattern, writing the names it binds into the
 // slots f.
-type mcode func(v Value, f []Value) bool
+type mcode func(v value, f []value) bool
 
 // compiled holds a program's compiled bodies and lambdas, by node.
 type compiled struct {
@@ -69,10 +69,10 @@ func (p *program) lam(n cnode) *lambdaCode {
 
 // enter1 starts a call of the lambda l of sf, which takes one argument,
 // with arg, returning the body of the arm that matches and its frame.
-func (l *lambdaCode) enter1(sf ScriptFunc, arg Value) (tcode, frame) {
+func (l *lambdaCode) enter1(sf scriptFunc, arg value) (tcode, frame) {
 	g := frame{caps: sf.caps}
 	if l.size > 0 {
-		g.slots = make([]Value, l.size)
+		g.slots = make([]value, l.size)
 	}
 	for _, a := range l.arms {
 		if a.pats[0](arg, g.slots) {
@@ -84,7 +84,7 @@ func (l *lambdaCode) enter1(sf ScriptFunc, arg Value) (tcode, frame) {
 
 // enterN starts a call of the lambda l of sf with its arguments, the
 // first slots of g, returning the body of the arm that matches.
-func (l *lambdaCode) enterN(sf ScriptFunc, g frame) tcode {
+func (l *lambdaCode) enterN(sf scriptFunc, g frame) tcode {
 	for _, a := range l.arms {
 		if matchEach(a.pats, g.slots, g.slots) {
 			return a.body
@@ -95,7 +95,7 @@ func (l *lambdaCode) enterN(sf ScriptFunc, g frame) tcode {
 
 // trampoline runs the body c in f, and the bodies that it calls in tail
 // position.
-func trampoline(c tcode, f frame) Value {
+func trampoline(c tcode, f frame) value {
 	for {
 		v, next, g := c(f)
 		if next == nil {
@@ -134,7 +134,7 @@ type operand struct {
 	c    code
 }
 
-func (o operand) get(f frame) Value {
+func (o operand) get(f frame) value {
 	if o.slot >= 0 {
 		return f.slots[o.slot]
 	}
@@ -159,11 +159,11 @@ func (p *program) operands(ns []int32) []operand {
 }
 
 // builtin returns the builtin that n is a constant of, if it is.
-func (p *program) builtin(n cnode) (BuiltInFunc, bool) {
+func (p *program) builtin(n cnode) (builtinFunc, bool) {
 	if p.ops[n] != opConst {
-		return BuiltInFunc{}, false
+		return builtinFunc{}, false
 	}
-	g, ok := p.consts[p.data[n].a].(BuiltInFunc)
+	g, ok := p.consts[p.data[n].a].(builtinFunc)
 	return g, ok
 }
 
@@ -174,13 +174,13 @@ func (p *program) expr(n cnode) code {
 	case opCall:
 		ac := p.operand(cnode(d.b))
 		if g, ok := p.builtin(cnode(d.a)); ok && g.arity == 1 {
-			return func(f frame) Value { return g.one(ac.get(f)) }
+			return func(f frame) value { return g.one(ac.get(f)) }
 		}
 		fc := p.operand(cnode(d.a))
-		return func(f frame) Value {
+		return func(f frame) value {
 			fn := fc.get(f)
 			arg := ac.get(f)
-			if sf, ok := fn.(ScriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
+			if sf, ok := fn.(scriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
 				if l := sf.prog.lam(sf.node); l.arity == 1 {
 					return trampoline(l.enter1(sf, arg))
 				}
@@ -200,13 +200,13 @@ func (p *program) expr(n cnode) code {
 			switch {
 			case g.two != nil:
 				a, b := acs[0], acs[1]
-				return func(f frame) Value {
+				return func(f frame) value {
 					x := a.get(f)
 					return g.two(x, b.get(f))
 				}
 			case g.three != nil:
 				a, b, c := acs[0], acs[1], acs[2]
-				return func(f frame) Value {
+				return func(f frame) value {
 					x := a.get(f)
 					y := b.get(f)
 					return g.three(x, y, c.get(f))
@@ -214,9 +214,9 @@ func (p *program) expr(n cnode) code {
 			}
 		}
 		fc := p.operand(cnode(r[0]))
-		return func(f frame) Value {
+		return func(f frame) value {
 			fn := fc.get(f)
-			if g, ok := fn.(BuiltInFunc); ok && g.arity == k {
+			if g, ok := fn.(builtinFunc); ok && g.arity == k {
 				switch {
 				case g.two != nil:
 					x := acs[0].get(f)
@@ -227,7 +227,7 @@ func (p *program) expr(n cnode) code {
 					return g.three(x, y, acs[2].get(f))
 				}
 			}
-			if sf, ok := fn.(ScriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
+			if sf, ok := fn.(scriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
 				if l := sf.prog.lam(sf.node); l.arity == k {
 					g := sf.frame(l.size)
 					for i, c := range acs {
@@ -236,7 +236,7 @@ func (p *program) expr(n cnode) code {
 					return trampoline(l.enterN(sf, g), g)
 				}
 			}
-			args := make([]Value, k)
+			args := make([]value, k)
 			for i, c := range acs {
 				args[i] = c.get(f)
 			}
@@ -256,7 +256,7 @@ func (p *program) expr(n cnode) code {
 		for i := range pats {
 			pats[i] = p.pattern(cnode(arms[2*i]))
 		}
-		return func(f frame) Value {
+		return func(f frame) value {
 			v := vc.get(f)
 			for i, m := range pats {
 				if m(v, f.slots) {
@@ -275,7 +275,7 @@ func (p *program) expr(n cnode) code {
 		for a := r[2+k:]; len(a) > 0; a = a[k+1:] {
 			pats = append(pats, p.patterns(a[:k]))
 		}
-		return func(f frame) Value {
+		return func(f frame) value {
 			args := f.slots[s : int(s)+k]
 			for i, vc := range vcs {
 				args[i] = vc.get(f)
@@ -291,122 +291,122 @@ func (p *program) expr(n cnode) code {
 	case opWhere:
 		body, binds := p.where(n)
 		bind, bc := p.binds(binds), p.expr(body)
-		return func(f frame) Value {
+		return func(f frame) value {
 			bind(f)
 			return bc(f)
 		}
 
 	case opConst:
 		v := p.consts[d.a]
-		return func(frame) Value { return v }
+		return func(frame) value { return v }
 
 	case opLocal:
 		s := d.a
-		return func(f frame) Value { return f.slots[s] }
+		return func(f frame) value { return f.slots[s] }
 
 	case opCapture:
 		i := d.a
-		return func(f frame) Value { return f.caps[i] }
+		return func(f frame) value { return f.caps[i] }
 
 	case opAddInt:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
-			return l.get(f).(Int) + r.get(f).(Int)
+		return func(f frame) value {
+			return l.get(f).(intValue) + r.get(f).(intValue)
 		}
 
 	case opAddFloat:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
-			return l.get(f).(Float) + r.get(f).(Float)
+		return func(f frame) value {
+			return l.get(f).(floatValue) + r.get(f).(floatValue)
 		}
 
 	case opSubInt:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
-			return l.get(f).(Int) - r.get(f).(Int)
+		return func(f frame) value {
+			return l.get(f).(intValue) - r.get(f).(intValue)
 		}
 
 	case opSubFloat:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
-			return l.get(f).(Float) - r.get(f).(Float)
+		return func(f frame) value {
+			return l.get(f).(floatValue) - r.get(f).(floatValue)
 		}
 
 	case opMulInt:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
-			return l.get(f).(Int) * r.get(f).(Int)
+		return func(f frame) value {
+			return l.get(f).(intValue) * r.get(f).(intValue)
 		}
 
 	case opMulFloat:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
-			return l.get(f).(Float) * r.get(f).(Float)
+		return func(f frame) value {
+			return l.get(f).(floatValue) * r.get(f).(floatValue)
 		}
 
 	case opAppendList:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
+		return func(f frame) value {
 			a := l.get(f).(List)
 			return List{append(slices.Clip(a.elements), r.get(f))}
 		}
 
 	case opAppendBytes:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
-			a := l.get(f).(Bytes)
-			return append(slices.Clip(a), byte(r.get(f).(Byte)))
+		return func(f frame) value {
+			a := l.get(f).(bytesValue)
+			return append(slices.Clip(a), byte(r.get(f).(byteValue)))
 		}
 
 	case opPrependList:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
+		return func(f frame) value {
 			b := r.get(f).(List)
-			return List{append([]Value{l.get(f)}, b.elements...)}
+			return List{append([]value{l.get(f)}, b.elements...)}
 		}
 
 	case opPrependBytes:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
-			b := r.get(f).(Bytes)
-			return append(Bytes{byte(l.get(f).(Byte))}, b...)
+		return func(f frame) value {
+			b := r.get(f).(bytesValue)
+			return append(bytesValue{byte(l.get(f).(byteValue))}, b...)
 		}
 
 	case opConcatList:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
+		return func(f frame) value {
 			a := l.get(f).(List)
 			return List{append(slices.Clip(a.elements), r.get(f).(List).elements...)}
 		}
 
 	case opConcatText:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
-			return l.get(f).(Text) + r.get(f).(Text)
+		return func(f frame) value {
+			return l.get(f).(textValue) + r.get(f).(textValue)
 		}
 
 	case opConcatBytes:
 		l, r := p.operand(cnode(d.a)), p.operand(cnode(d.b))
-		return func(f frame) Value {
-			a := l.get(f).(Bytes)
-			return append(slices.Clip(a), r.get(f).(Bytes)...)
+		return func(f frame) value {
+			a := l.get(f).(bytesValue)
+			return append(slices.Clip(a), r.get(f).(bytesValue)...)
 		}
 
 	case opCompose:
 		first, second, _ := p.compose(n)
 		fc, sc := p.expr(first), p.expr(second)
-		return func(f frame) Value {
-			return ScriptFunc{prog: p, node: n, caps: []Value{fc(f), sc(f)}}
+		return func(f frame) value {
+			return scriptFunc{prog: p, node: n, caps: []value{fc(f), sc(f)}}
 		}
 
 	case opLambda:
 		from := p.captures(n)
 		if len(from) == 0 {
-			sf := ScriptFunc{prog: p, node: n}
-			return func(frame) Value { return sf }
+			sf := scriptFunc{prog: p, node: n}
+			return func(frame) value { return sf }
 		}
-		return func(f frame) Value {
-			sf := ScriptFunc{prog: p, node: n, caps: make([]Value, len(from))}
+		return func(f frame) value {
+			sf := scriptFunc{prog: p, node: n, caps: make([]value, len(from))}
 			f.capture(sf.caps, from)
 			return sf
 		}
@@ -414,8 +414,8 @@ func (p *program) expr(n cnode) code {
 	case opFill:
 		from := p.captures(cnode(d.a))
 		s := d.b
-		return func(f frame) Value {
-			sf := f.slots[s].(ScriptFunc)
+		return func(f frame) value {
+			sf := f.slots[s].(scriptFunc)
 			f.capture(sf.caps, from)
 			return sf
 		}
@@ -429,7 +429,7 @@ func (p *program) expr(n cnode) code {
 			vals[i] = p.expr(cnode(fields[2*i+1]))
 		}
 		if base == none {
-			return func(f frame) Value {
+			return func(f frame) value {
 				r := newRecord(s)
 				for i, c := range vals {
 					r.values[keys[i]] = c(f)
@@ -439,7 +439,7 @@ func (p *program) expr(n cnode) code {
 		}
 		bc := p.expr(base)
 		if s != nil {
-			return func(f frame) Value {
+			return func(f frame) value {
 				r := newRecord(s)
 				copy(r.values, bc(f).(Record).values)
 				for i, c := range vals {
@@ -448,7 +448,7 @@ func (p *program) expr(n cnode) code {
 				return r
 			}
 		}
-		return func(f frame) Value {
+		return func(f frame) value {
 			b := bc(f).(Record)
 			r := newRecord(b.shape)
 			copy(r.values, b.values)
@@ -461,21 +461,21 @@ func (p *program) expr(n cnode) code {
 	case opAccess:
 		rc := p.operand(cnode(d.a))
 		key := label.ID(d.b)
-		return func(f frame) Value {
+		return func(f frame) value {
 			r := rc.get(f).(Record)
 			return r.values[r.shape.index(key)]
 		}
 
 	case opField:
 		rc := p.operand(cnode(d.a))
-		return func(f frame) Value {
+		return func(f frame) value {
 			return rc.get(f).(Record).values[d.b]
 		}
 
 	case opList:
 		elems := p.exprs(p.range_(n))
-		return func(f frame) Value {
-			values := make([]Value, len(elems))
+		return func(f frame) value {
+			values := make([]value, len(elems))
 			for i, c := range elems {
 				values[i] = c(f)
 			}
@@ -486,16 +486,16 @@ func (p *program) expr(n cnode) code {
 		tag := label.ID(d.a)
 		if cnode(d.b) == none {
 			v := Variant{tag: tag}
-			return func(frame) Value { return v }
+			return func(frame) value { return v }
 		}
 		pc := p.expr(cnode(d.b))
-		return func(f frame) Value { return Variant{tag: tag, value: pc(f)} }
+		return func(f frame) value { return Variant{tag: tag, value: pc(f)} }
 	}
 	panic(p.errorf(n, "unhandled op %d", p.ops[n]))
 }
 
 // done returns v as the value of a tcode.
-func done(v Value) (Value, tcode, frame) {
+func done(v value) (value, tcode, frame) {
 	return v, nil, frame{}
 }
 
@@ -506,13 +506,13 @@ func (p *program) tail(n cnode) tcode {
 	case opCall:
 		ac := p.operand(cnode(d.b))
 		if g, ok := p.builtin(cnode(d.a)); ok && g.arity == 1 {
-			return func(f frame) (Value, tcode, frame) { return done(g.one(ac.get(f))) }
+			return func(f frame) (value, tcode, frame) { return done(g.one(ac.get(f))) }
 		}
 		fc := p.operand(cnode(d.a))
-		return func(f frame) (Value, tcode, frame) {
+		return func(f frame) (value, tcode, frame) {
 			fn := fc.get(f)
 			arg := ac.get(f)
-			if sf, ok := fn.(ScriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
+			if sf, ok := fn.(scriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
 				if l := sf.prog.lam(sf.node); l.arity == 1 {
 					body, g := l.enter1(sf, arg)
 					return nil, body, g
@@ -533,13 +533,13 @@ func (p *program) tail(n cnode) tcode {
 			switch {
 			case g.two != nil:
 				a, b := acs[0], acs[1]
-				return func(f frame) (Value, tcode, frame) {
+				return func(f frame) (value, tcode, frame) {
 					x := a.get(f)
 					return done(g.two(x, b.get(f)))
 				}
 			case g.three != nil:
 				a, b, c := acs[0], acs[1], acs[2]
-				return func(f frame) (Value, tcode, frame) {
+				return func(f frame) (value, tcode, frame) {
 					x := a.get(f)
 					y := b.get(f)
 					return done(g.three(x, y, c.get(f)))
@@ -547,9 +547,9 @@ func (p *program) tail(n cnode) tcode {
 			}
 		}
 		fc := p.operand(cnode(r[0]))
-		return func(f frame) (Value, tcode, frame) {
+		return func(f frame) (value, tcode, frame) {
 			fn := fc.get(f)
-			if g, ok := fn.(BuiltInFunc); ok && g.arity == k {
+			if g, ok := fn.(builtinFunc); ok && g.arity == k {
 				switch {
 				case g.two != nil:
 					x := acs[0].get(f)
@@ -560,7 +560,7 @@ func (p *program) tail(n cnode) tcode {
 					return done(g.three(x, y, acs[2].get(f)))
 				}
 			}
-			if sf, ok := fn.(ScriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
+			if sf, ok := fn.(scriptFunc); ok && len(sf.args) == 0 && !sf.composition() {
 				if l := sf.prog.lam(sf.node); l.arity == k {
 					g := sf.frame(l.size)
 					for i, c := range acs {
@@ -569,7 +569,7 @@ func (p *program) tail(n cnode) tcode {
 					return nil, l.enterN(sf, g), g
 				}
 			}
-			args := make([]Value, k)
+			args := make([]value, k)
 			for i, c := range acs {
 				args[i] = c.get(f)
 			}
@@ -590,7 +590,7 @@ func (p *program) tail(n cnode) tcode {
 			pats[i] = p.pattern(cnode(arms[2*i]))
 			bodies[i] = p.tail(cnode(arms[2*i+1]))
 		}
-		return func(f frame) (Value, tcode, frame) {
+		return func(f frame) (value, tcode, frame) {
 			v := vc.get(f)
 			for i, m := range pats {
 				if m(v, f.slots) {
@@ -608,7 +608,7 @@ func (p *program) tail(n cnode) tcode {
 		for a := r[2+k:]; len(a) > 0; a = a[k+1:] {
 			arms = append(arms, armCode{pats: p.patterns(a[:k]), body: p.tail(cnode(a[k]))})
 		}
-		return func(f frame) (Value, tcode, frame) {
+		return func(f frame) (value, tcode, frame) {
 			args := f.slots[s : int(s)+k]
 			for i, vc := range vcs {
 				args[i] = vc.get(f)
@@ -624,13 +624,13 @@ func (p *program) tail(n cnode) tcode {
 	case opWhere:
 		body, binds := p.where(n)
 		bind, bc := p.binds(binds), p.tail(body)
-		return func(f frame) (Value, tcode, frame) {
+		return func(f frame) (value, tcode, frame) {
 			bind(f)
 			return bc(f)
 		}
 	}
 	c := p.expr(n)
-	return func(f frame) (Value, tcode, frame) { return done(c(f)) }
+	return func(f frame) (value, tcode, frame) { return done(c(f)) }
 }
 
 // binds compiles a where's bindings, as pairs of slot and value, into
@@ -654,7 +654,7 @@ func (p *program) binds(binds []int32) func(f frame) {
 	return func(f frame) {
 		for _, b := range bs {
 			if b.c == nil {
-				f.slots[b.slot] = ScriptFunc{prog: p, node: b.l, caps: make([]Value, b.caps)}
+				f.slots[b.slot] = scriptFunc{prog: p, node: b.l, caps: make([]value, b.caps)}
 				continue
 			}
 			f.slots[b.slot] = b.c(f)
@@ -672,7 +672,7 @@ func (p *program) exprsOf(ns []int32, stride int) []code {
 	return cs
 }
 
-func matchAny(Value, []Value) bool { return true }
+func matchAny(value, []value) bool { return true }
 
 // patterns compiles each pattern of ns.
 func (p *program) patterns(ns []int32) []mcode {
@@ -684,7 +684,7 @@ func (p *program) patterns(ns []int32) []mcode {
 }
 
 // matchEach matches each value of vs against the pattern at its index.
-func matchEach(ms []mcode, vs []Value, f []Value) bool {
+func matchEach(ms []mcode, vs []value, f []value) bool {
 	for i, m := range ms {
 		if !m(vs[i], f) {
 			return false
@@ -699,7 +699,7 @@ func (p *program) pattern(n cnode) mcode {
 	switch p.ops[n] {
 	case patBind:
 		s := d.a
-		return func(v Value, f []Value) bool {
+		return func(v value, f []value) bool {
 			f[s] = v
 			return true
 		}
@@ -710,22 +710,22 @@ func (p *program) pattern(n cnode) mcode {
 	case patLiteral:
 		// A literal is a primitive of the matched value's type; of those,
 		// only bytes aren't comparable with ==.
-		if c, ok := p.consts[d.a].(Bytes); ok {
-			return func(v Value, _ []Value) bool { return bytes.Equal(c, v.(Bytes)) }
+		if c, ok := p.consts[d.a].(bytesValue); ok {
+			return func(v value, _ []value) bool { return bytes.Equal(c, v.(bytesValue)) }
 		}
 		c := p.consts[d.a]
-		return func(v Value, _ []Value) bool { return v == c }
+		return func(v value, _ []value) bool { return v == c }
 
 	case patVariant:
 		tag := label.ID(d.a)
 		if cnode(d.b) == none {
-			return func(v Value, _ []Value) bool {
+			return func(v value, _ []value) bool {
 				t, ok := v.(Variant)
 				return ok && t.tag == tag
 			}
 		}
 		m := p.pattern(cnode(d.b))
-		return func(v Value, f []Value) bool {
+		return func(v value, f []value) bool {
 			t, ok := v.(Variant)
 			if !ok || t.tag != tag {
 				return false
@@ -733,7 +733,7 @@ func (p *program) pattern(n cnode) mcode {
 			// A tag without a payload has the payload ().
 			payload := t.value
 			if payload == nil {
-				payload = Hole{}
+				payload = holeValue{}
 			}
 			return m(payload, f)
 		}
@@ -748,7 +748,7 @@ func (p *program) pattern(n cnode) mcode {
 		}
 		if rest == none {
 			// The checker closed the record's type to the pattern's fields.
-			return func(v Value, f []Value) bool {
+			return func(v value, f []value) bool {
 				r, ok := v.(Record)
 				if !ok {
 					return false
@@ -762,7 +762,7 @@ func (p *program) pattern(n cnode) mcode {
 			}
 		}
 		rm := p.pattern(rest)
-		return func(v Value, f []Value) bool {
+		return func(v value, f []value) bool {
 			r, ok := v.(Record)
 			if !ok {
 				return false
@@ -792,7 +792,7 @@ func (p *program) pattern(n cnode) mcode {
 			ms[i] = p.pattern(cnode(fields[2*i+1]))
 		}
 		rm := p.pattern(rest)
-		return func(v Value, f []Value) bool {
+		return func(v value, f []value) bool {
 			r, ok := v.(Record)
 			if !ok {
 				return false
@@ -811,14 +811,14 @@ func (p *program) pattern(n cnode) mcode {
 
 	case patList:
 		ms := p.patterns(p.range_(n))
-		return func(v Value, f []Value) bool {
+		return func(v value, f []value) bool {
 			l, ok := v.(List)
 			return ok && len(l.elements) == len(ms) && matchEach(ms, l.elements, f)
 		}
 
 	case patCons:
 		hm, tm := p.pattern(cnode(d.a)), p.pattern(cnode(d.b))
-		return func(v Value, f []Value) bool {
+		return func(v value, f []value) bool {
 			l, ok := v.(List)
 			return ok && len(l.elements) > 0 &&
 				hm(l.elements[0], f) &&
@@ -827,7 +827,7 @@ func (p *program) pattern(n cnode) mcode {
 
 	case patSnoc:
 		im, lm := p.pattern(cnode(d.a)), p.pattern(cnode(d.b))
-		return func(v Value, f []Value) bool {
+		return func(v value, f []value) bool {
 			l, ok := v.(List)
 			last := len(l.elements) - 1
 			return ok && last >= 0 &&
@@ -838,7 +838,7 @@ func (p *program) pattern(n cnode) mcode {
 	case patPrefix:
 		rest, elems := p.elems(n)
 		rm, ms := p.pattern(rest), p.patterns(elems)
-		return func(v Value, f []Value) bool {
+		return func(v value, f []value) bool {
 			l, ok := v.(List)
 			return ok && len(ms) <= len(l.elements) &&
 				matchEach(ms, l.elements[:len(ms)], f) &&
@@ -848,7 +848,7 @@ func (p *program) pattern(n cnode) mcode {
 	case patSuffix:
 		rest, elems := p.elems(n)
 		rm, ms := p.pattern(rest), p.patterns(elems)
-		return func(v Value, f []Value) bool {
+		return func(v value, f []value) bool {
 			l, ok := v.(List)
 			split := len(l.elements) - len(ms)
 			return ok && split >= 0 &&

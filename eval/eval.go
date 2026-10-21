@@ -11,37 +11,29 @@ import (
 	"github.com/Victorystick/scrapscript/token"
 )
 
-type Vars interface {
-	Get(name string) Value
-}
-
-type Variables map[string]Value
-
-func (v Variables) Get(name string) Value {
-	return v[name]
-}
+type variables map[string]value
 
 var ErrNoFloatMatch = errors.New("cannot match on floats")
 
-func Literal(src *ast.SourceExpr, x ast.Node) (Value, error) {
+func literal(src *ast.SourceExpr, x ast.Node) (value, error) {
 	t := src.Main(x)
 	switch kind := src.LiteralKind(x); kind {
 	case token.HOLE:
-		return Hole{}, nil
+		return holeValue{}, nil
 	case token.INT:
 		i, err := strconv.Atoi(src.TokenText(t))
 		if err != nil {
 			return nil, err
 		}
-		return Int(i), nil
+		return intValue(i), nil
 	case token.FLOAT:
 		f, err := strconv.ParseFloat(src.TokenText(t), 64)
 		if err != nil {
 			return nil, err
 		}
-		return Float(f), nil
+		return floatValue(f), nil
 	case token.TEXT:
-		return Text(scanner.Unquote(src.TokenText(t))), nil
+		return textValue(scanner.Unquote(src.TokenText(t))), nil
 	case token.BYTES:
 		str := src.Source.GetString(src.TokenSpan(t).TrimStart(2))
 		dst := make([]byte, base64.StdEncoding.DecodedLen(len(str)))
@@ -49,13 +41,13 @@ func Literal(src *ast.SourceExpr, x ast.Node) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		return Bytes(dst[:n]), nil
+		return bytesValue(dst[:n]), nil
 	case token.BYTE:
 		val, err := strconv.ParseUint(src.Source.GetString(src.TokenSpan(t).TrimStart(1)), 16, 8)
 		if err != nil {
 			return nil, err
 		}
-		return Byte(byte(val)), nil
+		return byteValue(byte(val)), nil
 	default:
 		return nil, src.Error(x, fmt.Sprintf("unhandled literal kind %s", kind))
 	}

@@ -35,7 +35,7 @@ import (
 //
 // The bindings come from many scopes, but print as one where-group, so a
 // name that is already taken gets primes: a, a', a”.
-func printValue(labels *label.Table, v Value) string {
+func printValue(labels *label.Table, v value) string {
 	p := newValuePrinter(labels)
 	p.collect(v)
 	p.merge()
@@ -46,7 +46,7 @@ func printValue(labels *label.Table, v Value) string {
 // printScrap prints v, the value of prog, as printValue does, with the
 // members of the static part of its main source: the root scrap's, or if
 // that is an import, those of the scrap it refers to.
-func printScrap(labels *label.Table, v Value, prog *program) string {
+func printScrap(labels *label.Table, v value, prog *program) string {
 	src := prog.main
 	main := prog.srcs[src]
 	x := main.se.Expr
@@ -77,7 +77,7 @@ type binding struct {
 	binderKey
 	// nil for a sort binding, and for a variable that only types refer to,
 	// which prints as its static part
-	value   Value
+	value   value
 	printed string // its name in the printed scrap
 	// A variable's binding with a value that has its members, which one
 	// that only types refer to prints as instead.
@@ -120,13 +120,13 @@ func (b *binding) se() *ast.SourceExpr {
 }
 
 // se returns the source of sf's code.
-func (sf ScriptFunc) se() *ast.SourceExpr {
+func (sf scriptFunc) se() *ast.SourceExpr {
 	return sf.prog.srcs[sf.prog.uses[sf.uses()].src].se
 }
 
 // published returns the reference to the published scrap whose value sf
 // is, if it is one.
-func (sf ScriptFunc) published() (string, bool) {
+func (sf scriptFunc) published() (string, bool) {
 	if len(sf.args) > 0 {
 		return "", false
 	}
@@ -138,7 +138,7 @@ func (sf ScriptFunc) published() (string, bool) {
 }
 
 // uses returns the index in sf.prog.uses of what sf's code refers to.
-func (sf ScriptFunc) uses() int32 {
+func (sf scriptFunc) uses() int32 {
 	if sf.composition() {
 		_, _, u := sf.prog.compose(sf.node)
 		return u
@@ -148,13 +148,13 @@ func (sf ScriptFunc) uses() int32 {
 }
 
 // home returns the binder that defines sf, if its value is sf itself.
-func home(sf ScriptFunc) (binderKey, bool) {
+func home(sf scriptFunc) (binderKey, bool) {
 	u := sf.prog.uses[sf.uses()]
 	return binderKey{sf.prog, u.home}, u.home >= 0 && u.published < 0
 }
 
 // collect finds the bindings that v refers to.
-func (p *valuePrinter) collect(v Value) {
+func (p *valuePrinter) collect(v value) {
 	switch v := v.(type) {
 	case Record:
 		for _, val := range v.values {
@@ -168,14 +168,14 @@ func (p *valuePrinter) collect(v Value) {
 		if v.value != nil {
 			p.collect(v.value)
 		}
-	case BuiltInFunc:
+	case builtinFunc:
 		p.names[v.name] = true
-	case Partial:
+	case partial:
 		p.names[v.fn.name] = true
 		for _, arg := range v.args {
 			p.collect(arg)
 		}
-	case ScriptFunc:
+	case scriptFunc:
 		for _, arg := range v.args {
 			p.collect(arg)
 		}
@@ -192,7 +192,7 @@ func (p *valuePrinter) collect(v Value) {
 }
 
 // find returns the binding of key with the value v, or nil.
-func (p *valuePrinter) find(key binderKey, v Value) *binding {
+func (p *valuePrinter) find(key binderKey, v value) *binding {
 	for _, b := range p.byBinder[key] {
 		if same(b.value, v) {
 			return b
@@ -203,7 +203,7 @@ func (p *valuePrinter) find(key binderKey, v Value) *binding {
 
 // need returns the binding of key with the value v, nil for a sort
 // binding, finding what it refers to the first time.
-func (p *valuePrinter) need(key binderKey, v Value) *binding {
+func (p *valuePrinter) need(key binderKey, v value) *binding {
 	if b := p.find(key, v); b != nil {
 		return b
 	}
@@ -230,7 +230,7 @@ func (p *valuePrinter) need(key binderKey, v Value) *binding {
 		}
 	}
 	if p.defines(b) {
-		p.code(v.(ScriptFunc))
+		p.code(v.(scriptFunc))
 	} else {
 		p.collect(v)
 	}
@@ -305,7 +305,7 @@ func (p *valuePrinter) merge() {
 // defines returns true if b's value is a function that b defines, which
 // prints as its code.
 func (p *valuePrinter) defines(b *binding) bool {
-	sf, ok := b.value.(ScriptFunc)
+	sf, ok := b.value.(scriptFunc)
 	if !ok || len(sf.args) > 0 {
 		return false
 	}
@@ -315,7 +315,7 @@ func (p *valuePrinter) defines(b *binding) bool {
 
 // code finds the bindings that the code of sf refers to. A composition's
 // code is its functions.
-func (p *valuePrinter) code(sf ScriptFunc) {
+func (p *valuePrinter) code(sf scriptFunc) {
 	if sf.composition() {
 		p.collect(sf.caps[0])
 		p.collect(sf.caps[1])
@@ -326,7 +326,7 @@ func (p *valuePrinter) code(sf ScriptFunc) {
 
 // refs finds the bindings that the code with uses u in prog refers to, the
 // values of its free names taken from caps.
-func (p *valuePrinter) refs(prog *program, u int32, caps []Value) {
+func (p *valuePrinter) refs(prog *program, u int32, caps []value) {
 	us := prog.uses[u]
 	se := prog.srcs[us.src].se
 	for _, name := range us.names {
@@ -337,7 +337,7 @@ func (p *valuePrinter) refs(prog *program, u int32, caps []Value) {
 			p.names[se.TokenText(se.Main(r.ident))] = true
 			continue
 		}
-		var v Value
+		var v value
 		if r.cap >= 0 {
 			v = caps[r.cap]
 		}
@@ -348,7 +348,7 @@ func (p *valuePrinter) refs(prog *program, u int32, caps []Value) {
 // renames returns the printed names of the free names of the code with
 // uses u in prog, by Ident, with their values taken from caps, adding them
 // to into.
-func (p *valuePrinter) renames(into map[ast.Node]string, prog *program, u int32, caps []Value) map[ast.Node]string {
+func (p *valuePrinter) renames(into map[ast.Node]string, prog *program, u int32, caps []value) map[ast.Node]string {
 	if into == nil {
 		into = make(map[ast.Node]string)
 	}
@@ -356,7 +356,7 @@ func (p *valuePrinter) renames(into map[ast.Node]string, prog *program, u int32,
 		if r.b < 0 {
 			continue
 		}
-		var v Value
+		var v value
 		if r.cap >= 0 {
 			v = caps[r.cap]
 		}
@@ -367,17 +367,17 @@ func (p *valuePrinter) renames(into map[ast.Node]string, prog *program, u int32,
 
 // same returns true if a and b are the same value, as far as printing is
 // concerned: equal, with functions the same closure.
-func same(a, b Value) bool {
+func same(a, b value) bool {
 	switch a := a.(type) {
 	case nil:
 		return b == nil
-	case ScriptFunc:
-		o, ok := b.(ScriptFunc)
+	case scriptFunc:
+		o, ok := b.(scriptFunc)
 		return ok && a.prog == o.prog && a.node == o.node &&
 			len(a.caps) == len(o.caps) && (len(a.caps) == 0 || &a.caps[0] == &o.caps[0]) &&
 			slices.EqualFunc(a.args, o.args, same)
-	case Partial:
-		o, ok := b.(Partial)
+	case partial:
+		o, ok := b.(partial)
 		return ok && a.fn.name == o.fn.name && slices.EqualFunc(a.args, o.args, same)
 	case Record:
 		o, ok := b.(Record)
@@ -388,11 +388,11 @@ func same(a, b Value) bool {
 	case Variant:
 		o, ok := b.(Variant)
 		return ok && a.tag == o.tag && same(a.value, o.value)
-	case Bytes:
-		o, ok := b.(Bytes)
+	case bytesValue:
+		o, ok := b.(bytesValue)
 		return ok && bytes.Equal(a, o)
-	case BuiltInFunc:
-		o, ok := b.(BuiltInFunc)
+	case builtinFunc:
+		o, ok := b.(builtinFunc)
 		return ok && a.name == o.name
 	}
 	return a == b
@@ -421,7 +421,7 @@ func (p *valuePrinter) name() {
 	}
 }
 
-func (p *valuePrinter) print(v Value) string {
+func (p *valuePrinter) print(v value) string {
 	var s strings.Builder
 	p.value(&s, v, printer.Expr)
 	p.where(&s)
@@ -443,7 +443,7 @@ func (p *valuePrinter) where(s *strings.Builder) {
 		pr := p.printer(b.se(), names)
 		_, _, typ, val := b.se().Where(bd.where)
 		if p.defines(b) {
-			if sf := b.value.(ScriptFunc); !sf.composition() {
+			if sf := b.value.(scriptFunc); !sf.composition() {
 				p.renames(names, sf.prog, sf.uses(), sf.caps)
 				pr.Binding(typ, val, false)
 				s.WriteString(pr.String())
@@ -463,7 +463,7 @@ func (p *valuePrinter) where(s *strings.Builder) {
 		v := b.value
 		if p.defines(b) {
 			// A composition that b defines prints as its functions.
-			p.compose(s, v.(ScriptFunc), printer.Body)
+			p.compose(s, v.(scriptFunc), printer.Body)
 			continue
 		}
 		if v == nil || p.members(b) {
@@ -479,7 +479,7 @@ func (p *valuePrinter) where(s *strings.Builder) {
 // members of x's static part. An import prints as itself, a record literal as v's fields
 // and its members. Without v, x prints as its static part alone. names are
 // the printed names of the static part's free names.
-func (p *valuePrinter) withMembers(s *strings.Builder, prog *program, src int32, names map[ast.Node]string, x ast.Node, v Value) {
+func (p *valuePrinter) withMembers(s *strings.Builder, prog *program, src int32, names map[ast.Node]string, x ast.Node, v value) {
 	se, static := prog.srcs[src].se, prog.srcs[src].static
 	switch se.Kind(x) {
 	case ast.Record:
@@ -558,7 +558,7 @@ func (p *valuePrinter) printer(src *ast.SourceExpr, names map[ast.Node]string) *
 
 // compose prints the composition sf as its functions, in its source's
 // order.
-func (p *valuePrinter) compose(s *strings.Builder, sf ScriptFunc, ctx printer.Context) {
+func (p *valuePrinter) compose(s *strings.Builder, sf scriptFunc, ctx printer.Context) {
 	if ctx == printer.Arg {
 		s.WriteByte('(')
 		defer s.WriteByte(')')
@@ -573,25 +573,25 @@ func (p *valuePrinter) compose(s *strings.Builder, sf ScriptFunc, ctx printer.Co
 }
 
 // value prints v in ctx.
-func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
+func (p *valuePrinter) value(s *strings.Builder, v value, ctx printer.Context) {
 	switch v := v.(type) {
-	case Hole:
+	case holeValue:
 		s.WriteString("()")
-	case Int:
+	case intValue:
 		s.WriteString(strconv.FormatInt(int64(v), 10))
-	case Float:
+	case floatValue:
 		f := strconv.FormatFloat(float64(v), 'f', -1, 64)
 		s.WriteString(f)
 		// A FLOAT has digits on both sides of its point.
 		if strings.IndexByte(f, '.') < 0 {
 			s.WriteString(".0")
 		}
-	case Text:
+	case textValue:
 		s.WriteString(scanner.Quote(string(v)))
-	case Byte:
+	case byteValue:
 		const chars = "0123456789ABCDEF"
 		s.Write([]byte{'~', chars[v>>4], chars[v&0xf]})
-	case Bytes:
+	case bytesValue:
 		s.WriteString("~~")
 		s.WriteString(base64.StdEncoding.EncodeToString(v))
 	case Record:
@@ -628,11 +628,11 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 			return
 		}
 		p.app(s, ctx, "#"+p.labels.Name(v.tag), v.value)
-	case BuiltInFunc:
+	case builtinFunc:
 		s.WriteString(v.name)
-	case Partial:
+	case partial:
 		p.app(s, ctx, v.fn.name, v.args...)
-	case ScriptFunc:
+	case scriptFunc:
 		if len(v.args) > 0 {
 			// A function applied to some of its arguments prints as such.
 			fn := v
@@ -655,7 +655,7 @@ func (p *valuePrinter) value(s *strings.Builder, v Value, ctx printer.Context) {
 }
 
 // app prints head applied to args, in parentheses if ctx is an argument.
-func (p *valuePrinter) app(s *strings.Builder, ctx printer.Context, head string, args ...Value) {
+func (p *valuePrinter) app(s *strings.Builder, ctx printer.Context, head string, args ...value) {
 	if ctx == printer.Arg {
 		s.WriteByte('(')
 		defer s.WriteByte(')')

@@ -12,20 +12,20 @@ import (
 	"github.com/Victorystick/scrapscript/types"
 )
 
-func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
+func bindBuiltIns(reg *types.Registry) (types.TypeScope, variables) {
 	var scope types.TypeScope
-	var builtIns = make(Variables)
+	var builtIns = make(variables)
 
-	define := func(name string, typ types.TypeRef, one func(Value) Value) {
-		builtIns[name] = BuiltInFunc{name: name, arity: 1, one: one}
+	define := func(name string, typ types.TypeRef, one func(value) value) {
+		builtIns[name] = builtinFunc{name: name, arity: 1, one: one}
 		scope = scope.Bind(name, typ)
 	}
-	define2 := func(name string, typ types.TypeRef, two func(Value, Value) Value) {
-		builtIns[name] = BuiltInFunc{name: name, arity: 2, two: two}
+	define2 := func(name string, typ types.TypeRef, two func(value, value) value) {
+		builtIns[name] = builtinFunc{name: name, arity: 2, two: two}
 		scope = scope.Bind(name, typ)
 	}
-	define3 := func(name string, typ types.TypeRef, three func(Value, Value, Value) Value) {
-		builtIns[name] = BuiltInFunc{name: name, arity: 3, three: three}
+	define3 := func(name string, typ types.TypeRef, three func(value, value, value) value) {
+		builtIns[name] = builtinFunc{name: name, arity: 3, three: three}
 		scope = scope.Bind(name, typ)
 	}
 
@@ -38,7 +38,7 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 
 	// Enums that builtins return. Nullary tags are boxed once, so returning
 	// them doesn't allocate.
-	tag := func(name string) Value { return Variant{tag: reg.Labels().Of(name)} }
+	tag := func(name string) value { return Variant{tag: reg.Labels().Of(name)} }
 	ltID, gtID := reg.Labels().Of("lt"), reg.Labels().Of("gt")
 	lt, eq, gt := tag("lt"), tag("eq"), tag("gt")
 	order := func() types.TypeRef {
@@ -48,7 +48,7 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	maybe := func(t types.TypeRef) types.TypeRef {
 		return reg.Enum(map[string]types.TypeRef{"some": t, "none": types.HoleRef})
 	}
-	ordered := func(c int) Value {
+	ordered := func(c int) value {
 		switch {
 		case c < 0:
 			return lt
@@ -62,30 +62,30 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	// their values.
 
 	// Lists
-	define("list/length", reg.Func(aList, types.IntRef), func(ls Value) Value {
-		return Int(len(ls.(List).elements))
+	define("list/length", reg.Func(aList, types.IntRef), func(ls value) value {
+		return intValue(len(ls.(List).elements))
 	})
-	define2("list/map", reg.Func(aToB, reg.Func(aList, bList)), func(fn, list Value) Value {
+	define2("list/map", reg.Func(aToB, reg.Func(aList, bList)), func(fn, list value) value {
 		elems := list.(List).elements
-		results := make([]Value, len(elems))
+		results := make([]value, len(elems))
 		for i, v := range elems {
 			results[i] = apply(fn, v)
 		}
 		return List{results}
 	})
 	accum := reg.Func(a, reg.Func(b, a))
-	define3("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), func(acc, fn, list Value) Value {
+	define3("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), func(acc, fn, list value) value {
 		for _, v := range list.(List).elements {
 			acc = call2(fn, acc, v)
 		}
 		return acc
 	})
-	define2("list/repeat", reg.Func(types.IntRef, reg.Func(a, aList)), func(n, v Value) Value {
-		count := int(n.(Int))
+	define2("list/repeat", reg.Func(types.IntRef, reg.Func(a, aList)), func(n, v value) value {
+		count := int(n.(intValue))
 		if count < 0 {
 			panic(fail("list/repeat: negative count %d", count))
 		}
-		elems := make([]Value, count)
+		elems := make([]value, count)
 		for i := range elems {
 			elems[i] = v
 		}
@@ -93,9 +93,9 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	})
 
 	// Sorts stably, by a comparison like int/cmp.
-	define2("list/sort", reg.Func(reg.Func(a, reg.Func(a, order())), reg.Func(aList, aList)), func(fn, list Value) Value {
+	define2("list/sort", reg.Func(reg.Func(a, reg.Func(a, order())), reg.Func(aList, aList)), func(fn, list value) value {
 		elems := slices.Clone(list.(List).elements)
-		slices.SortStableFunc(elems, func(x, y Value) int {
+		slices.SortStableFunc(elems, func(x, y value) int {
 			switch call2(fn, x, y).(Variant).tag {
 			case ltID:
 				return -1
@@ -108,63 +108,63 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	})
 
 	// Text
-	define("text/length", reg.Func(types.TextRef, types.IntRef), func(text Value) Value {
-		return Int(len(text.(Text)))
+	define("text/length", reg.Func(types.TextRef, types.IntRef), func(text value) value {
+		return intValue(len(text.(textValue)))
 	})
-	define2("text/repeat", reg.Func(types.IntRef, reg.Func(types.TextRef, types.TextRef)), func(n, text Value) Value {
-		count := int(n.(Int))
+	define2("text/repeat", reg.Func(types.IntRef, reg.Func(types.TextRef, types.TextRef)), func(n, text value) value {
+		count := int(n.(intValue))
 		if count < 0 {
 			panic(fail("text/repeat: negative count %d", count))
 		}
-		return Text(strings.Repeat(string(text.(Text)), count))
+		return textValue(strings.Repeat(string(text.(textValue)), count))
 	})
-	define2("text/join", reg.Func(types.TextRef, reg.Func(textList, types.TextRef)), func(sep, list Value) Value {
+	define2("text/join", reg.Func(types.TextRef, reg.Func(textList, types.TextRef)), func(sep, list value) value {
 		elems := list.(List).elements
 		texts := make([]string, len(elems))
 		for i, v := range elems {
-			texts[i] = string(v.(Text))
+			texts[i] = string(v.(textValue))
 		}
-		return Text(strings.Join(texts, string(sep.(Text))))
+		return textValue(strings.Join(texts, string(sep.(textValue))))
 	})
-	define2("text/cmp", reg.Func(types.TextRef, reg.Func(types.TextRef, order())), func(a, b Value) Value {
-		return ordered(strings.Compare(string(a.(Text)), string(b.(Text))))
+	define2("text/cmp", reg.Func(types.TextRef, reg.Func(types.TextRef, order())), func(a, b value) value {
+		return ordered(strings.Compare(string(a.(textValue)), string(b.(textValue))))
 	})
 	// Splits the text around each separator; an empty one splits it into
 	// its characters.
-	define2("text/split", reg.Func(types.TextRef, reg.Func(types.TextRef, textList)), func(sep, text Value) Value {
-		parts := strings.Split(string(text.(Text)), string(sep.(Text)))
-		elems := make([]Value, len(parts))
+	define2("text/split", reg.Func(types.TextRef, reg.Func(types.TextRef, textList)), func(sep, text value) value {
+		parts := strings.Split(string(text.(textValue)), string(sep.(textValue)))
+		elems := make([]value, len(parts))
 		for i, part := range parts {
-			elems[i] = Text(part)
+			elems[i] = textValue(part)
 		}
 		return List{elems}
 	})
-	define("text/to-int", reg.Func(types.TextRef, maybe(types.IntRef)), func(text Value) Value {
-		i, err := strconv.ParseInt(string(text.(Text)), 10, 64)
+	define("text/to-int", reg.Func(types.TextRef, maybe(types.IntRef)), func(text value) value {
+		i, err := strconv.ParseInt(string(text.(textValue)), 10, 64)
 		if err != nil {
 			return nothing
 		}
-		return Variant{tag: some, value: Int(i)}
+		return Variant{tag: some, value: intValue(i)}
 	})
 
 	// Ints
-	define2("int/cmp", reg.Func(types.IntRef, reg.Func(types.IntRef, order())), func(a, b Value) Value {
-		return ordered(cmp.Compare(a.(Int), b.(Int)))
+	define2("int/cmp", reg.Func(types.IntRef, reg.Func(types.IntRef, order())), func(a, b value) value {
+		return ordered(cmp.Compare(a.(intValue), b.(intValue)))
 	})
 	// Division truncates towards zero, as in Go.
-	define2("int/div", reg.Func(types.IntRef, reg.Func(types.IntRef, maybe(types.IntRef))), func(a, b Value) Value {
-		if b.(Int) == 0 {
+	define2("int/div", reg.Func(types.IntRef, reg.Func(types.IntRef, maybe(types.IntRef))), func(a, b value) value {
+		if b.(intValue) == 0 {
 			return nothing
 		}
-		return Variant{tag: some, value: a.(Int) / b.(Int)}
+		return Variant{tag: some, value: a.(intValue) / b.(intValue)}
 	})
-	define("int/to-text", reg.Func(types.IntRef, types.TextRef), func(i Value) Value {
-		return Text(strconv.FormatInt(int64(i.(Int)), 10))
+	define("int/to-text", reg.Func(types.IntRef, types.TextRef), func(i value) value {
+		return textValue(strconv.FormatInt(int64(i.(intValue)), 10))
 	})
 
 	// int -> float
-	define("to-float", reg.Func(types.IntRef, types.FloatRef), func(i Value) Value {
-		return Float(i.(Int))
+	define("to-float", reg.Func(types.IntRef, types.FloatRef), func(i value) value {
+		return floatValue(i.(intValue))
 	})
 
 	// float -> int
@@ -174,24 +174,24 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, Variables) {
 	define("floor", floatToInt, roundFunc(math.Floor))
 
 	// bytes <-> text
-	define("bytes/to-utf8-text", reg.Func(types.BytesRef, types.TextRef), func(v Value) Value {
-		bytes := v.(Bytes)
+	define("bytes/to-utf8-text", reg.Func(types.BytesRef, types.TextRef), func(v value) value {
+		bytes := v.(bytesValue)
 		if !utf8.Valid(bytes) {
 			// Bytes print without labels, so without a table.
 			panic(fail("bytes/to-utf8-text: %s is not valid UTF-8", printValue(nil, bytes)))
 		}
-		return Text(bytes)
+		return textValue(bytes)
 	})
-	define("bytes/from-utf8-text", reg.Func(types.TextRef, types.BytesRef), func(text Value) Value {
-		return Bytes(text.(Text))
+	define("bytes/from-utf8-text", reg.Func(types.TextRef, types.BytesRef), func(text value) value {
+		return bytesValue(text.(textValue))
 	})
 
 	return scope, builtIns
 }
 
-func roundFunc(round func(float64) float64) func(Value) Value {
-	return func(f Value) Value {
-		return Int(round(float64(f.(Float))))
+func roundFunc(round func(float64) float64) func(value) value {
+	return func(f value) value {
+		return intValue(round(float64(f.(floatValue))))
 	}
 }
 

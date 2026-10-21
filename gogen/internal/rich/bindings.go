@@ -75,10 +75,10 @@ type Api struct {
 }
 
 func apiFromValue(l *labels, v eval.Value) Api {
-	r := v.(eval.Record)
+	r := v.Record()
 	return Api{
-		Data: bytes.Clone([]byte(r.Get(l.data).(eval.Bytes))),
-		Flag: byte(r.Get(l.flag).(eval.Byte)),
+		Data: bytes.Clone(r.Get(l.data).Bytes()),
+		Flag: r.Get(l.flag).Byte(),
 		Handle: func(fn eval.Value) func(C, string) (Reply, error) {
 			return func(a0 C, a1 string) (Reply, error) {
 				v, err := eval.Call(fn, a0.v, eval.Text(a1))
@@ -92,9 +92,9 @@ func apiFromValue(l *labels, v eval.Value) Api {
 		Helper: func(fn eval.Value) func(func(int64, int64) (int64, error)) (int64, error) {
 			return func(a0 func(int64, int64) (int64, error)) (int64, error) {
 				v, err := eval.Call(fn, eval.NewFunc("apiHelperArg0", 2, func(args []eval.Value) (eval.Value, error) {
-					r, err := a0(int64(args[0].(eval.Int)), int64(args[1].(eval.Int)))
+					r, err := a0(args[0].Int(), args[1].Int())
 					if err != nil {
-						return nil, err
+						return eval.Value{}, err
 					}
 					return eval.Int(r), nil
 				}))
@@ -102,12 +102,12 @@ func apiFromValue(l *labels, v eval.Value) Api {
 					var zero int64
 					return zero, err
 				}
-				return int64(v.(eval.Int)), nil
+				return v.Int(), nil
 			}
 		}(r.Get(l.helper)),
 		Init:  C{r.Get(l.init)},
-		Ratio: float64(r.Get(l.ratio).(eval.Float)),
-		Tags:  host.ListFrom(r.Get(l.tags), func(v eval.Value) string { return string(v.(eval.Text)) }),
+		Ratio: r.Get(l.ratio).Float(),
+		Tags:  host.ListFrom(r.Get(l.tags), func(v eval.Value) string { return v.Text() }),
 		Tree:  treeFromValue(l, r.Get(l.tree)),
 		Unit:  struct{}{},
 	}
@@ -118,9 +118,9 @@ func (x Api) toValue(l *labels) eval.Value {
 		eval.Bytes(bytes.Clone(x.Data)),
 		eval.Byte(x.Flag),
 		eval.NewFunc("apiHandle", 2, func(args []eval.Value) (eval.Value, error) {
-			r, err := x.Handle(C{args[0]}, string(args[1].(eval.Text)))
+			r, err := x.Handle(C{args[0]}, args[1].Text())
 			if err != nil {
-				return nil, err
+				return eval.Value{}, err
 			}
 			return r.toValue(l), nil
 		}),
@@ -132,11 +132,11 @@ func (x Api) toValue(l *labels) eval.Value {
 						var zero int64
 						return zero, err
 					}
-					return int64(v.(eval.Int)), nil
+					return v.Int(), nil
 				}
 			}(args[0]))
 			if err != nil {
-				return nil, err
+				return eval.Value{}, err
 			}
 			return eval.Int(r), nil
 		}),
@@ -144,7 +144,7 @@ func (x Api) toValue(l *labels) eval.Value {
 		eval.Float(x.Ratio),
 		host.ListTo(x.Tags, func(x string) eval.Value { return eval.Text(x) }),
 		x.Tree.toValue(l),
-		eval.Hole{},
+		eval.Hole(),
 	)
 }
 
@@ -204,12 +204,12 @@ func (x Reply) Respond() ReplyRespondPayload {
 }
 
 func replyFromValue(l *labels, v eval.Value) Reply {
-	t := v.(eval.Variant)
+	t := v.Variant()
 	switch t.Tag() {
 	case l.fetch:
 		return NewReplyFetch(replyFetchPayloadFromValue(l, t.Payload()))
 	case l.range_:
-		return NewReplyRange(string(t.Payload().(eval.Text)))
+		return NewReplyRange(t.Payload().Text())
 	case l.respond:
 		return NewReplyRespond(replyRespondPayloadFromValue(l, t.Payload()))
 	}
@@ -234,7 +234,7 @@ type ReplyFetchPayload struct {
 }
 
 func replyFetchPayloadFromValue(l *labels, v eval.Value) ReplyFetchPayload {
-	r := v.(eval.Record)
+	r := v.Record()
 	return ReplyFetchPayload{
 		Then: func(fn eval.Value) func(string) (Reply, error) {
 			return func(a0 string) (Reply, error) {
@@ -246,16 +246,16 @@ func replyFetchPayloadFromValue(l *labels, v eval.Value) ReplyFetchPayload {
 				return replyFromValue(l, v), nil
 			}
 		}(r.Get(l.then)),
-		Url: string(r.Get(l.url).(eval.Text)),
+		Url: r.Get(l.url).Text(),
 	}
 }
 
 func (x ReplyFetchPayload) toValue(l *labels) eval.Value {
 	return l.replyFetchPayloadShape.New(
 		eval.NewFunc("replyFetchPayloadThen", 1, func(args []eval.Value) (eval.Value, error) {
-			r, err := x.Then(string(args[0].(eval.Text)))
+			r, err := x.Then(args[0].Text())
 			if err != nil {
-				return nil, err
+				return eval.Value{}, err
 			}
 			return r.toValue(l), nil
 		}),
@@ -269,10 +269,10 @@ type ReplyRespondPayload struct {
 }
 
 func replyRespondPayloadFromValue(l *labels, v eval.Value) ReplyRespondPayload {
-	r := v.(eval.Record)
+	r := v.Record()
 	return ReplyRespondPayload{
-		Body:   bytes.Clone([]byte(r.Get(l.body).(eval.Bytes))),
-		Status: int64(r.Get(l.status).(eval.Int)),
+		Body:   bytes.Clone(r.Get(l.body).Bytes()),
+		Status: r.Get(l.status).Int(),
 	}
 }
 
@@ -321,7 +321,7 @@ func (x Tree) Node() TreeNodePayload {
 }
 
 func treeFromValue(l *labels, v eval.Value) Tree {
-	t := v.(eval.Variant)
+	t := v.Variant()
 	switch t.Tag() {
 	case l.leaf:
 		return NewTreeLeaf()
@@ -334,7 +334,7 @@ func treeFromValue(l *labels, v eval.Value) Tree {
 func (x Tree) toValue(l *labels) eval.Value {
 	switch x.tag {
 	case TreeLeaf:
-		return eval.NewVariant(l.leaf, nil)
+		return eval.NewVariant(l.leaf, eval.Value{})
 	case TreeNode:
 		return eval.NewVariant(l.node, (*x.node).toValue(l))
 	}
@@ -348,11 +348,11 @@ type TreeNodePayload struct {
 }
 
 func treeNodePayloadFromValue(l *labels, v eval.Value) TreeNodePayload {
-	r := v.(eval.Record)
+	r := v.Record()
 	return TreeNodePayload{
 		Left:  treeFromValue(l, r.Get(l.left)),
 		Right: treeFromValue(l, r.Get(l.right)),
-		Value: int64(r.Get(l.value).(eval.Int)),
+		Value: r.Get(l.value).Int(),
 	}
 }
 

@@ -122,7 +122,7 @@ type core struct {
 	// slots, label IDs and uses indices, by op.
 	extra []int32
 	// The values of literals and builtins, decoded once.
-	consts []Value
+	consts []value
 	// The table that tags and record keys are interned in.
 	labels *label.Table
 	// The table that the shapes of records are interned in, and the shapes
@@ -326,7 +326,7 @@ type unit struct {
 // Free names that they don't bind refer to globals. Tags and record keys
 // are interned in the label table of shapes, and the shapes of records in
 // shapes.
-func compile(units []unit, reg *types.Registry, globals Vars, shapes *shapeTable) (*core, error) {
+func compile(units []unit, reg *types.Registry, globals variables, shapes *shapeTable) (*core, error) {
 	root := int32(len(units) - 1)
 	c := compiler{
 		core:     core{labels: shapes.labels, table: shapes, spans: []span{{0, root}}},
@@ -460,7 +460,7 @@ type compiler struct {
 	core
 	units   []unit
 	reg     *types.Registry
-	globals Vars
+	globals variables
 	// The index in consts of each builtin referred to.
 	builtins map[string]int32
 	err      error
@@ -577,7 +577,7 @@ func (c *compiler) span(o op, xs []int32, x ast.Node) cnode {
 	return c.node(o, start, int32(len(c.extra)), x)
 }
 
-func (c *compiler) constant(v Value) int32 {
+func (c *compiler) constant(v value) int32 {
 	c.consts = append(c.consts, v)
 	return int32(len(c.consts) - 1)
 }
@@ -587,7 +587,7 @@ func (c *compiler) constant(v Value) int32 {
 func (c *compiler) builtin(x ast.Node, name string) int32 {
 	i, ok := c.builtins[name]
 	if !ok {
-		v := c.globals.Get(name)
+		v := c.globals[name]
 		if v == nil {
 			c.error(x, fmt.Sprintf("unknown variable %s", name))
 		}
@@ -766,7 +766,7 @@ func (c *compiler) expr(x ast.Node) cnode {
 	se := c.src
 	switch se.Kind(x) {
 	case ast.Literal:
-		v, err := Literal(se, x)
+		v, err := literal(se, x)
 		if err != nil {
 			c.error(x, err.Error())
 		}
@@ -1430,11 +1430,11 @@ func (c *compiler) pattern(x ast.Node, scope int) cnode {
 		return c.node(patBind, int32(slot), 0, x)
 
 	case ast.Literal:
-		v, err := Literal(se, x)
+		v, err := literal(se, x)
 		if err != nil {
 			c.error(x, err.Error())
 		}
-		if _, ok := v.(Float); ok {
+		if _, ok := v.(floatValue); ok {
 			c.error(x, ErrNoFloatMatch.Error())
 		}
 		return c.node(patLiteral, c.constant(v), 0, x)

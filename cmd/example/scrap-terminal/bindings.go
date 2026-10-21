@@ -45,7 +45,7 @@ type Program struct {
 }
 
 func programFromValue(l *labels, v eval.Value) Program {
-	r := v.(eval.Record)
+	r := v.Record()
 	return Program{
 		Init: turnFromValue(l, r.Get(l.init)),
 		Step: func(fn eval.Value) func(Event, S) (Turn, error) {
@@ -67,7 +67,7 @@ func (x Program) toValue(l *labels) eval.Value {
 		eval.NewFunc("programStep", 2, func(args []eval.Value) (eval.Value, error) {
 			r, err := x.Step(eventFromValue(l, args[0]), S{args[1]})
 			if err != nil {
-				return nil, err
+				return eval.Value{}, err
 			}
 			return r.toValue(l), nil
 		}),
@@ -81,10 +81,10 @@ type Turn struct {
 }
 
 func turnFromValue(l *labels, v eval.Value) Turn {
-	r := v.(eval.Record)
+	r := v.Record()
 	return Turn{
 		Next:  nextActionFromValue(l, r.Get(l.next)),
-		Out:   string(r.Get(l.out).(eval.Text)),
+		Out:   r.Get(l.out).Text(),
 		State: S{r.Get(l.state)},
 	}
 }
@@ -135,10 +135,10 @@ func (x NextAction) Exit() int64 {
 func NewNextActionReadLine() NextAction { return NextAction{tag: NextActionReadLine} }
 
 func nextActionFromValue(l *labels, v eval.Value) NextAction {
-	t := v.(eval.Variant)
+	t := v.Variant()
 	switch t.Tag() {
 	case l.exit:
-		return NewNextActionExit(int64(t.Payload().(eval.Int)))
+		return NewNextActionExit(t.Payload().Int())
 	case l.readLine:
 		return NewNextActionReadLine()
 	}
@@ -150,7 +150,7 @@ func (x NextAction) toValue(l *labels) eval.Value {
 	case NextActionExit:
 		return eval.NewVariant(l.exit, eval.Int(x.exit))
 	case NextActionReadLine:
-		return eval.NewVariant(l.readLine, nil)
+		return eval.NewVariant(l.readLine, eval.Value{})
 	}
 	panic("NextAction: invalid tag")
 }
@@ -193,12 +193,12 @@ func (x Event) Line() string {
 }
 
 func eventFromValue(l *labels, v eval.Value) Event {
-	t := v.(eval.Variant)
+	t := v.Variant()
 	switch t.Tag() {
 	case l.eof:
 		return NewEventEof()
 	case l.line:
-		return NewEventLine(string(t.Payload().(eval.Text)))
+		return NewEventLine(t.Payload().Text())
 	}
 	panic("Event: unknown tag")
 }
@@ -206,7 +206,7 @@ func eventFromValue(l *labels, v eval.Value) Event {
 func (x Event) toValue(l *labels) eval.Value {
 	switch x.tag {
 	case EventEof:
-		return eval.NewVariant(l.eof, nil)
+		return eval.NewVariant(l.eof, eval.Value{})
 	case EventLine:
 		return eval.NewVariant(l.line, eval.Text(x.line))
 	}

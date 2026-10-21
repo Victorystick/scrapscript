@@ -40,7 +40,7 @@ type Scrap struct {
 	loading, loaded bool
 	inferred        bool
 	result          types.Result
-	value           Value
+	value           value
 	prog            *program
 }
 
@@ -68,10 +68,10 @@ type Environment struct {
 	reg   types.Registry
 	// The shapes of records, whose labels are in reg's table.
 	shapes *shapeTable
-	// The TypeScope and Variables match each other's contents.
+	// The TypeScope and variables match each other's contents.
 	// One is used for type inference, the other for evaluation.
 	typeScope types.TypeScope
-	vars      Variables
+	vars      variables
 	scraps    map[hashKey]*Scrap
 	drafts    map[string]*Scrap // by path
 }
@@ -270,12 +270,13 @@ func (e *Environment) check(s *Scrap) (types.Result, error) {
 func (e *Environment) Eval(s *Scrap) (Value, error) {
 	res, err := e.infer(s)
 	if err != nil {
-		return nil, err
+		return Value{}, err
 	}
-	return e.eval(s, res)
+	v, err := e.eval(s, res)
+	return Value{v}, err
 }
 
-func (e *Environment) eval(s *Scrap, res types.Result) (Value, error) {
+func (e *Environment) eval(s *Scrap, res types.Result) (value, error) {
 	if res.Sort {
 		return nil, fmt.Errorf("cannot evaluate a type")
 	}
@@ -323,31 +324,31 @@ func (e *Environment) units(s *Scrap) []unit {
 func (e *Environment) Apply(fn, arg *Scrap) (v Value, err error) {
 	ares, err := e.infer(arg)
 	if err != nil {
-		return nil, err
+		return Value{}, err
 	}
 	fres, err := e.infer(fn)
 	if err != nil {
-		return nil, err
+		return Value{}, err
 	}
 	a, err := e.eval(arg, ares)
 	if err != nil {
-		return nil, err
+		return Value{}, err
 	}
 	f, err := e.eval(fn, fres)
 	if err != nil {
-		return nil, err
+		return Value{}, err
 	}
 	fnType, param := e.reg.Instantiate(fres.Type), e.reg.Var()
 	if e.reg.Unify(fnType, e.reg.Func(param, e.reg.Var())) != nil {
 		strs, where := e.reg.Strings(fnType)
-		return nil, fmt.Errorf("cannot apply: '%s' is not a function%s", strs[0], where)
+		return Value{}, fmt.Errorf("cannot apply: '%s' is not a function%s", strs[0], where)
 	}
 	if argType := e.reg.Instantiate(ares.Type); e.reg.Unify(param, argType) != nil {
 		strs, where := e.reg.Strings(argType, param)
-		return nil, fmt.Errorf("cannot apply: passed '%s' but expected '%s'%s", strs[0], strs[1], where)
+		return Value{}, fmt.Errorf("cannot apply: passed '%s' but expected '%s'%s", strs[0], strs[1], where)
 	}
 	defer catch(&err)
-	return apply(f, a), nil
+	return Value{apply(f, a)}, nil
 }
 
 // Infer returns the string representation of the type of a Scrap.
@@ -362,7 +363,7 @@ func (e *Environment) Infer(s *Scrap) (string, error) {
 // Print returns a scrap that evaluates to v, a value of this environment,
 // and prints the same.
 func (e *Environment) Print(v Value) string {
-	return printValue(e.reg.Labels(), v)
+	return printValue(e.reg.Labels(), v.v)
 }
 
 // PrintScrap evaluates s, and returns a scrap that evaluates to its value
@@ -373,7 +374,7 @@ func (e *Environment) PrintScrap(s *Scrap) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return printScrap(e.reg.Labels(), v, s.prog), nil
+	return printScrap(e.reg.Labels(), v.v, s.prog), nil
 }
 
 // Label returns the ID of the record label or enum tag name in this
