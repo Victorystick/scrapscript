@@ -16,12 +16,15 @@ import (
 //	text, bytes  n: kind | length  p: the first byte
 //	list         n: kind | length  p: the first element
 //	variant      n: kind | tag     p: the payload, or nil if it has none
-//	record       n: kind           p: the record
+//	record       n: kind | shape | length  p: the first value
 //	function     n: kind           p: the builtinFunc, partial or scriptFunc
 //
 // So a list's tail is its elements from the second on, without allocating.
+// A record's values are in the order of its shape's labels, and its shape
+// is its ID in the environment's shapeTable.
+//
 // p never points past the end of what it points into, which the garbage
-// collector requires, so empty text, bytes and lists have it nil.
+// collector requires, so empty text, bytes, lists and records have it nil.
 //
 // Values know their kinds, so that functions print the values they have
 // captured, whose types may vary. The evaluator otherwise trusts the
@@ -34,6 +37,12 @@ type value struct {
 const (
 	kindShift = 56
 	lenMask   = 1<<kindShift - 1
+
+	// A record's shape ID and length, below its kind.
+	shapeShift = 24
+	fieldsMask = 1<<shapeShift - 1
+	maxFields  = fieldsMask
+	maxShapes  = 1<<(kindShift-shapeShift) - 1
 )
 
 // The sentinels that scalars point to, by kind.
@@ -116,8 +125,27 @@ func (v value) asList() []value {
 	return unsafe.Slice((*value)(v.p), v.n&lenMask)
 }
 
-func recordVal(r *record) value       { return boxed(kindRecord, 0, unsafe.Pointer(r)) }
-func (v value) asRecord() *record     { return (*record)(v.p) }
+// recordVal returns the record of shape s with values, in the order of its
+// labels, which it takes ownership of.
+func recordVal(s *shape, values []value) value {
+	n := uint64(s.id)<<shapeShift | uint64(len(values))
+	if len(values) == 0 {
+		return boxed(kindRecord, n, nil)
+	}
+	return boxed(kindRecord, n, unsafe.Pointer(unsafe.SliceData(values)))
+}
+
+// shapeID returns the ID of the shape of v, a record.
+func (v value) shapeID() uint32 {
+	return uint32((v.n & lenMask) >> shapeShift)
+}
+
+// fields returns the values of v, a record, which the caller must not
+// modify.
+func (v value) fields() []value {
+	return unsafe.Slice((*value)(v.p), v.n&fieldsMask)
+}
+
 func builtinVal(b *builtinFunc) value { return boxed(kindBuiltin, 0, unsafe.Pointer(b)) }
 func partialVal(p *partial) value     { return boxed(kindPartial, 0, unsafe.Pointer(p)) }
 func scriptVal(sf *scriptFunc) value  { return boxed(kindScript, 0, unsafe.Pointer(sf)) }

@@ -96,7 +96,7 @@ func TestRunAgreesWithSimulate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s on %q: simulate: %v", name, input, err)
 			}
-			r := res.Record()
+			r := env.Record(res)
 			want, wantStatus := r.Get(env.Label("out")).Text(), int(r.Get(env.Label("status")).Int())
 			if out.String() != want || status != wantStatus {
 				t.Errorf("%s on %q: Run gave %q, %d; simulate gave %q, %d",

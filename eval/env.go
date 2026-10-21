@@ -363,7 +363,7 @@ func (e *Environment) Infer(s *Scrap) (string, error) {
 // Print returns a scrap that evaluates to v, a value of this environment,
 // and prints the same.
 func (e *Environment) Print(v Value) string {
-	return printValue(e.reg.Labels(), v.v)
+	return printValue(e.shapes, v.v)
 }
 
 // PrintScrap evaluates s, and returns a scrap that evaluates to its value
@@ -374,7 +374,7 @@ func (e *Environment) PrintScrap(s *Scrap) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return printScrap(e.reg.Labels(), v.v, s.prog), nil
+	return printScrap(e.shapes, v.v, s.prog), nil
 }
 
 // Label returns the ID of the record label or enum tag name in this

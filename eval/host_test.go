@@ -72,8 +72,8 @@ func TestRunProgram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prog := v.Record()
-	turn := prog.Get(e.Label("init")).Record()
+	prog := e.Record(v)
+	turn := e.Record(prog.Get(e.Label("init")))
 	var out strings.Builder
 	input := []string{"a", "b"}
 	for {
@@ -93,7 +93,7 @@ func TestRunProgram(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		turn = res.Record()
+		turn = e.Record(res)
 	}
 	if out.String() != "a\nb\n" {
 		t.Errorf("expected %q, got %q", "a\nb\n", out.String())
@@ -135,7 +135,7 @@ func TestShape(t *testing.T) {
 	if got := e.Print(r); got != `{ a = "x", b = 1 }` {
 		t.Errorf("expected { a = \"x\", b = 1 }, got %s", got)
 	}
-	if r.Record().Get(e.Label("b")).Int() != 1 || r.Record().Get(e.Label("c")).IsValid() {
+	if e.Record(r).Get(e.Label("b")).Int() != 1 || e.Record(r).Get(e.Label("c")).IsValid() {
 		t.Errorf("expected b = 1 and no c")
 	}
 	// A scrap reads the record's fields as those of its own records, which

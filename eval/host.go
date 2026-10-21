@@ -56,13 +56,13 @@ func (s *Shape) New(values ...Value) Value {
 		panic(fmt.Sprintf("eval.Shape.New: %d values for %d labels", len(values), len(s.shape.labels)))
 	}
 	if s.order == nil {
-		return Value{recordVal(&record{s.shape, fromHost(values)})}
+		return Value{recordVal(s.shape, fromHost(values))}
 	}
-	r := newRecord(s.shape)
+	r := make([]value, len(values))
 	for i, v := range values {
-		r.values[s.order[i]] = v.v
+		r[s.order[i]] = v.v
 	}
-	return Value{recordVal(r)}
+	return Value{recordVal(s.shape, r)}
 }
 
 // A Value is a value of a scrap, as a host sees it. The host knows its type
@@ -142,12 +142,12 @@ func (v Value) Bytes() []byte {
 
 // A Record is a record, as a host reads it.
 type Record struct {
-	r *record
+	r record
 }
 
-// Record returns the record that v is.
-func (v Value) Record() Record {
-	return Record{v.as(kindRecord).asRecord()}
+// Record returns the record that v, a value of this environment, is.
+func (e *Environment) Record(v Value) Record {
+	return Record{e.shapes.record(v.as(kindRecord))}
 }
 
 // Get returns the value of a record's field, or the zero Value if it has

@@ -75,7 +75,7 @@ type Api struct {
 }
 
 func apiFromValue(l *labels, v eval.Value) Api {
-	r := v.Record()
+	r := l.env.Record(v)
 	return Api{
 		Data: bytes.Clone(r.Get(l.data).Bytes()),
 		Flag: r.Get(l.flag).Byte(),
@@ -234,7 +234,7 @@ type ReplyFetchPayload struct {
 }
 
 func replyFetchPayloadFromValue(l *labels, v eval.Value) ReplyFetchPayload {
-	r := v.Record()
+	r := l.env.Record(v)
 	return ReplyFetchPayload{
 		Then: func(fn eval.Value) func(string) (Reply, error) {
 			return func(a0 string) (Reply, error) {
@@ -269,7 +269,7 @@ type ReplyRespondPayload struct {
 }
 
 func replyRespondPayloadFromValue(l *labels, v eval.Value) ReplyRespondPayload {
-	r := v.Record()
+	r := l.env.Record(v)
 	return ReplyRespondPayload{
 		Body:   bytes.Clone(r.Get(l.body).Bytes()),
 		Status: r.Get(l.status).Int(),
@@ -348,7 +348,7 @@ type TreeNodePayload struct {
 }
 
 func treeNodePayloadFromValue(l *labels, v eval.Value) TreeNodePayload {
-	r := v.Record()
+	r := l.env.Record(v)
 	return TreeNodePayload{
 		Left:  treeFromValue(l, r.Get(l.left)),
 		Right: treeFromValue(l, r.Get(l.right)),
@@ -366,8 +366,10 @@ func (x TreeNodePayload) toValue(l *labels) eval.Value {
 
 // labels are the IDs of the interface's record labels and tags in the
 // environment that Load checked the script in, which values hold, and
-// the shapes of its records there.
+// the shapes of its records there, and the environment, which reads
+// records.
 type labels struct {
+	env                      *eval.Environment
 	body                     label.ID
 	data                     label.ID
 	fetch                    label.ID
@@ -397,6 +399,7 @@ type labels struct {
 
 func newLabels(env *eval.Environment) *labels {
 	l := &labels{
+		env:     env,
 		body:    env.Label("body"),
 		data:    env.Label("data"),
 		fetch:   env.Label("fetch"),

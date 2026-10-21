@@ -45,7 +45,7 @@ type Program struct {
 }
 
 func programFromValue(l *labels, v eval.Value) Program {
-	r := v.Record()
+	r := l.env.Record(v)
 	return Program{
 		Init: turnFromValue(l, r.Get(l.init)),
 		Step: func(fn eval.Value) func(Event, S) (Turn, error) {
@@ -81,7 +81,7 @@ type Turn struct {
 }
 
 func turnFromValue(l *labels, v eval.Value) Turn {
-	r := v.Record()
+	r := l.env.Record(v)
 	return Turn{
 		Next:  nextActionFromValue(l, r.Get(l.next)),
 		Out:   r.Get(l.out).Text(),
@@ -215,8 +215,10 @@ func (x Event) toValue(l *labels) eval.Value {
 
 // labels are the IDs of the interface's record labels and tags in the
 // environment that Load checked the script in, which values hold, and
-// the shapes of its records there.
+// the shapes of its records there, and the environment, which reads
+// records.
 type labels struct {
+	env          *eval.Environment
 	eof          label.ID
 	exit         label.ID
 	init         label.ID
@@ -232,6 +234,7 @@ type labels struct {
 
 func newLabels(env *eval.Environment) *labels {
 	l := &labels{
+		env:      env,
 		eof:      env.Label("eof"),
 		exit:     env.Label("exit"),
 		init:     env.Label("init"),

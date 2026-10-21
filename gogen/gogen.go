@@ -54,7 +54,7 @@ func Generate(env *eval.Environment, iface *eval.Scrap, cfg Config) (map[string]
 		byRef:      make(map[types.TypeRef]*decl),
 		byKey:      make(map[string]*decl),
 		labels:     make(map[string]string),
-		labelNames: make(map[string]bool),
+		labelNames: map[string]bool{"env": true},
 	}
 	for _, name := range []string{"Interface", "Load"} {
 		g.names[name] = true
@@ -110,7 +110,7 @@ type generator struct {
 	byRef map[types.TypeRef]*decl
 	byKey map[string]*decl
 	// The fields of the labels struct, by the label or tag they hold the ID
-	// of, and the field names taken.
+	// of, and the field names taken, env among them.
 	labels     map[string]string
 	labelNames map[string]bool
 	// The fields of the labels struct that hold the shapes of records, in
@@ -486,15 +486,16 @@ func (g *generator) labelsType(w func(string, ...any)) {
 	names := slices.Sorted(maps.Keys(g.labels))
 	w("\n// labels are the IDs of the interface's record labels and tags in the\n")
 	w("// environment that Load checked the script in, which values hold, and\n")
-	w("// the shapes of its records there.\n")
-	w("type labels struct {\n")
+	w("// the shapes of its records there, and the environment, which reads\n")
+	w("// records.\n")
+	w("type labels struct {\n\tenv *eval.Environment\n")
 	for _, name := range names {
 		w("\t%s label.ID\n", g.labels[name])
 	}
 	for _, s := range g.shapes {
 		w("\t%s *eval.Shape\n", s.name)
 	}
-	w("}\n\nfunc newLabels(env *eval.Environment) *labels {\n\tl := &labels{\n")
+	w("}\n\nfunc newLabels(env *eval.Environment) *labels {\n\tl := &labels{\n\t\tenv: env,\n")
 	for _, name := range names {
 		w("\t\t%s: env.Label(%q),\n", g.labels[name], name)
 	}
@@ -523,7 +524,7 @@ func (g *generator) record(w func(string, ...any), d *decl) {
 	if len(d.fields) == 0 {
 		w("\treturn %s{}\n}\n", d.name)
 	} else {
-		w("\tr := v.Record()\n\treturn %s{\n", d.name)
+		w("\tr := l.env.Record(v)\n\treturn %s{\n", d.name)
 		for _, f := range d.fields {
 			w("\t\t%s: %s,\n", f.name, g.from(f.typ, fmt.Sprintf("r.Get(%s)", g.label(f.label))))
 		}

@@ -96,7 +96,7 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 	d := c.data[n]
 	switch o := c.ops[n]; o {
 	case opConst, patLiteral:
-		s.WriteString(printValue(c.labels, c.consts[d.a]))
+		s.WriteString(printValue(c.table, c.consts[d.a]))
 	case opLocal:
 		fmt.Fprintf(s, "@%d", d.a)
 	case opCapture:

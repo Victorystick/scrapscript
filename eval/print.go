@@ -8,14 +8,14 @@ import (
 	"strings"
 
 	"github.com/Victorystick/scrapscript/ast"
-	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/printer"
 	"github.com/Victorystick/scrapscript/scanner"
 	"github.com/Victorystick/scrapscript/token"
 )
 
 // printValue returns a scrap that evaluates to v and prints the same, as SPEC.md
-// section 10, rule 6, requires, with the names of labels in labels.
+// section 10, rule 6, requires, with the shapes of records and the names of
+// labels in shapes.
 //
 // A function prints as its code, with the bindings that the code refers to
 // in a where-clause after the value. Those are printed the same way, so
@@ -35,8 +35,8 @@ import (
 //
 // The bindings come from many scopes, but print as one where-group, so a
 // name that is already taken gets primes: a, a', a”.
-func printValue(labels *label.Table, v value) string {
-	p := newValuePrinter(labels)
+func printValue(shapes *shapeTable, v value) string {
+	p := newValuePrinter(shapes)
 	p.collect(v)
 	p.merge()
 	p.name()
@@ -46,7 +46,7 @@ func printValue(labels *label.Table, v value) string {
 // printScrap prints v, the value of prog, as printValue does, with the
 // members of the static part of its main source: the root scrap's, or if
 // that is an import, those of the scrap it refers to.
-func printScrap(labels *label.Table, v value, prog *program) string {
+func printScrap(shapes *shapeTable, v value, prog *program) string {
 	src := prog.main
 	main := prog.srcs[src]
 	x := main.se.Expr
@@ -55,9 +55,9 @@ func printScrap(labels *label.Table, v value, prog *program) string {
 		u = prog.whereUses(src, x)
 	}
 	if u < 0 {
-		return printValue(labels, v)
+		return printValue(shapes, v)
 	}
-	p := newValuePrinter(labels)
+	p := newValuePrinter(shapes)
 	p.collect(v)
 	if main.rootStatic >= 0 {
 		p.refs(prog, main.rootStatic, nil)
@@ -90,9 +90,9 @@ type binderKey struct {
 	b    int32 // the index in binders of prog
 }
 
-func newValuePrinter(labels *label.Table) *valuePrinter {
+func newValuePrinter(shapes *shapeTable) *valuePrinter {
 	return &valuePrinter{
-		labels:   labels,
+		shapes:   shapes,
 		byBinder: make(map[binderKey][]*binding),
 		names:    make(map[string]bool),
 		idents:   make(map[string]bool),
@@ -100,8 +100,8 @@ func newValuePrinter(labels *label.Table) *valuePrinter {
 }
 
 type valuePrinter struct {
-	labels   *label.Table
-	bindings []*binding // in the order that they are found
+	shapes   *shapeTable // and their labels
+	bindings []*binding  // in the order that they are found
 	// The bindings of each binder, one per value.
 	byBinder map[binderKey][]*binding
 	// The names that print as themselves without being bound, builtins.
@@ -157,7 +157,7 @@ func home(sf *scriptFunc) (binderKey, bool) {
 func (p *valuePrinter) collect(v value) {
 	switch v.kind() {
 	case kindRecord:
-		for _, val := range v.asRecord().values {
+		for _, val := range v.fields() {
 			p.collect(val)
 		}
 	case kindList:
@@ -391,8 +391,7 @@ func same(a, b value) bool {
 		x, y := a.asPartial(), b.asPartial()
 		return x.fn.name == y.fn.name && slices.EqualFunc(x.args, y.args, same)
 	case kindRecord:
-		x, y := a.asRecord(), b.asRecord()
-		return x.shape == y.shape && slices.EqualFunc(x.values, y.values, same)
+		return a.n == b.n && slices.EqualFunc(a.fields(), b.fields(), same)
 	case kindList:
 		return slices.EqualFunc(a.asList(), b.asList(), same)
 	case kindVariant:
@@ -494,10 +493,10 @@ func (p *valuePrinter) withMembers(s *strings.Builder, prog *program, src int32,
 	switch se.Kind(x) {
 	case ast.Record:
 		_, fields := se.Record(x)
-		var r *record
+		var r record
 		valued := v.kind() == kindRecord
 		if valued {
-			r = v.asRecord()
+			r = p.shapes.record(v)
 		}
 		n := 0
 		sep := func() {
@@ -511,7 +510,7 @@ func (p *valuePrinter) withMembers(s *strings.Builder, prog *program, src int32,
 		for i := 0; valued && i < len(r.values); i++ {
 			key := r.shape.labels[i]
 			sep()
-			name := p.labels.Name(key)
+			name := p.shapes.labels.Name(key)
 			s.WriteString(name)
 			s.WriteString(" = ")
 			if f := field(se, fields, name); f != ast.None && static.Has(f) {
@@ -522,7 +521,7 @@ func (p *valuePrinter) withMembers(s *strings.Builder, prog *program, src int32,
 		}
 		for i := range fields.Len() {
 			f := fields.Value(i)
-			if !static.Has(f) || valued && r.shape.index(p.labels.Of(se.TokenText(fields.Key(i)))) >= 0 {
+			if !static.Has(f) || valued && r.shape.index(p.shapes.labels.Of(se.TokenText(fields.Key(i)))) >= 0 {
 				continue
 			}
 			// A member, which the value leaves out.
@@ -610,7 +609,7 @@ func (p *valuePrinter) value(s *strings.Builder, v value, ctx printer.Context) {
 		s.WriteString("~~")
 		s.WriteString(base64.StdEncoding.EncodeToString(v.asBytes()))
 	case kindRecord:
-		r := v.asRecord()
+		r := p.shapes.record(v)
 		if len(r.values) == 0 {
 			s.WriteString("{}")
 			return
@@ -620,7 +619,7 @@ func (p *valuePrinter) value(s *strings.Builder, v value, ctx printer.Context) {
 			if i > 0 {
 				s.WriteString(", ")
 			}
-			s.WriteString(p.labels.Name(key))
+			s.WriteString(p.shapes.labels.Name(key))
 			s.WriteString(" = ")
 			p.value(s, r.values[i], printer.Expr)
 		}
@@ -642,10 +641,10 @@ func (p *valuePrinter) value(s *strings.Builder, v value, ctx printer.Context) {
 	case kindVariant:
 		payload := v.payload()
 		if !payload.valid() {
-			s.WriteString("#" + p.labels.Name(v.tag()))
+			s.WriteString("#" + p.shapes.labels.Name(v.tag()))
 			return
 		}
-		p.app(s, ctx, "#"+p.labels.Name(v.tag()), payload)
+		p.app(s, ctx, "#"+p.shapes.labels.Name(v.tag()), payload)
 	case kindBuiltin:
 		s.WriteString(v.asBuiltin().name)
 	case kindPartial:

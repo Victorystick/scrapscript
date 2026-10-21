@@ -2,6 +2,7 @@ package eval
 
 import (
 	"bytes"
+	"slices"
 
 	"github.com/Victorystick/scrapscript/label"
 )
@@ -78,7 +79,7 @@ func (l *lambdaCode) enter1(sf *scriptFunc, arg value) (tcode, frame) {
 			return a.body, g
 		}
 	}
-	panic(sf.prog.errorf(sf.node, "no arm matches %s", printValue(sf.prog.labels, arg)))
+	panic(sf.prog.errorf(sf.node, "no arm matches %s", printValue(sf.prog.table, arg)))
 }
 
 // enterN starts a call of the lambda l of sf with its arguments, the
@@ -264,7 +265,7 @@ func (p *program) expr(n cnode) code {
 					return bodies[i](f)
 				}
 			}
-			panic(p.errorf(n, "no arm matches %s", printValue(p.labels, v)))
+			panic(p.errorf(n, "no arm matches %s", printValue(p.table, v)))
 		}
 
 	case opMatchN:
@@ -430,46 +431,45 @@ func (p *program) expr(n cnode) code {
 		}
 		if base == none {
 			return func(f frame) value {
-				r := newRecord(s)
+				r := make([]value, len(s.labels))
 				for i, c := range vals {
-					r.values[keys[i]] = c(f)
+					r[keys[i]] = c(f)
 				}
-				return recordVal(r)
+				return recordVal(s, r)
 			}
 		}
 		bc := p.expr(base)
 		if s != nil {
 			return func(f frame) value {
-				r := newRecord(s)
-				copy(r.values, bc(f).asRecord().values)
+				r := make([]value, len(s.labels))
+				copy(r, bc(f).fields())
 				for i, c := range vals {
-					r.values[keys[i]] = c(f)
+					r[keys[i]] = c(f)
 				}
-				return recordVal(r)
+				return recordVal(s, r)
 			}
 		}
 		return func(f frame) value {
-			b := bc(f).asRecord()
-			r := newRecord(b.shape)
-			copy(r.values, b.values)
+			b := p.table.record(bc(f))
+			r := slices.Clone(b.values)
 			for i, c := range vals {
-				r.values[b.shape.index(label.ID(keys[i]))] = c(f)
+				r[b.shape.index(label.ID(keys[i]))] = c(f)
 			}
-			return recordVal(r)
+			return recordVal(b.shape, r)
 		}
 
 	case opAccess:
 		rc := p.operand(cnode(d.a))
 		key := label.ID(d.b)
 		return func(f frame) value {
-			r := rc.get(f).asRecord()
+			r := p.table.record(rc.get(f))
 			return r.values[r.shape.index(key)]
 		}
 
 	case opField:
 		rc := p.operand(cnode(d.a))
 		return func(f frame) value {
-			return rc.get(f).asRecord().values[d.b]
+			return rc.get(f).fields()[d.b]
 		}
 
 	case opList:
@@ -597,7 +597,7 @@ func (p *program) tail(n cnode) tcode {
 					return bodies[i](f)
 				}
 			}
-			panic(p.errorf(n, "no arm matches %s", printValue(p.labels, v)))
+			panic(p.errorf(n, "no arm matches %s", printValue(p.table, v)))
 		}
 
 	case opMatchN:
@@ -750,9 +750,9 @@ func (p *program) pattern(n cnode) mcode {
 		if rest == none {
 			// The checker closed the record's type to the pattern's fields.
 			return func(v value, f []value) bool {
-				r := v.asRecord()
+				r := v.fields()
 				for i, m := range ms {
-					if !m(r.values[keys[i]], f) {
+					if !m(r[keys[i]], f) {
 						return false
 					}
 				}
@@ -761,21 +761,20 @@ func (p *program) pattern(n cnode) mcode {
 		}
 		rm := p.pattern(rest)
 		return func(v value, f []value) bool {
-			r := v.asRecord()
+			r := p.table.record(v)
 			for i, m := range ms {
 				if !m(r.values[r.shape.index(s.labels[keys[i]])], f) {
 					return false
 				}
 			}
-			rest := newRecord(p.table.without(r.shape, s))
-			j := 0
+			rs := p.table.without(r.shape, s)
+			rest := make([]value, 0, len(rs.labels))
 			for i, l := range r.shape.labels {
 				if s.index(l) < 0 {
-					rest.values[j] = r.values[i]
-					j++
+					rest = append(rest, r.values[i])
 				}
 			}
-			return rm(recordVal(rest), f)
+			return rm(recordVal(rs, rest), f)
 		}
 
 	case patSplit:
@@ -788,17 +787,17 @@ func (p *program) pattern(n cnode) mcode {
 		}
 		rm := p.pattern(rest)
 		return func(v value, f []value) bool {
-			r := v.asRecord()
+			r := v.fields()
 			for i, m := range ms {
-				if !m(r.values[keys[i]], f) {
+				if !m(r[keys[i]], f) {
 					return false
 				}
 			}
-			rest := newRecord(rs)
+			rest := make([]value, len(from))
 			for i, j := range from {
-				rest.values[i] = r.values[j]
+				rest[i] = r[j]
 			}
-			return rm(recordVal(rest), f)
+			return rm(recordVal(rs, rest), f)
 		}
 
 	case patList:

@@ -4,14 +4,17 @@ import (
 	"encoding/binary"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/Victorystick/scrapscript/label"
 )
 
 // A shape is the labels of a record, in order by name, which is the order
 // that the record holds its values in. Shapes are interned per environment,
-// so records with the same labels share one, and never change.
+// so records with the same labels share one, and never change. A record
+// value holds its shape's ID, its index in the table.
 type shape struct {
+	id     uint32
 	labels []label.ID
 }
 
@@ -22,9 +25,12 @@ func (s *shape) index(l label.ID) int {
 
 // A shapeTable interns the shapes of an environment's records, whose
 // labels are in its label table. It only grows, and is safe for concurrent
-// use, as label.Table is.
+// use, as label.Table is: rest patterns add shapes while values run, which
+// may be on many goroutines (TODO.md section 3).
 type shapeTable struct {
 	labels *label.Table
+	// The shapes by ID, which `at` reads without locking.
+	byID atomic.Pointer[[]*shape]
 
 	mu    sync.RWMutex
 	byKey map[string]*shape // by the bytes of their labels
@@ -34,11 +40,18 @@ type shapeTable struct {
 }
 
 func newShapeTable(labels *label.Table) *shapeTable {
-	return &shapeTable{
+	t := &shapeTable{
 		labels: labels,
 		byKey:  make(map[string]*shape),
 		rests:  make(map[[2]*shape]*shape),
 	}
+	t.byID.Store(new([]*shape))
+	return t
+}
+
+// at returns the shape with the ID.
+func (t *shapeTable) at(id uint32) *shape {
+	return (*t.byID.Load())[id]
 }
 
 // sort sorts labels by name, the order of a shape.
@@ -65,8 +78,19 @@ func (t *shapeTable) of(labels []label.ID) *shape {
 	if s, ok := t.byKey[string(key)]; ok {
 		return s
 	}
-	s = &shape{labels}
+	if len(labels) > maxFields {
+		panic("eval: a record has too many fields")
+	}
+	byID := *t.byID.Load()
+	if len(byID) > maxShapes {
+		panic("eval: too many shapes of records")
+	}
+	s = &shape{uint32(len(byID)), labels}
 	t.byKey[string(key)] = s
+	// Readers only see shapes up to the length they loaded, so appending in
+	// place is safe.
+	byID = append(byID, s)
+	t.byID.Store(&byID)
 	return s
 }
 

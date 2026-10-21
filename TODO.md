@@ -35,6 +35,15 @@ multi-pattern arms, where-groups and pattern operators separately.
       bytes; `++` on lists, text or bytes) statically instead of by the
       runtime value.
 - [ ] Use them to specialise functions per record shape (SPEC.md section 12).
+- [ ] Know the shapes of rests statically, so that the shape table stops
+      changing once a program is compiled and loses its locks. A rest
+      pattern on an open record makes its rest's shape while values run
+      (`shapeTable.without`), and access to a field of an open record
+      searches its shape. Either collect the closed rows that the checker
+      instantiates each open row with, following generic callers to a
+      fixpoint, and make those shapes when compiling; or pass rests' shapes
+      and fields' indices as hidden arguments (evidence passing, SPEC.md
+      section 12), which also spares access its search.
 
 ## 4. Errors everywhere after type checking
 

@@ -32,46 +32,15 @@ func (k kind) String() string {
 	return kindNames[k]
 }
 
-// A record holds its values in the order of its shape's labels.
+// A record is a record's shape and values, as read from a record value.
 type record struct {
 	shape  *shape
 	values []value
 }
 
-// A record allocated together with its values.
-type recordWith[A any] struct {
-	record
-	buf A
-}
-
-// newRecord returns a record of the shape s, whose values the caller sets.
-// A record of up to eight values is one allocation.
-func newRecord(s *shape) *record {
-	switch len(s.labels) {
-	case 1:
-		return inlineRecord(s, func(a *[1]value) []value { return a[:] })
-	case 2:
-		return inlineRecord(s, func(a *[2]value) []value { return a[:] })
-	case 3:
-		return inlineRecord(s, func(a *[3]value) []value { return a[:] })
-	case 4:
-		return inlineRecord(s, func(a *[4]value) []value { return a[:] })
-	case 5:
-		return inlineRecord(s, func(a *[5]value) []value { return a[:] })
-	case 6:
-		return inlineRecord(s, func(a *[6]value) []value { return a[:] })
-	case 7:
-		return inlineRecord(s, func(a *[7]value) []value { return a[:] })
-	case 8:
-		return inlineRecord(s, func(a *[8]value) []value { return a[:] })
-	}
-	return &record{s, make([]value, len(s.labels))}
-}
-
-func inlineRecord[A any](s *shape, values func(*A) []value) *record {
-	r := &recordWith[A]{}
-	r.shape, r.values = s, values(&r.buf)
-	return &r.record
+// record returns the record that v, a record of a shape in t, is.
+func (t *shapeTable) record(v value) record {
+	return record{t.at(v.shapeID()), v.fields()}
 }
 
 // A built-in function, or one that a host implements, which takes arity

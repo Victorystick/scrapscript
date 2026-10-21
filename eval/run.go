@@ -176,7 +176,7 @@ func (sf *scriptFunc) frame(size int) frame {
 func (p *program) noArm(n cnode, args []value) runtimeError {
 	strs := make([]string, len(args))
 	for i, a := range args {
-		strs[i] = printValue(p.labels, a)
+		strs[i] = printValue(p.table, a)
 	}
 	return p.errorf(n, "no arm matches %s", strings.Join(strs, ", "))
 }
