@@ -1,9 +1,6 @@
 package eval
 
 import (
-	"bytes"
-	"slices"
-
 	"github.com/Victorystick/scrapscript/label"
 )
 
@@ -13,7 +10,7 @@ import (
 // as IDs in their environment's table, so they print through it, with
 // Environment.Print.
 type Value interface {
-	eq(other Value) bool
+	isValue()
 }
 
 type Hole struct{}
@@ -127,83 +124,15 @@ func (sf ScriptFunc) composition() bool {
 	return sf.prog.ops[sf.node] == opCompose
 }
 
-func Equals(a, b Value) bool {
-	switch a.(type) {
-	case Hole:
-		return a.eq(b)
-	case Int:
-		return a.eq(b)
-	case Float:
-		return a.eq(b)
-	case Text:
-		return a.eq(b)
-	case Byte:
-		return a.eq(b)
-	case Bytes:
-		return a.eq(b)
-	case Record:
-		return a.eq(b)
-	case List:
-		return a.eq(b)
-	case Variant:
-		return a.eq(b)
-	case BuiltInFunc:
-		return a.eq(b)
-	case Partial:
-		return a.eq(b)
-	case ScriptFunc:
-		return a.eq(b)
-	}
-	return false
-}
-
-func (h Hole) eq(other Value) bool {
-	_, ok := other.(Hole)
-	return ok
-}
-func (i Int) eq(other Value) bool {
-	o, ok := other.(Int)
-	return ok && i == o
-}
-func (f Float) eq(other Value) bool {
-	o, ok := other.(Float)
-	return ok && f == o
-}
-func (t Text) eq(other Value) bool {
-	o, ok := other.(Text)
-	return ok && t == o
-}
-func (b Byte) eq(other Value) bool {
-	o, ok := other.(Byte)
-	return ok && b == o
-}
-func (bs Bytes) eq(other Value) bool {
-	o, ok := other.(Bytes)
-	return ok && bytes.Equal(bs, o)
-}
-func (i Record) eq(other Value) bool {
-	o, ok := other.(Record)
-	return ok && i.shape == o.shape && slices.EqualFunc(i.values, o.values, Equals)
-}
-func (l List) eq(other Value) bool {
-	o, ok := other.(List)
-	return ok && slices.EqualFunc(l.elements, o.elements, Equals)
-}
-func (v Variant) eq(other Value) bool {
-	o, ok := other.(Variant)
-	return ok && v.tag == o.tag && Equals(v.value, o.value)
-}
-func (bf BuiltInFunc) eq(other Value) bool {
-	o, ok := other.(BuiltInFunc)
-	return ok && bf.name == o.name
-}
-
-// Functions are equal if they print the same.
-func (p Partial) eq(other Value) bool {
-	o, ok := other.(Partial)
-	return ok && p.fn.name == o.fn.name && slices.EqualFunc(p.args, o.args, Equals)
-}
-func (sf ScriptFunc) eq(other Value) bool {
-	o, ok := other.(ScriptFunc)
-	return ok && printValue(sf.prog.labels, sf) == printValue(o.prog.labels, o)
-}
+func (Hole) isValue()        {}
+func (Int) isValue()         {}
+func (Float) isValue()       {}
+func (Text) isValue()        {}
+func (Byte) isValue()        {}
+func (Bytes) isValue()       {}
+func (Record) isValue()      {}
+func (List) isValue()        {}
+func (Variant) isValue()     {}
+func (BuiltInFunc) isValue() {}
+func (Partial) isValue()     {}
+func (ScriptFunc) isValue()  {}

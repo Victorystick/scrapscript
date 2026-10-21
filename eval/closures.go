@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"bytes"
 	"slices"
 
 	"github.com/Victorystick/scrapscript/label"
@@ -707,8 +708,13 @@ func (p *program) pattern(n cnode) mcode {
 		return matchAny
 
 	case patLiteral:
+		// A literal is a primitive of the matched value's type; of those,
+		// only bytes aren't comparable with ==.
+		if c, ok := p.consts[d.a].(Bytes); ok {
+			return func(v Value, _ []Value) bool { return bytes.Equal(c, v.(Bytes)) }
+		}
 		c := p.consts[d.a]
-		return func(v Value, _ []Value) bool { return c.eq(v) }
+		return func(v Value, _ []Value) bool { return v == c }
 
 	case patVariant:
 		tag := label.ID(d.a)

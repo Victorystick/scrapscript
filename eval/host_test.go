@@ -138,13 +138,15 @@ func TestShape(t *testing.T) {
 	if r.Get(e.Label("b")) != eval.Int(1) || r.Get(e.Label("c")) != nil {
 		t.Errorf("expected b = 1 and no c")
 	}
-	// A record from a scrap has the same shape, whatever its fields' order.
-	v, err := e.Eval(read(t, e, `{ b = 1, a = "x" }`))
+	// A scrap reads the record's fields as those of its own records, which
+	// have the same shape, whatever its fields' order.
+	fn, err := e.Eval(read(t, e, `| { b = 1, a = a } -> a ++ "y" | _ -> "no"`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !eval.Equals(r, v) {
-		t.Errorf("expected %s to equal %s", e.Print(r), e.Print(v))
+	v, err := eval.Call(fn, r)
+	if err != nil || v != eval.Text("xy") {
+		t.Errorf("expected \"xy\", got %v, %v", v, err)
 	}
 	// Labels given in the record's order need no reordering.
 	if got := e.Print(e.Shape(e.Label("a"), e.Label("b")).New(eval.Text("x"), eval.Int(1))); got != `{ a = "x", b = 1 }` {

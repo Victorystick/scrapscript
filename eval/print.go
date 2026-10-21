@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"bytes"
 	"encoding/base64"
 	"slices"
 	"strconv"
@@ -387,8 +388,14 @@ func same(a, b Value) bool {
 	case Variant:
 		o, ok := b.(Variant)
 		return ok && a.tag == o.tag && same(a.value, o.value)
+	case Bytes:
+		o, ok := b.(Bytes)
+		return ok && bytes.Equal(a, o)
+	case BuiltInFunc:
+		o, ok := b.(BuiltInFunc)
+		return ok && a.name == o.name
 	}
-	return a.eq(b)
+	return a == b
 }
 
 // name names the bindings: each by its own name, unless an earlier binding

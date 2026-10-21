@@ -99,9 +99,9 @@ builtins now return plain values and panic with a `runtimeError`, which
 
 - [x] Tail calls, sorely missing: platform run loops recurse once per event
       and grow the stack without bound.
-- [ ] Functions aren't comparable. Remove their `eq` methods (a
+- [x] Functions aren't comparable. Remove their `eq` methods (a
       `ScriptFunc` compares by printing), remove `eval.Equals`, and mark
-      `Value` with an unexported `value()` method instead of `eq`. Only
+      `Value` with an unexported `isValue()` method instead of `eq`. Only
       literal patterns compare values, and only primitives.
 - [ ] Sources have no file name, so errors in drafts don't say which file.
 - [ ] Structure parse and type errors for an LSP as well as the CLI: a
