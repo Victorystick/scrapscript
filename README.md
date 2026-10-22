@@ -30,6 +30,16 @@ So far it supports
     list text -> int
     ```
 
+* `scrap test` to run the test cases of a script passed over standard input, made with `lib/test.scrap` and grouped in records and lists. It prints each failing case and exits with status 1 if any failed.
+
+    ```sh
+    $ cd lib && printf '{ adds = t.eq (1 + 1) 3 }\n; t = $"./test.scrap"' | scrap test
+    FAIL adds
+        got  2
+        want 3
+    1 failed, 0 passed
+    ```
+
 ## Missing
 
 * `scrap flat` - due to a lack of details.

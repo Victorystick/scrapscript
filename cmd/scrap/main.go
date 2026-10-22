@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/token"
@@ -20,6 +21,7 @@ type Command struct {
 var commands = []Command{
 	{name: "eval", desc: "evaluates it", fn: evaluate},
 	{name: "type", desc: "infers its type", fn: inferType},
+	{name: "test", desc: "runs the test cases it holds", fn: runTests},
 	{name: "push", desc: "pushes it to the server", fn: pushScrap},
 	{name: "hash", desc: "prints its sha256 hash", fn: hashScrap},
 }
@@ -93,6 +95,28 @@ func inferType(args []string) {
 	env := makeEnv()
 	scrap := must(env.Read(input))
 	fmt.Println(must(env.Infer(scrap)))
+}
+
+// runTests prints each failing case of a test scrap and a summary, and
+// exits with status 1 if any case failed.
+func runTests(args []string) {
+	input := must(io.ReadAll(os.Stdin))
+	env := makeEnv()
+	scrap := must(env.Read(input))
+	results := must(env.Test(scrap))
+	failed := 0
+	for _, r := range results {
+		if !r.Failed {
+			continue
+		}
+		failed++
+		fmt.Println(strings.TrimSpace("FAIL " + r.Path))
+		fmt.Println("    " + strings.ReplaceAll(r.Message, "\n", "\n    "))
+	}
+	fmt.Printf("%d failed, %d passed\n", failed, len(results)-failed)
+	if failed > 0 {
+		os.Exit(1)
+	}
 }
 
 func pushScrap(args []string) {
