@@ -40,6 +40,12 @@ So far it supports
     1 failed, 0 passed
     ```
 
+* `--root dir` reads the script as if it were a file in `dir`, which relative imports such as `$"./test.scrap"` resolve from, and `--cache dir` keeps fetched scraps in `dir` instead of the user cache directory. Flags go before or after the command:
+
+    ```sh
+    $ scrap eval --root ./lib --cache ./tmp-scraps < some.scrap
+    ```
+
 ## Missing
 
 * `scrap flat` - due to a lack of details.

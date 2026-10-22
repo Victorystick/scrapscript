@@ -28,6 +28,8 @@ var commands = []Command{
 
 var (
 	server = flag.String("server", "https://scraps.oseg.dev/", "The scrapyard server to use")
+	root   = flag.String("root", ".", "The directory the script reads drafts from, as if it were a file there")
+	cache  = flag.String("cache", "", "The directory to cache fetched scraps in (default: the user cache directory)")
 )
 
 func main() {
@@ -53,7 +55,9 @@ func main() {
 		os.Exit(2)
 	}
 
-	cmd.fn(flag.Args()[1:])
+	// Flags may also follow the command.
+	flag.CommandLine.Parse(flag.Args()[1:])
+	cmd.fn(flag.Args())
 }
 
 func must[T any](val T, err error) T {
@@ -69,11 +73,14 @@ func makeEnv() *eval.Environment {
 
 	pusher := yards.ByHttp(*server)
 	env.UsePusher(pusher)
-	env.UseDrafts(os.DirFS("."))
-	env.UseFetcher(must(yards.NewDefaultCacheFetcher(
-		// Don't cache invalid scraps, but trust the local cache for now.
-		yards.Validate(pusher)),
-	))
+	env.UseDrafts(os.DirFS(*root))
+	// Don't cache invalid scraps, but trust the local cache for now.
+	fetcher := yards.Validate(pusher)
+	if *cache != "" {
+		env.UseFetcher(must(yards.NewCacheFetcher(*cache, fetcher)))
+	} else {
+		env.UseFetcher(must(yards.NewDefaultCacheFetcher(fetcher)))
+	}
 	return env
 }
 
