@@ -81,8 +81,6 @@ type context struct {
 	tvars   *Scope[tvar]
 	imports Imports
 	nodes   []TypeRef
-	// How many tag payloads the type expression being read is inside of.
-	payloads int
 	// The aliases being expanded, outermost first.
 	expanding []*alias
 	// The groups of the where nodes met, and their indices by node.

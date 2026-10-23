@@ -693,6 +693,23 @@ func (r *Registry) occurs(v TypeRef, level uint32, t TypeRef) error {
 	return nil
 }
 
+// guarded reports whether every path from t to the variable v passes
+// through a tag's payload. It stops at enums, so it terminates on recursive
+// types, whose cycles pass through enums.
+func (r *Registry) guarded(t, v TypeRef) bool {
+	t = r.Resolve(t)
+	n := r.at(t)
+	switch n.kind {
+	case varKind:
+		return t != v
+	case listKind, recordKind:
+		return r.guarded(n.a, v)
+	case funcKind, extendKind, fieldKind:
+		return r.guarded(n.a, v) && r.guarded(n.b, v)
+	}
+	return true
+}
+
 // unifyRows unifies two rows, which may list their labels in any order.
 func (r *Registry) unifyRows(a, b TypeRef) error {
 	a, b = r.Resolve(a), r.Resolve(b)

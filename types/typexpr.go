@@ -35,12 +35,12 @@ type alias struct {
 	done bool
 
 	// While the alias is being expanded: the arguments it is expanded with,
-	// the payload depth it started at, and the node that a recursive use of
-	// it refers back to, once there is one.
+	// and the type that a recursive use of it refers back to and the first
+	// such use, once there is one.
 	pending bool
 	args    []TypeRef
-	depth   int
 	back    TypeRef
+	use     ast.Node
 
 	// Its definition, which its types print by, once it has one.
 	def *typeDef
@@ -291,9 +291,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 			}
 			tags[tag] = HoleRef
 			if payload != ast.None {
-				c.payloads++
 				tags[tag] = c.typ(payload)
-				c.payloads--
 			}
 		}
 		return c.reg.add(node{kind: enumKind, a: c.reg.row(tags, c.rowTail(tail))})
@@ -485,13 +483,16 @@ func (c *context) alias(x ast.Node, a *alias) TypeRef {
 //
 // A use of the alias within its own expansion makes it a recursive type: it
 // refers back to the type being expanded, so that the type is a cycle in the
-// registry (SPEC.md section 7.5). It must recur within a tag's payload, and
-// apply the alias to the same arguments, or the type would be infinite.
+// registry (SPEC.md section 7.5). Every cycle must pass through a tag's
+// payload, which is checked on the expanded type, so that an argument the
+// alias passes to another may recur where that one puts it. A recursive use
+// must also apply the alias to the same arguments, or the type would be
+// infinite.
 func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 	if a.pending {
 		return c.recur(x, a, refs)
 	}
-	a.pending, a.args, a.depth, a.back = true, refs, c.payloads, NoType
+	a.pending, a.args, a.back = true, refs, NoType
 	c.expanding = append(c.expanding, a)
 	before := c.reg.next()
 	aliases, tvars := c.aliases, c.tvars
@@ -505,12 +506,17 @@ func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 	back := a.back
 	a.pending, a.args = false, nil
 	if back != NoType {
+		if !c.reg.guarded(ref, back) {
+			c.bail(a.use, fmt.Sprintf("recursive type %s must recur within a tag's payload", a.name))
+		}
 		c.reg.link(back, ref)
 	}
 	// The type prints by the alias's name, unless it is a type that
 	// existed before, such as a primitive or another alias's type, or an
-	// alias in its body named it first.
-	if _, named := c.reg.names[ref]; ref >= before && !named {
+	// alias in its body named it first. A recursive alias names it anyway,
+	// since the name the body gave it has the type itself as an argument,
+	// as in `expr = expr-f expr`.
+	if _, named := c.reg.names[ref]; ref >= before && (!named || back != NoType) {
 		c.reg.name(ref, typeName{c.define(x, a, ref), refs})
 	}
 	return ref
@@ -539,21 +545,21 @@ func (c *context) define(x ast.Node, a *alias, ref TypeRef) *typeDef {
 // another this way, each with its own generalized parameters.
 func (c *context) independently(f func() TypeRef) TypeRef {
 	type state struct {
-		args  []TypeRef
-		depth int
-		back  TypeRef
+		args []TypeRef
+		back TypeRef
+		use  ast.Node
 	}
 	outer := c.expanding
 	saved := make([]state, len(outer))
 	for i, a := range outer {
-		saved[i] = state{a.args, a.depth, a.back}
+		saved[i] = state{a.args, a.back, a.use}
 		a.pending = false
 	}
 	c.expanding = nil
 	ref := f()
 	c.expanding = outer
 	for i, a := range outer {
-		a.pending, a.args, a.depth, a.back = true, saved[i].args, saved[i].depth, saved[i].back
+		a.pending, a.args, a.back, a.use = true, saved[i].args, saved[i].back, saved[i].use
 	}
 	return ref
 }
@@ -561,16 +567,13 @@ func (c *context) independently(f func() TypeRef) TypeRef {
 // recur returns the type that a recursive use x of the alias a, applied to
 // refs, refers back to.
 func (c *context) recur(x ast.Node, a *alias, refs []TypeRef) TypeRef {
-	if c.payloads == a.depth {
-		c.bail(x, fmt.Sprintf("recursive type %s must recur within a tag's payload", a.name))
-	}
 	for i, ref := range refs {
 		if c.reg.Resolve(ref) != c.reg.Resolve(a.args[i]) {
 			c.bail(x, fmt.Sprintf("recursive type %s must recur with the same type arguments", a.name))
 		}
 	}
 	if a.back == NoType {
-		a.back = c.reg.Var()
+		a.back, a.use = c.reg.Var(), x
 	}
 	return a.back
 }

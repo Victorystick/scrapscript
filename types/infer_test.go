@@ -227,6 +227,14 @@ func TestInfer(t *testing.T) {
 		{`sum ; sum : a => (a -> int) -> tree a -> int = f -> | #leaf -> 0 | #node n -> f n.value + sum f n.left + sum f n.right
 ; tree = a => [#leaf, #node { value : a, left : tree a, right : tree a }]`,
 			"(a -> int) -> tree a -> int\n; tree = a => [ #leaf, #node { left : tree a, right : tree a, value : a } ]"},
+		// A recursive type may recur through another alias's parameter, where
+		// that one puts it in a tag's payload.
+		{`f ; f : expr -> expr = x -> x ; expr-f = a => [#lit int, #neg a] ; expr : type = expr-f expr`,
+			"expr -> expr\n; expr : type = [ #lit int, #neg expr ]"},
+		{`f ; f : tree int -> int = _ -> 0 ; tree-f = a => b => [#leaf, #node { v : a, l : b, r : b }] ; tree = a => tree-f a (tree a)`,
+			"tree int -> int\n; tree = a => [ #leaf, #node { l : tree a, r : tree a, v : a } ]"},
+		{`f ; f : expr-f int -> int = _ -> 0 ; expr-f = a => [#lit int, #neg a] ; expr : type = expr-f expr`,
+			"expr-f int -> int\n; expr-f = a => [ #lit int, #neg a ]"},
 		{`xs ; xs : ints = #cons { head = 1, tail = #cons { head = 2, tail = #nil } }
 ; ints : type = [#nil, #cons { head : int, tail : ints }]`, "ints\n; ints : type = [ #cons { head : int, tail : ints }, #nil ]"},
 		// A recursive function may be under a where-clause.
@@ -336,6 +344,8 @@ func TestInferFailure(t *testing.T) {
 		{`1 ; t : type = list t`, `recursive type t must recur within a tag's payload`},
 		{`1 ; t : type = { a : t }`, `recursive type t must recur within a tag's payload`},
 		{`1 ; t : type = u ; u : type = list t`, `recursive type t must recur within a tag's payload`},
+		{`1 ; f = a => { x : a } ; t : type = f t`, `recursive type t must recur within a tag's payload`},
+		{`1 ; id = a => a ; t : type = id t`, `recursive type t must recur within a tag's payload`},
 		{`1 ; t = a => [#a (t (list a))]`, `recursive type t must recur with the same type arguments`},
 		{`f #b ; f : t -> int = _ -> 1 ; t : type = [#a t]`, "cannot unify 't' with '[ #b, ..a ]'\n; t : type = [ #a t ]"},
 		// Paths reach type members statically.

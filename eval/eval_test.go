@@ -357,6 +357,17 @@ func TestExpressionFragments(t *testing.T) {
 		`text = "let x = (2 + 3) in if (x < 10) then (x * x) else -x", unbound = #err "unbound y", value = #ok 25 }`)
 }
 
+// The same language as functors that map over children and algebras folded
+// over them, with a pass that rewrites one tag into a smaller language.
+func TestExpressionAlgebras(t *testing.T) {
+	source, err := os.ReadFile("testdata/cata.scrap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evalString(t, string(source), `{ desugared = "(2 + (-1 * (3 * 4)))", desugared-value = -10, `+
+		`text = "(2 + -(3 * 4))", value = -10 }`)
+}
+
 func TestFailures(t *testing.T) {
 	for _, ex := range failures {
 		evalFailure(t, ex.source, ex.error)

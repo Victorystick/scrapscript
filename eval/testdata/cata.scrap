@@ -1,0 +1,64 @@
+-- The expression language of expr.scrap, split the way data types à la carte
+-- splits it: each tag group maps a function over its children once, and each
+-- operation is an algebra that handles one layer, with its children already
+-- folded. A pass that handles some tags returns the rest unchanged, without
+-- arms for them.
+{ value = cata eval-alg program
+, text = cata show-alg program
+, desugared = cata desugar program |> cata-small show-small-alg
+, desugared-value = cata desugar program |> cata-small eval-small-alg
+}
+
+; program : expr = #add { l = #lit 2, r = #neg (#mul { l = #lit 3, r = #lit 4 }) }
+
+-- The functors, and the languages that are their fixed points.
+; expr-f : type -> type = a => [#lit int, #add { l : a, r : a }, #mul { l : a, r : a }, #neg a]
+; expr : type = expr-f expr
+; small-f : type -> type = a => [#lit int, #add { l : a, r : a }, #mul { l : a, r : a }]
+; small : type = small-f small
+
+-- The knots fold an algebra bottom-up, one per language, since a fold can't
+-- be generic over the functor without higher-kinded type variables.
+; cata : b => (expr-f b -> b) -> expr -> b = alg -> x -> alg (fmap (cata alg) x)
+; fmap = f -> x -> chain map-ops map-neg f map-lit x
+; cata-small : b => (small-f b -> b) -> small -> b = alg -> x -> alg (map-ops (cata-small alg) map-lit x)
+
+-- Composes two fragments into one.
+; chain = f -> g -> h -> ext -> f h (g h ext)
+
+-- Mapping over children.
+; map-lit = | #lit n -> #lit n
+; map-ops = f -> ext ->
+    | #add { l = l, r = r } -> #add { l = f l, r = f r }
+    | #mul { l = l, r = r } -> #mul { l = f l, r = f r }
+    | other -> ext other
+; map-neg = f -> ext ->
+    | #neg e -> #neg (f e)
+    | other -> ext other
+
+-- Rewrites negation as multiplication, into the smaller language.
+; desugar = | #neg a -> #mul { l = #lit -1, r = a } | other -> other
+
+-- Evaluation.
+; eval-alg = x -> chain eval-ops eval-neg () eval-lit x
+; eval-small-alg = x -> eval-ops () eval-lit x
+; eval-lit = | #lit n -> n
+; eval-ops = _ -> ext ->
+    | #add { l = l, r = r } -> l + r
+    | #mul { l = l, r = r } -> l * r
+    | other -> ext other
+; eval-neg = _ -> ext ->
+    | #neg a -> 0 - a
+    | other -> ext other
+
+-- Printing.
+; show-alg = x -> chain show-ops show-neg () show-lit x
+; show-small-alg = x -> show-ops () show-lit x
+; show-lit = | #lit n -> int/to-text n
+; show-ops = _ -> ext ->
+    | #add { l = l, r = r } -> "(" ++ l ++ " + " ++ r ++ ")"
+    | #mul { l = l, r = r } -> "(" ++ l ++ " * " ++ r ++ ")"
+    | other -> ext other
+; show-neg = _ -> ext ->
+    | #neg a -> "-" ++ a
+    | other -> ext other
