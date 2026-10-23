@@ -436,7 +436,13 @@ tree = a => [#leaf, #node { value : a, left : tree a, right : tree a }]
 
 Records, lists and function arrows do not count as guards, so `t = list t` and
 `t = t` are rejected. Mutually recursive aliases are checked per strongly
-connected component.
+connected component. The guard is checked on the expanded type, so an alias
+may recur as an argument to another that puts it in a payload:
+
+```scrap
+expr-f = a => [#lit int, #neg a]
+; expr : type = expr-f expr
+```
 
 A recursive use applies the alias to its own parameters, so that the type is a
 finite graph: `t = a => [#a (t (list a))]` is rejected.
