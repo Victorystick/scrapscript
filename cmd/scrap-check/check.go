@@ -1,5 +1,6 @@
 // Command scrap-check is the type checker as a WebAssembly module, for hosts
-// such as a scrapyard that check scraps before storing them. Build it with:
+// such as a scrapyard that check scraps before storing them, or a web page
+// that runs them. Build it with:
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o scrap-check.wasm ./cmd/scrap-check
 //
@@ -13,6 +14,10 @@
 // {"missing": ["<sha256>", ...]} if the sources lack scraps that it refers
 // to, directly or not. The host fetches those and asks again, so that the
 // module never waits on the host.
+//
+// With "eval": true in the request, a scrap that checks is evaluated too.
+// The response then has its value as `scrap eval` prints it, "value", or
+// the error that stopped it, "error", next to its type.
 package main
 
 import (
@@ -29,10 +34,12 @@ func main() {}
 type request struct {
 	Source  string            `json:"source"`
 	Sources map[string]string `json:"sources"`
+	Eval    bool              `json:"eval"`
 }
 
 type response struct {
 	Type    string   `json:"type,omitempty"`
+	Value   string   `json:"value,omitempty"`
 	Error   string   `json:"error,omitempty"`
 	Missing []string `json:"missing,omitempty"`
 }
@@ -79,7 +86,14 @@ func check(req request) response {
 	if err != nil {
 		return response{Error: token.Render(err, false)}
 	}
-	return response{Type: t}
+	if !req.Eval {
+		return response{Type: t}
+	}
+	v, err := env.PrintScrap(s)
+	if err != nil {
+		return response{Type: t, Error: token.Render(err, false)}
+	}
+	return response{Type: t, Value: v}
 }
 
 // missing returns the hashes of the scraps that s refers to, directly or

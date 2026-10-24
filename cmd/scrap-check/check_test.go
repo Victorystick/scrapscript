@@ -40,6 +40,13 @@ func TestCheck(t *testing.T) {
 			Source:  `$source:` + hash(`1 + "a"`),
 			Sources: map[string]string{hash(`1 + "a"`): `1 + "a"`},
 		}, response{}, "cannot unify 'text' with 'int'"},
+		{"evaluates", request{Source: `1 + 2`, Eval: true}, response{Type: "int", Value: "3"}, ""},
+		{"evaluates imports", request{Source: use + ` 1`, Sources: both, Eval: true}, response{Type: "int", Value: "3"}, ""},
+		{"prints functions as scraps", request{Source: "inc\n; inc = x -> x + 1", Eval: true},
+			response{Type: "int -> int", Value: "inc\n; inc = x -> x + 1"}, ""},
+		{"evaluation fails", request{Source: `list/repeat -1 0`, Eval: true},
+			response{Type: "list int", Error: "list/repeat: negative count -1"}, ""},
+		{"type error before evaluation", request{Source: `1 + "a"`, Eval: true}, response{}, "cannot unify 'text' with 'int'"},
 	}
 	for _, ex := range examples {
 		t.Run(ex.name, func(t *testing.T) {
