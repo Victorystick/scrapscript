@@ -1,8 +1,9 @@
 # TODO
 
-Architectural blemishes, most important first. Items 1–4 are one piece of
-work: lower the AST to a core IR after type checking, and evaluate that.
-Track the effect on performance in [BENCHMARK.md](BENCHMARK.md).
+Architectural blemishes, most important first, then gaps in the language
+itself (9). Items 1–4 are one piece of work: lower the AST to a core IR
+after type checking, and evaluate that. Track the effect on performance in
+[BENCHMARK.md](BENCHMARK.md).
 
 ## 1. No core IR
 
@@ -161,6 +162,64 @@ prints 189 KB.
       not through one map for all of them.
 - [ ] Bindings from nested where-groups print as one group, which can make
       a binding recursive that wasn't (`brokenRoundTrips`).
+
+## 9. The language falls short of its spec
+
+Gaps in the language itself, found by writing the libraries; most important
+first. 1 and 2 change what the language promises, 5 is quick.
+
+- [ ] Comparisons and equality. SPEC.md lists `== /= < <= > >=`, but `==`
+      is a parse error and `1 < 2` fails with `can't infer binary expression
+      LT`. Without them each library writes its own `same`, `larger` and
+      `not` (lib/parser.scrap, lib/avl.scrap, lib/access-log.scrap), and
+      `status > 499` is `int/cmp status 499 |> | #gt -> 1 | _ -> 0`. Choose
+      them once inference is done, as `+ - *` are: `==` and `/=` on any
+      ground type without functions, the orderings on `int`, `float`,
+      `text`, `byte` and `bytes`, all returning `[#false, #true]`. An
+      operand that stays a type variable, or holds a function, is a type
+      error. No type classes, and types stay erased; generic code still
+      takes a `cmp`, as avl does.
+- [ ] A well-typed scrap never fails at runtime. Only three builtins still
+      can: `list/repeat` and `text/repeat` on a negative count and
+      `bytes/to-utf8-text` on invalid UTF-8 (eval/builtins.go). Return an
+      option where there is no answer, as `int/div` and `text/to-int` do,
+      and an empty result for a negative count; define `round`, `ceil` and
+      `floor` on NaN and infinities. Then SPEC.md can promise that a closed,
+      well-typed scrap fails only on resources or a host's values, which is
+      also the soundness theorem planned in section 12.
+- [ ] Finish arithmetic, and settle SPEC.md's contradiction: section 7.1
+      asks for separate Int and Float operators, while `+ - *` are chosen
+      by type (`1.5 + 2.0` works) and section 14 calls it open. Keep the
+      overloading and say so in 7.1.
+  - `/`, `%` and `^` are in the grammar but don't scan, so floats can't be
+    divided at all. Make `/` float only (IEEE, total), keep `int/div` and
+    add a Euclidean `int/mod`, so division by zero can't hide in an
+    operator. Drop `^`, or make it float only: `2 ^ -1` has no int.
+  - Ints wrap silently: `9223372036854775807 + 1` is
+    `-9223372036854775808`. Arbitrary precision with a small-int fast
+    path neither wraps nor fails; decide before published scraps rely on
+    wrapping.
+  - Until they're implemented, drop `/ % ^` from section 2.3.
+- [ ] Text has two units: `text/length "héllo"` is 6 (bytes), while
+      `text/split "" "héllo"` gives 5 code points, so `pad` in
+      lib/access-log.scrap misaligns non-ASCII paths. Count code points
+      throughout; bytes are a `bytes/from-utf8-text` away. And settle
+      section 4's open text-prefix patterns (`"he" ++ rest`) in favour:
+      lib/parser.scrap works on `list text` and hand-writes `strip` for
+      lack of them.
+- [ ] Field punning. SPEC.md has `{ x }` for `{ x = x }` in literals and
+      patterns, but `{ x } ; x = 1` is a parse error. Every library's export
+      record is `{ parser = parser, outcome = outcome, … }`.
+- [ ] Specify the prelude (section 14 lists it as open). `[#some v, #none]`,
+      `[#lt, #eq, #gt]` and `[#true, #false]` are spelled out everywhere:
+      add builtin aliases `bool`, `option a`, `result e a` and `order`,
+      and `not`, `int/min`, `int/max`, `list/filter`, `list/reverse` and
+      `list/range`. Since scraps are closed, the prelude is part of a
+      scrap's meaning, which makes it the concrete case for editions
+      (section 9.1): changing a builtin changes published scraps.
+- [ ] Later: record extension. Spreads only update, so `{ ..{ a = 1 }, b =
+      2 }` is a type error; section 7.3 notes that lacks constraints make
+      a separate extension construct possible.
 
 ## Accepted
 
