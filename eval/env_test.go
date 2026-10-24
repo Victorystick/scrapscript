@@ -1,6 +1,9 @@
 package eval
 
 import (
+	"crypto/sha256"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -263,15 +266,104 @@ func TestReadDraft(t *testing.T) {
 	}
 }
 
-func TestDraftsWithPathsCannotBePushed(t *testing.T) {
-	env := NewEnvironment()
-	env.UsePusher(nopPusher{})
-	scrap, err := env.Read([]byte(`$"./inc.scrap" 1`))
+// A yard keeps pushed scraps by hash, and the order they came in.
+type yard struct {
+	scraps map[string]string
+	order  []string
+}
+
+func (y *yard) PushScrap(data []byte) (string, error) {
+	key := fmt.Sprintf("%x", sha256.Sum256(data))
+	if y.scraps == nil {
+		y.scraps = make(map[string]string)
+	}
+	y.scraps[key] = string(data)
+	y.order = append(y.order, string(data))
+	return key, nil
+}
+
+func (y *yard) FetchSha256(key string) ([]byte, error) {
+	if s, ok := y.scraps[key]; ok {
+		return []byte(s), nil
+	}
+	return nil, fmt.Errorf("no scrap %s", key)
+}
+
+func TestPushDraftTree(t *testing.T) {
+	hash := func(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
+	inc := `x -> x + 1`
+	two := `$source:` + hash(inc) + ` 1`
+	main := "-- uses both\n$source:" + hash(inc) + "  $source:" + hash(two)
+
+	env := pathEnv(pathFiles)
+	y := &yard{}
+	env.UsePusher(y)
+	// sub/two.scrap refers to inc.scrap too, which is pushed once.
+	scrap, err := env.Read([]byte("-- uses both\n$\"./inc.scrap\"  $\"./sub/two.scrap\""))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.Push(scrap); err == nil || !strings.Contains(err.Error(), "cannot push a draft that refers to a path") {
-		t.Errorf("Expected 'cannot push a draft that refers to a path', got %v", err)
+	key, err := env.Push(scrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != hash(main) {
+		t.Errorf("Expected %s, got %s", hash(main), key)
+	}
+	if want := []string{inc, two, main}; !slices.Equal(y.order, want) {
+		t.Errorf("Expected pushes %q, got %q", want, y.order)
+	}
+
+	// The published scraps work without the drafts.
+	env = NewEnvironment()
+	env.UseFetcher(y)
+	scrap, err = env.Read([]byte("$source:" + key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	val, err := env.Eval(scrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env.Print(val); got != "3" {
+		t.Errorf("Expected 3, got %s", got)
+	}
+}
+
+func TestPushRefersToPublishedScraps(t *testing.T) {
+	y := &yard{}
+	inc, _ := y.PushScrap([]byte(`x -> x + 1`))
+	y.order = nil
+
+	env := pathEnv(map[string]string{"two.scrap": "$source:" + inc + " 1"})
+	env.UsePusher(y)
+	env.UseFetcher(y)
+	scrap, err := env.Read([]byte(`$"./two.scrap"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Push(scrap); err != nil {
+		t.Fatal(err)
+	}
+	// The published scrap isn't pushed again.
+	if len(y.order) != 2 {
+		t.Errorf("Expected 2 pushes, got %q", y.order)
+	}
+}
+
+func TestIllTypedDraftsAreNotPushed(t *testing.T) {
+	env := pathEnv(map[string]string{"bad.scrap": `1 + "a"`, "ok.scrap": `1`})
+	y := &yard{}
+	env.UsePusher(y)
+	scrap, err := env.Read([]byte(`$"./ok.scrap" + $"./bad.scrap"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Push(scrap); err == nil || !strings.Contains(err.Error(), "cannot unify 'text' with 'int'") {
+		t.Errorf("Expected 'cannot unify 'text' with 'int'', got %v", err)
+	}
+	if len(y.order) != 0 {
+		t.Errorf("Expected no pushes, got %q", y.order)
 	}
 }
 

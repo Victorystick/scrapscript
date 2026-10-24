@@ -40,6 +40,12 @@ So far it supports
     1 failed, 0 passed
     ```
 
+* `scrap push` to publish a script passed over standard input to the scrapyard, printing its hash. The drafts it refers to by path, such as `$"./test.scrap"`, are published first, each with its paths replaced by `$source:<hex>` of the published draft.
+
+    ```sh
+    $ cd lib && echo '$"./test.scrap"' | scrap push
+    ```
+
 * `--root dir` reads the script as if it were a file in `dir`, which relative imports such as `$"./test.scrap"` resolve from, and `--cache dir` keeps fetched scraps in `dir` instead of the user cache directory. Flags go before or after the command:
 
     ```sh
