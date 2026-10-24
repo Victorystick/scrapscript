@@ -593,10 +593,8 @@ func (r *Registry) unify(a, b TypeRef) error {
 		return r.mismatch(a, b)
 	}
 
-	switch na.kind {
-	case listKind, funcKind, recordKind, enumKind:
-		// Link them first, so that unifying recursive types ends when it
-		// comes back around. A named one stays, to print by its name.
+	// Link a named one to the other, so that it prints by its name.
+	link := func() {
 		if _, named := r.names[a]; named {
 			r.link(b, a)
 		} else {
@@ -605,15 +603,29 @@ func (r *Registry) unify(a, b TypeRef) error {
 	}
 
 	switch na.kind {
-	case listKind:
-		return r.unify(na.a, nb.a)
-	case funcKind:
-		if err := r.unify(na.a, nb.a); err != nil {
-			return err
-		}
-		return r.unify(na.b, nb.b)
-	case enumKind, recordKind:
+	case enumKind:
+		// Every cycle passes through an enum, so link enums first, so that
+		// unifying recursive types ends when it comes back around.
+		link()
 		return r.rowError(a, b, r.unifyRows(na.a, nb.a))
+	case listKind, funcKind, recordKind:
+		// Others are linked after their parts, so that an occurs check on
+		// their parts doesn't see one through the other.
+		var err error
+		switch na.kind {
+		case listKind:
+			err = r.unify(na.a, nb.a)
+		case funcKind:
+			if err = r.unify(na.a, nb.a); err == nil {
+				err = r.unify(na.b, nb.b)
+			}
+		case recordKind:
+			err = r.rowError(a, b, r.unifyRows(na.a, nb.a))
+		}
+		if err == nil {
+			link()
+		}
+		return err
 	case extendKind:
 		return r.unifyRows(a, b)
 	case fieldKind:

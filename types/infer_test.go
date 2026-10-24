@@ -237,6 +237,15 @@ func TestInfer(t *testing.T) {
 			"expr-f int -> int\n; expr-f = a => [ #lit int, #neg a ]"},
 		{`xs ; xs : ints = #cons { head = 1, tail = #cons { head = 2, tail = #nil } }
 ; ints : type = [#nil, #cons { head : int, tail : ints }]`, "ints\n; ints : type = [ #cons { head : int, tail : ints }, #nil ]"},
+		// A type may recur through a function's parameter, as in
+		// self-application, and a value of it need not be annotated.
+		{`f (#roll (_ -> 42)) ; f : roll -> int = _ -> 1 ; roll : type = [#roll (roll -> int)]`, `int`},
+		{`unroll (#roll (_ -> 42)) (#roll (_ -> 42))
+; unroll : a => roll a -> roll a -> a = | #roll g -> g
+; roll : type -> type = a => [#roll (roll a -> a)]`, `int`},
+		// An annotation informs the arms of a match function.
+		{`m ; m : b => roll b -> b = | #roll x -> x (#roll x)
+; roll : type -> type = b => [#roll (roll b -> b)]`, "roll a -> a\n; roll = a => [ #roll (roll a -> a) ]"},
 		// A recursive function may be under a where-clause.
 		{`f ; f = (n -> f (n - k) ; k = 1)`, `int -> a`},
 		// Aliases of primitives print as the primitive.
