@@ -212,7 +212,7 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 		return c.reg.Func(binder, ret)
 
 	case ast.MatchFunc:
-		return c.matchFunc(x)
+		return c.matchFunc(x, NoType)
 
 	case ast.Call:
 		fn, arg := c.src.Call(x)
@@ -284,6 +284,10 @@ func (c *context) check(x ast.Node, want TypeRef) {
 			c.scope = scope
 			return
 		}
+	}
+	if c.src.Kind(x) == ast.MatchFunc {
+		c.ensure(x, c.matchFunc(x, want), want)
+		return
 	}
 	c.ensure(x, c.infer(x), want)
 }
@@ -592,12 +596,28 @@ type positioned struct {
 // the enum it matches if no arm matches the same position, or one above it,
 // with a catch-all pattern. So a match function without a catch-all accepts
 // exactly the tags it lists.
-func (c *context) matchFunc(x ast.Node) TypeRef {
+func (c *context) matchFunc(x ast.Node, want TypeRef) TypeRef {
 	args := make([]TypeRef, c.src.Arity(x))
 	for i := range args {
 		args[i] = c.reg.Var()
 	}
 	bodyTy := c.reg.Var()
+	// Take the arguments and result from want, if it has as many, so that
+	// an annotation informs the inference of the arms.
+	if want != NoType {
+		seeded, ty := make([]TypeRef, len(args)), want
+		for i := range seeded {
+			n := c.reg.at(c.reg.Resolve(ty))
+			if n.kind != funcKind {
+				seeded = nil
+				break
+			}
+			seeded[i], ty = n.a, n.b
+		}
+		if seeded != nil {
+			args, bodyTy = seeded, ty
+		}
+	}
 	m := arms{tests: len(c.tests), ends: len(c.ends)}
 	defer func() { c.tests, c.ends = c.tests[:m.tests], c.ends[:m.ends] }()
 	for _, arm := range c.src.Arms(x) {

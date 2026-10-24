@@ -243,6 +243,9 @@ func TestInfer(t *testing.T) {
 		{`unroll (#roll (_ -> 42)) (#roll (_ -> 42))
 ; unroll : a => roll a -> roll a -> a = | #roll g -> g
 ; roll : type -> type = a => [#roll (roll a -> a)]`, `int`},
+		// An annotation informs the arms of a match function.
+		{`m ; m : b => roll b -> b = | #roll x -> x (#roll x)
+; roll : type -> type = b => [#roll (roll b -> b)]`, "roll a -> a\n; roll = a => [ #roll (roll a -> a) ]"},
 		// A recursive function may be under a where-clause.
 		{`f ; f = (n -> f (n - k) ; k = 1)`, `int -> a`},
 		// Aliases of primitives print as the primitive.
