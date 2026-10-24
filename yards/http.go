@@ -50,8 +50,14 @@ func (h httpFetcher) PushScrap(data []byte) (key string, err error) {
 	if err != nil {
 		return
 	}
+	defer resp.Body.Close()
 
-	bytes, err := io.ReadAll(resp.Body)
-	key = string(bytes)
-	return
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("http post failed with %s: %s", resp.Status, bytes.TrimSpace(body))
+	}
+	return string(body), nil
 }

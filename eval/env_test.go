@@ -275,6 +275,18 @@ func TestDraftsWithPathsCannotBePushed(t *testing.T) {
 	}
 }
 
+func TestIllTypedScrapsCannotBePushed(t *testing.T) {
+	env := NewEnvironment()
+	env.UsePusher(nopPusher{})
+	scrap, err := env.Read([]byte(`1 + "a"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Push(scrap); err == nil || !strings.Contains(err.Error(), "cannot unify 'text' with 'int'") {
+		t.Errorf("Expected 'cannot unify 'text' with 'int'', got %v", err)
+	}
+}
+
 func TestApply(t *testing.T) {
 	examples := []struct{ fn, arg, result, err string }{
 		{`n -> n + 1`, `1`, `2`, ``},

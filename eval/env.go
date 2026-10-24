@@ -383,6 +383,8 @@ func (e *Environment) Label(name string) label.ID {
 	return e.reg.Labels().Of(name)
 }
 
+// Push stores a scrap with the pusher and returns its hash. It must refer to
+// others only by hash, and type check.
 func (e *Environment) Push(s *Scrap) (string, error) {
 	if e.pusher == nil {
 		return "", fmt.Errorf("cannot push without a pusher")
@@ -391,6 +393,9 @@ func (e *Environment) Push(s *Scrap) (string, error) {
 		if _, ok := s.expr.Path(n); ok {
 			return "", s.expr.Error(n, "cannot push a draft that refers to a path")
 		}
+	}
+	if _, err := e.infer(s); err != nil {
+		return "", err
 	}
 	return e.pusher.PushScrap(s.expr.Source.Bytes())
 }
