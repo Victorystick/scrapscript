@@ -55,6 +55,32 @@ func TestTest(t *testing.T) {
 	}
 }
 
+// lib/ord.scrap's functions take their orderings as instances.
+func TestOrdLibrary(t *testing.T) {
+	results, err := testScrap(t, `{ max = t.eq (o.max 3 4) 4
+, min = t.eq (o.min "b" "a") "a"
+, sort = t.eq (o.sort [3, 1, 2]) [1, 2, 3]
+, lists = t.eq (o.sort [[2], [1, 5], [1]]) [[1], [1, 5], [2]]
+, reverse = t.eq (o.sort [1, 3, 2] ; _ = o.reverse o.int) [3, 2, 1]
+}
+; _ = o.int
+; _ = o.text
+; _ = o.list
+; o = $"./ord.scrap"
+; t = $"./test.scrap"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 5 {
+		t.Fatalf("got %d results, want 5: %v", len(results), results)
+	}
+	for _, r := range results {
+		if r.Failed {
+			t.Errorf("%s: %s", r.Path, r.Message)
+		}
+	}
+}
+
 func TestTestRejects(t *testing.T) {
 	failures := []struct{ source, error string }{
 		{`1`, `the test scrap is not a test case`},

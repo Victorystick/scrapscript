@@ -224,6 +224,9 @@ type uses struct {
 	names []string // every name in it, bound or free
 	home  int32    // the binder whose value it is, which it prints as, or -1
 	src   int32    // the source of the code
+	// For a constrained function, how many of its first arguments are the
+	// instances it takes implicitly.
+	implicit int32
 	// The source of the published scrap whose value it is, which it
 	// prints as the reference to, or -1.
 	published int32
@@ -312,6 +315,8 @@ type unit struct {
 	typed []types.TypeRef
 	// The nodes with a static part.
 	static types.NodeSet
+	// The instances that uses of constrained names take, by node.
+	implicits map[ast.Node][]*types.Evidence
 	// Whether it denotes a type, which has no value.
 	sort bool
 	// The reference to it if it is published, $source:…, or empty.
@@ -336,6 +341,7 @@ func compile(units []unit, reg *types.Registry, globals variables, shapes *shape
 		builtins: make(map[string]int32),
 		scraps:   make([]int32, len(units)),
 		inlines:  make(map[int32]inlinable),
+		givens:   make(map[given]int32),
 		imported: make(map[int32]int32),
 		exports:  make([]map[string]int32, len(units)),
 	}
@@ -412,7 +418,7 @@ func (c *compiler) enter(i int32) (restore func()) {
 func (c *compiler) switchTo(i int32) {
 	c.cur = i
 	u := c.units[i]
-	c.src, c.typed, c.static = u.se, u.typed, u.static
+	c.src, c.typed, c.static, c.implicits = u.se, u.typed, u.static, u.implicits
 	n := cnode(len(c.ops))
 	if last := &c.spans[len(c.spans)-1]; last.start == n {
 		last.src = i
@@ -467,10 +473,14 @@ type compiler struct {
 
 	// The source being compiled: its index, its expression, the types of
 	// its nodes and its nodes with a static part.
-	cur    int32
-	src    *ast.SourceExpr
-	typed  []types.TypeRef
-	static types.NodeSet
+	cur       int32
+	src       *ast.SourceExpr
+	typed     []types.TypeRef
+	static    types.NodeSet
+	implicits map[ast.Node][]*types.Evidence
+	// The binder of each given that a use's instances are: a binding of
+	// `_`, or a constrained function's parameter, by source and node.
+	givens map[given]int32
 	// The binder of each unit's value, or -1 for a type.
 	scraps []int32
 
@@ -498,6 +508,11 @@ type compiler struct {
 	exports  []map[string]int32
 	// The record literal that the current unit's value is, if it is one.
 	export ast.Node
+}
+
+type given struct {
+	src int32
+	x   ast.Node
 }
 
 // The most tokens that a function may have to be inlined by size, and the
@@ -763,6 +778,49 @@ func (c *compiler) bind(b binder) int32 {
 }
 
 func (c *compiler) expr(x ast.Node) cnode {
+	if evs, ok := c.implicits[x]; ok {
+		xs := c.evidence([]int32{int32(c.value(x))}, evs)
+		if len(xs) == 2 {
+			return c.node(opCall, xs[0], xs[1], x)
+		}
+		return c.span(opCallN, xs, x)
+	}
+	return c.value(x)
+}
+
+// evidence appends to xs the instances that evs say a use takes, each
+// applied to the instances it takes itself.
+func (c *compiler) evidence(xs []int32, evs []*types.Evidence) []int32 {
+	for _, ev := range evs {
+		b := c.givens[given{c.cur, ev.Given}]
+		i := len(c.values) - 1
+		for c.values[i].b != b {
+			i--
+		}
+		// A printed function prints the instances it refers to, by their
+		// bindings.
+		c.refer(ev.Given, i, true, true)
+		var n cnode
+		if e := c.values[i]; e.level < c.level {
+			n = c.node(opCapture, c.capture(c.level, e), 0, ev.Given)
+		} else {
+			n = c.node(opLocal, int32(c.binders[e.b].slot), 0, ev.Given)
+		}
+		if len(ev.Args) > 0 {
+			args := c.evidence([]int32{int32(n)}, ev.Args)
+			if len(args) == 2 {
+				n = c.node(opCall, args[0], args[1], ev.Given)
+			} else {
+				n = c.span(opCallN, args, ev.Given)
+			}
+		}
+		xs = append(xs, int32(n))
+	}
+	return xs
+}
+
+// value compiles x, without the instances that it takes.
+func (c *compiler) value(x ast.Node) cnode {
 	se := c.src
 	switch se.Kind(x) {
 	case ast.Literal:
@@ -929,6 +987,14 @@ func (c *compiler) call(x, fn, arg ast.Node) cnode {
 		args = append(args, a)
 	}
 	slices.Reverse(args)
+	// A constrained function takes its instances before its arguments.
+	if evs, ok := c.implicits[fn]; ok {
+		xs := c.evidence([]int32{int32(c.value(fn))}, evs)
+		for _, a := range args {
+			xs = append(xs, int32(c.expr(a)))
+		}
+		return c.span(opCallN, xs, x)
+	}
 	if len(args) == 1 {
 		if arms := c.arms(fn); arms != nil {
 			return c.match(fn, c.expr(arg), arms)
@@ -1107,6 +1173,9 @@ func (c *compiler) exported(u int32, key string) (inlinable, bool) {
 // of one arm with one pattern. The arms' slots overlap.
 func (c *compiler) fn(x ast.Node) cnode {
 	u := c.open(true)
+	if c.implicits != nil && c.typed[x] != types.NoType {
+		c.uses[u].implicit = int32(c.reg.Constraints(c.typed[x]))
+	}
 	level, next, size, budget := c.level, c.next, c.size, c.budget
 	c.level, c.next, c.size, c.budget = c.level+1, 0, 0, inlineBudget
 	c.fns = append(c.fns[:c.level], nil)
@@ -1207,6 +1276,9 @@ func (c *compiler) group(x ast.Node) cnode {
 			}
 		}
 		byNode[w] = c.bind(b)
+		if se.Instance(w) {
+			c.givens[given{c.cur, w}] = byNode[w]
+		}
 		if se.Kind(val) == ast.Import {
 			c.imported[byNode[w]] = c.units[c.cur].deps[val]
 		}
@@ -1239,6 +1311,10 @@ func (c *compiler) group(x ast.Node) cnode {
 	}
 
 	comps := se.Components(binds, nil)
+	if c.implicits != nil {
+		comps = se.ComponentsOf(binds, nil, c.instances)
+		c.recursive(comps)
+	}
 	c.inlinable(body, binds, comps, byNode)
 
 	xs := []int32{0}
@@ -1280,6 +1356,44 @@ func (c *compiler) group(x ast.Node) cnode {
 		c.next = start
 	}
 	return c.span(opWhere, xs, x)
+}
+
+// instances returns the Where nodes of the instances that the use x takes,
+// and that those take.
+func (c *compiler) instances(x ast.Node) []ast.Node {
+	var ws []ast.Node
+	var walk func(evs []*types.Evidence)
+	walk = func(evs []*types.Evidence) {
+		for _, ev := range evs {
+			if c.src.Kind(ev.Given) == ast.Where {
+				ws = append(ws, ev.Given)
+			}
+			walk(ev.Args)
+		}
+	}
+	walk(c.implicits[x])
+	return ws
+}
+
+// recursive checks that the bindings of recursive components are
+// functions, as the checker does, once instances count as references: an
+// instance that uses itself must be a function.
+func (c *compiler) recursive(comps []ast.Component) {
+	for _, comp := range comps {
+		if !comp.Recursive {
+			continue
+		}
+		for _, w := range comp.Binds {
+			_, id, _, val := c.src.Where(w)
+			if val, _ = c.src.Group(val); c.src.Kind(val) != ast.Func && c.src.Kind(val) != ast.MatchFunc {
+				name := c.name(id)
+				if c.src.Instance(w) {
+					name = "an instance"
+				}
+				c.error(w, fmt.Sprintf("%s is recursive through instances, so it must be a function", name))
+			}
+		}
+	}
 }
 
 // inlinable notes the group's bindings that calls may be inlined into: the
@@ -1388,8 +1502,16 @@ func (c *compiler) param(x ast.Node, slot, arity, scope int) cnode {
 	if lookup(c.values, name) >= scope {
 		c.error(x, fmt.Sprintf("cannot bind %s twice", name))
 	}
-	c.bind(binder{name: name, slot: slot, where: ast.None, types: -1, static: -1})
+	c.given(x, c.bind(binder{name: name, slot: slot, where: ast.None, types: -1, static: -1}))
 	return c.node(patArg, int32(slot), 0, x)
+}
+
+// given notes that the parameter x has binder b, in case it is the given of
+// a constrained function's instance.
+func (c *compiler) given(x ast.Node, b int32) {
+	if c.implicits != nil {
+		c.givens[given{c.cur, x}] = b
+	}
 }
 
 // split compiles the record pattern x, with a rest, that matches records
@@ -1426,7 +1548,7 @@ func (c *compiler) pattern(x ast.Node, scope int) cnode {
 			c.error(x, fmt.Sprintf("cannot bind %s twice", name))
 		}
 		slot := c.alloc()
-		c.bind(binder{name: name, slot: slot, where: ast.None, types: -1, static: -1})
+		c.given(x, c.bind(binder{name: name, slot: slot, where: ast.None, types: -1, static: -1}))
 		return c.node(patBind, int32(slot), 0, x)
 
 	case ast.Literal:

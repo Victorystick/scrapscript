@@ -60,6 +60,18 @@ type Result struct {
 	// the parts of those that the static part comes from, such as a record
 	// literal's fields.
 	Static NodeSet
+	// The instances that each use of a constrained name takes implicitly,
+	// by node, one per constraint, in order.
+	Implicits map[ast.Node][]*Evidence
+}
+
+// Evidence is what solves a constraint: an instance, the Where node of a
+// binding of `_`, or the parameter of a constrained function that takes
+// it, its Ident node. An instance with constraints of its own is applied
+// to their evidence, Args.
+type Evidence struct {
+	Given ast.Node
+	Args  []*Evidence
 }
 
 // A Param is a parameter of an exported type constructor.
@@ -98,6 +110,35 @@ type context struct {
 	// done.
 	tests []test
 	ends  []int
+
+	// The instances in scope, innermost first, and the constraints of uses
+	// left to solve, with the evidence that solves each use's.
+	givens   *Scope[given]
+	depth    int
+	goals    []goal
+	evidence map[ast.Node][]*Evidence
+}
+
+// A given is an instance that constraints may be solved with: a binding of
+// `_`, or the parameter of a constrained function for its constraint.
+// Givens of the same depth are in the same scope, so only one of them may
+// fit a constraint.
+type given struct {
+	node  ast.Node
+	typ   TypeRef // a type scheme, for a binding
+	depth int
+	// Or, the instances without annotations of a group, which are added as
+	// they are inferred, for the constraints that wait for them.
+	late *[]given
+}
+
+// A goal is a constraint of a use, x, to solve with the givens in scope
+// there.
+type goal struct {
+	want   TypeRef
+	x      ast.Node
+	ev     *Evidence
+	givens *Scope[given]
 }
 
 func (c *context) bail(n ast.Node, msg string) {
@@ -139,6 +180,7 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, imports Imports) (
 
 	reg.enter()
 	res = context.scrap(se.Expr)
+	context.solve(0, true)
 	for _, m := range context.matches {
 		context.exhaustive(m.node, m.args)
 	}
@@ -147,6 +189,7 @@ func Infer(reg *Registry, scope TypeScope, se ast.SourceExpr, imports Imports) (
 	reg.generalize(res.Type)
 	res.Nodes = context.nodes
 	res.Static = context.statics
+	res.Implicits = context.evidence
 	return res, err
 }
 
@@ -161,30 +204,15 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 	case ast.Literal:
 		return literalTypeRef(c.src.LiteralKind(x))
 	case ast.Ident:
-		name := c.src.TokenText(c.src.Main(x))
-		bound := c.scope.Get(name)
-		if bound == nil {
-			if a := c.aliases.Lookup(name); a != nil && a.value == ast.None {
-				c.bail(x, fmt.Sprintf("cannot use type %s as a value", name))
-			}
-			c.bail(x, "unbound variable: "+name)
-		}
-		return c.reg.Instantiate(bound.val)
+		return c.peel(x, c.name(x))
 	case ast.Where:
 		return where(c, x, c.infer)
 	case ast.List:
 		return c.list(x)
 	case ast.Record:
-		return c.record(x)
+		return c.record(x, false)
 	case ast.Access:
-		if c.static(x).isType() {
-			c.bail(x, fmt.Sprintf("cannot use type %s as a value", c.src.NodeText(x)))
-		}
-		rec, key := c.src.Access(x)
-		field := c.reg.Var()
-		row := c.reg.extend(c.reg.labels.Of(c.src.TokenText(key)), field, c.reg.Var())
-		c.ensure(rec, c.infer(rec), c.reg.add(node{kind: recordKind, a: row}))
-		return field
+		return c.peel(x, c.access(x))
 	case ast.Variant:
 		tag, payload := c.src.Variant(x)
 		typ := HoleRef
@@ -226,10 +254,179 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 		if res.Sort {
 			c.bail(x, fmt.Sprintf("cannot use type %s as a value", c.src.NodeText(x)))
 		}
-		return c.reg.Instantiate(res.Type)
+		return c.peel(x, c.reg.Instantiate(res.Type))
 	}
 
 	panic(fmt.Sprintf("can't infer node %s", c.src.Kind(x)))
+}
+
+// access returns the type of the field that the Access node x reads.
+func (c *context) access(x ast.Node) TypeRef {
+	if c.static(x).isType() {
+		c.bail(x, fmt.Sprintf("cannot use type %s as a value", c.src.NodeText(x)))
+	}
+	rec, key := c.src.Access(x)
+	field := c.reg.Var()
+	row := c.reg.extend(c.reg.labels.Of(c.src.TokenText(key)), field, c.reg.Var())
+	c.ensure(rec, c.infer(rec), c.reg.add(node{kind: recordKind, a: row}))
+	return field
+}
+
+// keep infers the type of x as infer does, except that a name or a field,
+// as an alias for another value, keeps its constraints, which then are
+// those of its users, and so do the fields of a record literal.
+func (c *context) keep(x ast.Node) TypeRef {
+	var t TypeRef
+	switch c.src.Kind(x) {
+	case ast.Ident:
+		t = c.name(x)
+	case ast.Access:
+		t = c.access(x)
+	case ast.Record:
+		t = c.record(x, true)
+	default:
+		return c.infer(x)
+	}
+	c.typed(x, t)
+	return t
+}
+
+// name returns the type of a use of the name x, instantiated.
+func (c *context) name(x ast.Node) TypeRef {
+	name := c.src.TokenText(c.src.Main(x))
+	if name == "_" {
+		c.bail(x, "cannot use _ as a value")
+	}
+	bound := c.scope.Get(name)
+	if bound == nil {
+		if a := c.aliases.Lookup(name); a != nil && a.value == ast.None {
+			c.bail(x, fmt.Sprintf("cannot use type %s as a value", name))
+		}
+		c.bail(x, "unbound variable: "+name)
+	}
+	return c.reg.Instantiate(bound.val)
+}
+
+// peel returns the type of the use x of a value of type t, which takes the
+// instances for t's constraints implicitly: what is left after them.
+func (c *context) peel(x ast.Node, t TypeRef) TypeRef {
+	for {
+		arg, res, ok := c.reg.implicit(t)
+		if !ok {
+			return t
+		}
+		ev := &Evidence{}
+		if c.evidence == nil {
+			c.evidence = make(map[ast.Node][]*Evidence)
+		}
+		c.evidence[x] = append(c.evidence[x], ev)
+		c.goals = append(c.goals, goal{arg, x, ev, c.givens})
+		t = res
+	}
+}
+
+// solve solves the constraints of goals[from:] that it can, and those that
+// constraints of their instances add. A constraint is solved by the given in
+// the innermost scope that has one that fits it; two that fit there are
+// ambiguous.
+//
+// A constraint whose type has variables waits while it fits only by binding
+// them, since later uses may decide them. If its variables are about to be
+// generalized, at the end of a binding, or if all, it can't wait: the one
+// given that fits decides them, or it is an error.
+func (c *context) solve(from int, all bool) {
+	for progress := from < len(c.goals); progress; {
+		progress = false
+		for i := from; i < len(c.goals); i++ {
+			g := c.goals[i]
+			if g.ev.Given != ast.None {
+				continue
+			}
+			forced := all || c.reg.above(g.want, c.reg.level)
+			fit, binds, n := c.fit(g)
+			switch {
+			case n == 1 && (!binds || forced):
+				c.use(g, fit)
+				progress = true
+			case n > 1 && (forced || !binds):
+				c.unsolved(g, "%s has more than one instance of '%s' in scope")
+			case n == 0 && forced:
+				c.unsolved(g, "%s has no instance of '%s' in scope")
+			}
+		}
+	}
+	// Drop solved goals, keeping those that wait for an outer binding.
+	left := slices.DeleteFunc(slices.Clone(c.goals[from:]), func(g goal) bool { return g.ev.Given != ast.None })
+	c.goals = append(c.goals[:from], left...)
+}
+
+// unsolved fails at g's use, with msg about it and the type it wants.
+func (c *context) unsolved(g goal, msg string) {
+	strs, where := c.reg.Strings(g.want)
+	c.bail(g.x, fmt.Sprintf(msg, c.src.NodeText(g.x), strs[0])+where)
+}
+
+// fit returns the givens that fit g in the innermost scope that has any:
+// the first of them, whether one fits only by binding g's variables, and
+// how many there are.
+func (c *context) fit(g goal) (first given, binds bool, n int) {
+	depth := -1
+	try := func(gv given) {
+		mark := c.reg.next()
+		ok, b := c.reg.fits(c.head(gv.typ), g.want, mark)
+		if !ok {
+			return
+		}
+		if n == 0 {
+			first, depth = gv, gv.depth
+		}
+		binds = binds || b
+		n++
+	}
+	for s := g.givens; s != nil; s = s.parent {
+		if depth >= 0 && s.val.depth != depth {
+			break
+		}
+		if s.val.late == nil {
+			try(s.val)
+			continue
+		}
+		for _, gv := range *s.val.late {
+			try(gv)
+		}
+	}
+	return first, binds, n
+}
+
+// head returns the type that a given of type t provides: an instance of
+// it, without its constraints.
+func (c *context) head(t TypeRef) TypeRef {
+	t = c.reg.Instantiate(t)
+	for {
+		_, res, ok := c.reg.implicit(t)
+		if !ok {
+			return t
+		}
+		t = res
+	}
+}
+
+// use solves the goal g with the given gv, whose constraints become goals
+// of g's use.
+func (c *context) use(g goal, gv given) {
+	t := c.reg.Instantiate(gv.typ)
+	for {
+		arg, res, ok := c.reg.implicit(t)
+		if !ok {
+			break
+		}
+		ev := &Evidence{}
+		g.ev.Args = append(g.ev.Args, ev)
+		c.goals = append(c.goals, goal{arg, g.x, ev, g.givens})
+		t = res
+	}
+	c.ensure(g.x, t, g.want)
+	g.ev.Given = gv.node
 }
 
 // scrap infers the result of a scrap's expression x. Unlike other
@@ -251,7 +448,12 @@ func (c *context) scrap(x ast.Node) Result {
 			return res
 		}
 	}
-	res := Result{Type: c.infer(x)}
+	var res Result
+	if c.src.Kind(x) == ast.Record {
+		res.Type = c.keep(x)
+	} else {
+		res.Type = c.infer(x)
+	}
 	if s := c.noted(x); !s.isNone() && !s.isType() {
 		res.Members = c.exports(x, s)
 	}
@@ -270,20 +472,31 @@ func (c *context) imported(x ast.Node) Result {
 // check checks that x has the type want. A function's parameter takes the
 // argument type of want before its body is checked, so that an annotation
 // informs the inference of the body, as for `++`.
+//
+// A constrained function takes its instance as its first parameter, which
+// is a given for the constraints of its body.
 func (c *context) check(x ast.Node, want TypeRef) {
+	_, _, implicit := c.reg.implicit(want)
 	if c.src.Kind(x) == ast.Func {
 		arg, body := c.src.Func(x)
 		if n := c.reg.at(c.reg.Resolve(want)); n.kind == funcKind && c.src.Kind(arg) == ast.Ident {
 			c.typed(x, want)
 			c.typed(arg, n.a)
-			scope := c.scope
+			scope, givens, depth := c.scope, c.givens, c.depth
 			if name := c.src.NodeText(arg); name != "_" {
 				c.bind(name, n.a)
 			}
+			if implicit {
+				c.depth++
+				c.givens = c.givens.Bind("", given{node: arg, typ: n.a, depth: c.depth})
+			}
 			c.check(body, n.b)
-			c.scope = scope
+			c.scope, c.givens, c.depth = scope, givens, depth
 			return
 		}
+	}
+	if implicit {
+		c.bail(x, "a constrained function takes its instance as its first parameter, as in `i -> …`")
 	}
 	if c.src.Kind(x) == ast.MatchFunc {
 		c.ensure(x, c.matchFunc(x, want), want)
@@ -369,8 +582,8 @@ func (c *context) either(a, b, typ TypeRef) bool {
 // bindings are mutually recursive. Each strongly connected component of them
 // is inferred in turn, and generalized before the components that use it.
 func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
-	scope, aliases := c.scope, c.aliases
-	defer func() { c.scope, c.aliases = scope, aliases }()
+	scope, aliases, givens := c.scope, c.aliases, c.givens
+	defer func() { c.scope, c.aliases, c.givens = scope, aliases, givens }()
 
 	g := c.group(x)
 	body, binds := g.body, g.binds
@@ -382,15 +595,33 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 
 	// An annotated binding has the type its annotation declares, everywhere
 	// in the group, so references to it don't make it part of a component.
+	// An instance, a binding of `_`, is in scope for the group's
+	// constraints, but not by name.
 	annotated := make(map[ast.Node]bool)
+	depth := c.depth + 1
+	var late *[]given
 	for _, b := range binds {
-		if _, id, typ, _ := c.src.Where(b); typ != ast.None && !c.src.Sort(b) {
+		_, id, typ, _ := c.src.Where(b)
+		if typ != ast.None && !c.src.Sort(b) {
 			annotated[b] = true
-			c.bind(c.src.TokenText(id), c.annotation(typ, func(string) TypeRef { return c.reg.Gen() }))
+			scheme := c.annotation(typ, func(string) TypeRef { return c.reg.Gen() })
+			if c.src.Instance(b) {
+				c.depth = depth
+				c.givens = c.givens.Bind("", given{node: b, typ: scheme, depth: depth})
+				continue
+			}
+			c.bind(c.src.TokenText(id), scheme)
+		} else if c.src.Instance(b) && late == nil {
+			late = new([]given)
+			c.depth = depth
+			c.givens = c.givens.Bind("", given{depth: depth, late: late})
 		}
 	}
 
 	comps := c.src.Components(binds, func(b ast.Node) bool { return annotated[b] })
+	if late != nil {
+		comps = c.instancesFirst(comps, binds)
+	}
 	if len(annotated) == 0 {
 		c.functions(comps)
 	} else {
@@ -402,29 +633,71 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 			// Check the value with the annotation's type variables rigid, so
 			// that it can't assume anything about them.
 			_, _, typ, val := c.src.Where(b)
+			from := len(c.goals)
 			c.reg.enter()
 			c.check(val, c.annotation(typ, c.reg.rigid))
 			c.reg.exit()
+			c.solve(from, false)
 			continue
 		}
 
+		from := len(c.goals)
 		c.reg.enter()
 		vars := make([]TypeRef, len(comp.Binds))
 		for i, b := range comp.Binds {
 			vars[i] = c.reg.Var()
-			c.bind(c.src.TokenText(c.src.Main(b)), vars[i])
+			if !c.src.Instance(b) {
+				c.bind(c.src.TokenText(c.src.Main(b)), vars[i])
+			}
 		}
 		for i, b := range comp.Binds {
 			_, _, _, val := c.src.Where(b)
+			if c.src.Instance(b) || c.src.Kind(val) == ast.Record {
+				// An instance may be a constrained one, by another name.
+				c.ensure(val, vars[i], c.keep(val))
+				continue
+			}
 			c.ensure(val, vars[i], c.infer(val))
 		}
 		c.reg.exit()
-		for _, v := range vars {
+		c.solve(from, false)
+		for i, v := range vars {
 			c.reg.generalize(v)
+			// An instance without an annotation is an instance of the type
+			// of its value, from here on.
+			if b := comp.Binds[i]; c.src.Instance(b) {
+				*late = append(*late, given{node: b, typ: v, depth: depth})
+			}
 		}
 	}
 
 	return inferBody(body)
+}
+
+// instancesFirst moves the components of instances without annotations
+// that don't refer to the group's other bindings first, so that every
+// binding of the group may use them. Other instances without annotations
+// are only in scope for the components after them.
+func (c *context) instancesFirst(comps []ast.Component, binds []ast.Node) []ast.Component {
+	first := func(comp ast.Component) bool {
+		b := comp.Binds[0]
+		_, _, typ, val := c.src.Where(b)
+		return c.src.Instance(b) && typ == ast.None && !c.src.RefersTo(val, binds)
+	}
+	if !slices.ContainsFunc(comps, first) {
+		return comps
+	}
+	moved := slices.Clone(comps)
+	slices.SortStableFunc(moved, func(a, b ast.Component) int {
+		switch fa, fb := first(a), first(b); {
+		case fa && !fb:
+			return -1
+		case fb && !fa:
+			return 1
+		}
+		return 0
+	})
+	return moved
 }
 
 // functions checks that the bindings of recursive components are
@@ -452,7 +725,11 @@ func (c *context) list(x ast.Node) TypeRef {
 	return c.reg.List(elem)
 }
 
-func (c *context) record(x ast.Node) TypeRef {
+// record infers the type of a record literal. If export, it is the value of
+// a binding without an annotation or of a scrap, whose fields that are names
+// keep their constraints, so that a library can export constrained
+// functions and instances: each use of such a field takes its instances.
+func (c *context) record(x ast.Node, export bool) TypeRef {
 	rest, fields := c.src.Record(x)
 
 	// A spread record may only have its existing fields updated, keeping
@@ -483,7 +760,11 @@ func (c *context) record(x ast.Node) TypeRef {
 			members[k] = true
 			continue
 		}
-		ref[k] = c.infer(v)
+		if export {
+			ref[k] = c.keep(v)
+		} else {
+			ref[k] = c.infer(v)
+		}
 	}
 	return c.reg.Record(ref)
 }

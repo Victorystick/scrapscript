@@ -29,6 +29,14 @@ type Component struct {
 // A reference is a free identifier in a binding's value that names a binding
 // of the group, unless cut returns true for that binding; cut may be nil.
 func (se *SourceExpr) Components(binds []Node, cut func(Node) bool) []Component {
+	return se.ComponentsOf(binds, cut, nil)
+}
+
+// ComponentsOf is Components, with the references that uses make
+// implicitly too: implicit returns the Where nodes of the instances that a
+// use of a name takes, of which those in the group are references. It may
+// be nil.
+func (se *SourceExpr) ComponentsOf(binds []Node, cut func(Node) bool, implicit func(Node) []Node) []Component {
 	index := make(map[string]int, len(binds))
 	for i, b := range binds {
 		if !se.Sort(b) && (cut == nil || !cut(b)) {
@@ -49,6 +57,21 @@ func (se *SourceExpr) Components(binds []Node, cut func(Node) bool) []Component 
 		free:   freeNames{se: se, bound: make(map[string]int)},
 	}
 	t.free.visit = t.ref
+	if implicit != nil {
+		nodes := make(map[Node]int)
+		for i, b := range binds {
+			if se.Instance(b) {
+				nodes[b] = i
+			}
+		}
+		t.free.implicit = func(n Node) {
+			for _, w := range implicit(n) {
+				if j, ok := nodes[w]; ok {
+					t.refs = append(t.refs, j)
+				}
+			}
+		}
+	}
 	for i, b := range binds {
 		if !se.Sort(b) && t.order[i] == 0 {
 			t.visit(i)
@@ -80,6 +103,22 @@ func (se *SourceExpr) References(body Node, binds []Node) []int {
 	}
 	f.expr(body)
 	return counts
+}
+
+// RefersTo returns true if n refers to a value binding of binds by name.
+func (se *SourceExpr) RefersTo(n Node, binds []Node) bool {
+	names := make(map[string]bool, len(binds))
+	for _, b := range binds {
+		if !se.Sort(b) && !se.Instance(b) {
+			names[se.TokenText(se.Mains[b])] = true
+		}
+	}
+	refers := false
+	f := freeNames{se: se, bound: make(map[string]int), visit: func(name string) {
+		refers = refers || names[name]
+	}}
+	f.expr(n)
+	return refers
 }
 
 type tarjan struct {
@@ -154,6 +193,9 @@ type freeNames struct {
 	bound map[string]int
 	names []string
 	visit func(string)
+	// If not nil, called with each use of a name, an Ident, Access or
+	// Import node, that may take instances implicitly.
+	implicit func(Node)
 }
 
 // bind binds the names from start onwards, returning start.
@@ -178,6 +220,13 @@ func (f *freeNames) expr(n Node) {
 	case Ident:
 		if name := se.TokenText(se.Mains[n]); f.bound[name] == 0 {
 			f.visit(name)
+		}
+		if f.implicit != nil {
+			f.implicit(n)
+		}
+	case Import:
+		if f.implicit != nil {
+			f.implicit(n)
 		}
 	case Binary, Call:
 		d := se.Data[n]
@@ -207,6 +256,9 @@ func (f *freeNames) expr(n Node) {
 		}
 	case Variant, Access:
 		f.expr(Node(se.Data[n].Lhs))
+		if f.implicit != nil && se.Kinds[n] == Access {
+			f.implicit(n)
+		}
 	case Record:
 		rest, fields := se.Record(n)
 		f.expr(rest)

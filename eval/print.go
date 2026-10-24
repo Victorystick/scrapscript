@@ -658,7 +658,23 @@ func (p *valuePrinter) value(s *strings.Builder, v value, ctx printer.Context) {
 			bare.args = nil
 			var head strings.Builder
 			p.value(&head, scriptVal(&bare), printer.Arg)
-			p.app(s, ctx, head.String(), sf.args...)
+			args := sf.args
+			// The instances that a constrained function takes print as
+			// instances in scope of its application.
+			k := min(int(sf.prog.uses[sf.uses()].implicit), len(args))
+			if k > 0 {
+				s.WriteByte('(')
+				defer s.WriteByte(')')
+				instances := args[:k]
+				defer func() {
+					for _, d := range instances {
+						s.WriteString(" ; _ = ")
+						p.value(s, d, printer.Body)
+					}
+				}()
+				ctx, args = printer.Expr, args[k:]
+			}
+			p.app(s, ctx, head.String(), args...)
 		} else if ref, ok := sf.published(); ok {
 			s.WriteString(ref)
 		} else if key, ok := home(sf); ok {

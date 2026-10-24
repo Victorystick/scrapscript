@@ -115,9 +115,19 @@ func (c *context) annotation(x ast.Node, fresh func(name string) TypeRef) TypeRe
 	for _, p := range params {
 		c.tvars = c.tvars.Bind(p.name, tvar{fresh(p.name), p.row})
 	}
-	ref := c.typ(t)
+	ref := c.constrained(t)
 	c.tvars = tvars
 	return ref
+}
+
+// constrained returns the type t that an annotation declares after its
+// type variables: its constraints, which come first, then its type.
+func (c *context) constrained(t ast.Node) TypeRef {
+	if !c.src.Implicit(t) {
+		return c.typ(t)
+	}
+	arg, body := c.src.Func(t)
+	return c.reg.Implicit(c.typ(arg), c.constrained(body))
 }
 
 // kind returns the kind of the alias, such as `type -> type`.
@@ -278,6 +288,9 @@ func (c *context) typ(x ast.Node) TypeRef {
 	case ast.Call:
 		return c.application(x)
 	case ast.Func:
+		if c.src.Implicit(x) {
+			c.bail(x, "constraints must come first in an annotation, after its type variables")
+		}
 		arg, body := c.src.Func(x)
 		return c.reg.Func(c.typ(arg), c.typ(body))
 	case ast.Enum:

@@ -310,7 +310,7 @@ func (e *Environment) units(s *Scrap) []unit {
 		for _, n := range s.expr.Imports() {
 			deps[n] = visit(s.deps[n])
 		}
-		u := unit{se: &s.expr, typed: s.result.Nodes, static: s.result.Static, sort: s.result.Sort, ref: s.ref, deps: deps}
+		u := unit{se: &s.expr, typed: s.result.Nodes, static: s.result.Static, implicits: s.result.Implicits, sort: s.result.Sort, ref: s.ref, deps: deps}
 		index[s] = int32(len(units))
 		units = append(units, u)
 		return index[s]

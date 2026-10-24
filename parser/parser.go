@@ -375,8 +375,11 @@ func (p *parser) isKind(t ast.Node) bool {
 
 // parseType parses a type, or a kind:
 //
-//	type  = NAME "=>" type | arrow
+//	type  = NAME "=>" type | arrow [ "=>" type ]
 //	arrow = tapp [ "->" arrow ]
+//
+// `c => t` is a constraint: a function type whose argument callers don't
+// pass. A constraint is never a lone NAME, which would bind a variable.
 func (p *parser) parseType() ast.Node {
 	if debug != nil {
 		stack = append(stack, "parseType")
@@ -387,7 +390,13 @@ func (p *parser) parseType() ast.Node {
 		p.next()
 		return p.add(ast.Forall, param, uint32(p.parseType()), 0)
 	}
-	return p.parseArrowType()
+	t := p.parseArrowType()
+	if p.tok != token.FORALL {
+		return t
+	}
+	arrow := p.at()
+	p.next()
+	return p.add(ast.Func, arrow, uint32(t), uint32(p.parseType()))
 }
 
 func (p *parser) parseArrowType() ast.Node {

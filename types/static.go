@@ -80,6 +80,13 @@ func (c *context) group(x ast.Node) group {
 	for _, b := range binds {
 		_, id, typ, val := c.src.Where(b)
 		name := c.src.TokenText(id)
+		// Instances have no names, and so no static parts.
+		if c.src.Instance(b) {
+			if c.src.Sort(b) {
+				c.bail(b, "an instance is a value, not a type")
+			}
+			continue
+		}
 		if seen[name] {
 			c.bail(b, fmt.Sprintf("cannot bind %s twice", name))
 		}

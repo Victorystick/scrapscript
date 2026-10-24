@@ -38,7 +38,8 @@ const (
 	Import                // Main: '$', followed by the algorithm and hash tokens, or a path's TEXT token.
 
 	// Types. A type also uses Ident and Import for names, Literal for (),
-	// Call for type application and Func for function types.
+	// Call for type application and Func for function types, whose Main is
+	// '=>' for a constraint (see Implicit).
 
 	Forall     // Main: the variable before '=>'. Lhs: the type it is bound in.
 	RecordType // Main: '{'. Lhs: the row tail, an Ident, or None. Rhs: see Record.
@@ -152,6 +153,19 @@ func (se *SourceExpr) Enum(n Node) (tail Node, variants []Node) {
 // Forall returns a Forall node's variable and the type it is bound in.
 func (se *SourceExpr) Forall(n Node) (param Tok, typ Node) {
 	return se.Mains[n], Node(se.Data[n].Lhs)
+}
+
+// Implicit returns true if n is a constraint in a type, `c => t`: a Func
+// node whose argument callers don't pass, since it is found from the
+// instances in scope.
+func (se *SourceExpr) Implicit(n Node) bool {
+	return se.Kinds[n] == Func && se.Tokens.Kinds[se.Mains[n]] == token.FORALL
+}
+
+// Instance returns true if the Where node n is an instance: a binding of
+// `_`, which no name refers to, only constraints.
+func (se *SourceExpr) Instance(n Node) bool {
+	return string(se.TokenBytes(se.Mains[n])) == "_"
 }
 
 // Variant returns a Variant node's tag and payload, which may be None.

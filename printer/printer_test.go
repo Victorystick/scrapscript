@@ -102,6 +102,8 @@ var trees = []string{
 	`x ; x : () = ()`,
 	`f ; f : list (int -> int) = []`,
 	`f ; f : (a => a) -> int = _ -> 1`,
+	`f ; f : a => ord a => (a -> a) => list a -> a = o -> g -> h`,
+	`x ; _ : a => ord a => ord (list a) = o -> { cmp = lex } ; _ = o`,
 	`a < b`,
 	`(a < b) |> f`,
 	`a ++ b ++ c`,

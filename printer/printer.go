@@ -361,6 +361,9 @@ func (p *Printer) typePrec(x ast.Node) int {
 	case ast.Forall:
 		return typeTop
 	case ast.Func:
+		if p.Src.Implicit(x) {
+			return typeTop
+		}
 		return typeArrow
 	case ast.Call:
 		return typeApp
@@ -388,6 +391,12 @@ func (p *Printer) typ(x ast.Node, min int) {
 
 	case ast.Func:
 		arg, res := se.Func(x)
+		if se.Implicit(x) {
+			p.typ(arg, typeArrow)
+			p.WriteString(" => ")
+			p.typ(res, typeTop)
+			break
+		}
 		p.typ(arg, typeApp)
 		p.WriteString(" -> ")
 		p.typ(res, typeArrow)

@@ -24,7 +24,7 @@ const (
 	linkKind               // A bound type variable. a: what it is bound to.
 	genKind                // A generalized type variable of a type scheme. a: its lacks.
 	listKind               // a: the element type.
-	funcKind               // a: the argument type. b: the result type.
+	funcKind               // a: the argument type. b: the result type. aux: implicitAux for a constraint.
 	recordKind             // a: the row of fields.
 	enumKind               // a: the row of tags.
 	emptyKind              // The empty row, which closes a row.
@@ -32,6 +32,10 @@ const (
 	fieldKind              // An entry of a row. a: its payload. b: its flag: presentRef, absentRef or a variable.
 	rigidKind              // A rigid type variable, equal only to itself. aux: its level. a: its name's label. b: its lacks.
 )
+
+// implicitAux marks a function type as a constraint, `c => t`, whose
+// argument is found from the instances in scope rather than passed.
+const implicitAux = 1
 
 // A node is a type in a Registry. Its kind says how it uses the other fields.
 type node struct {
@@ -223,6 +227,35 @@ func (r *Registry) List(elem TypeRef) TypeRef {
 // Func returns a function type.
 func (r *Registry) Func(arg, result TypeRef) TypeRef {
 	return r.add(node{kind: funcKind, a: arg, b: result})
+}
+
+// Implicit returns a constraint: a function type whose argument, of type
+// arg, its users don't pass, since it is found from the instances in scope.
+func (r *Registry) Implicit(arg, result TypeRef) TypeRef {
+	return r.add(node{kind: funcKind, aux: implicitAux, a: arg, b: result})
+}
+
+// implicit returns the argument and result of ref if it is a constraint.
+func (r *Registry) implicit(ref TypeRef) (arg, result TypeRef, ok bool) {
+	n := r.at(r.Resolve(ref))
+	if n.kind != funcKind || n.aux != implicitAux {
+		return NoType, NoType, false
+	}
+	return n.a, n.b, true
+}
+
+// Constraints returns how many constraints ref starts with, whose
+// arguments a function of type ref takes first, implicitly.
+func (r *Registry) Constraints(ref TypeRef) int {
+	n := 0
+	for {
+		_, res, ok := r.implicit(ref)
+		if !ok {
+			return n
+		}
+		ref = res
+		n++
+	}
 }
 
 // Record returns a closed record type with the given fields.
@@ -555,6 +588,45 @@ func (r *Registry) Unify(a, b TypeRef) error {
 	return err
 }
 
+// fits returns true if a and b would unify, leaving them as they are, and
+// whether they would only by binding a variable made before mark.
+func (r *Registry) fits(a, b, mark TypeRef) (ok, binds bool) {
+	r.unifying = true
+	ok = r.unify(a, b) == nil
+	r.unifying = false
+	for i := len(r.trail) - 1; i >= 0; i-- {
+		u := r.trail[i]
+		if u.ref < mark && u.old.kind == varKind {
+			binds = true
+		}
+		r.nodes[u.ref] = u.old
+	}
+	r.trail = r.trail[:0]
+	return ok, binds
+}
+
+// above returns true if ref has an unbound variable of a level above level,
+// which generalizing at level would generalize.
+func (r *Registry) above(ref TypeRef, level uint32) bool {
+	ref = r.Resolve(ref)
+	n := r.at(ref)
+	switch n.kind {
+	case varKind:
+		return n.aux > level
+	case enumKind:
+		if !r.enterEnum(ref) {
+			return false
+		}
+		defer r.exitEnum()
+		return r.above(n.a, level)
+	case listKind, recordKind:
+		return r.above(n.a, level)
+	case funcKind, extendKind, fieldKind:
+		return r.above(n.a, level) || r.above(n.b, level)
+	}
+	return false
+}
+
 // rowError turns an error from unifying the rows of a and b into a message.
 func (r *Registry) rowError(a, b TypeRef, err error) error {
 	switch err {
@@ -589,7 +661,7 @@ func (r *Registry) unify(a, b TypeRef) error {
 	if nb.kind == varKind {
 		return r.bind(b, a)
 	}
-	if na.kind != nb.kind {
+	if na.kind != nb.kind || na.kind == funcKind && na.aux != nb.aux {
 		return r.mismatch(a, b)
 	}
 
@@ -1167,7 +1239,11 @@ func (s *stringer) writeBody(ref TypeRef, nesting int) {
 			s.WriteByte('(')
 		}
 		s.write(n.a, argLevel)
-		s.WriteString(" -> ")
+		if n.aux == implicitAux {
+			s.WriteString(" => ")
+		} else {
+			s.WriteString(" -> ")
+		}
 		s.write(n.b, topLevel)
 		if nesting >= argLevel {
 			s.WriteByte(')')

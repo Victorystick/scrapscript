@@ -1,0 +1,45 @@
+-- ord: orderings as instances. A constrained function, such as `max`, takes
+-- the instance of `ord a` for its argument type from the instances in scope
+-- where it is used, so callers don't pass a comparison:
+--
+--   o.max 3 4 ; _ = o.int ; o = $"./ord.scrap"
+--
+-- Instances are lexical, so a scrap brings the ones it uses into scope with
+-- bindings of `_`. `o.list` is an instance for lists of any ordered type.
+
+{ ord = ord
+, order = order
+, int = { cmp = int/cmp }
+, text = { cmp = text/cmp }
+, list = list
+, reverse = reverse
+, cmp = cmp
+, max = max
+, min = min
+, sort = sort
+}
+
+; order : type = [#lt, #eq, #gt]
+
+; ord : type -> type = a => { cmp : a -> a -> order }
+
+; cmp : a => ord a => a -> a -> order = o -> o.cmp
+
+; max : a => ord a => a -> a -> a = o -> x -> y -> cmp x y |> | #lt -> y | _ -> x
+
+; min : a => ord a => a -> a -> a = o -> x -> y -> cmp x y |> | #gt -> y | _ -> x
+
+-- Sorts stably, in ascending order.
+; sort : a => ord a => list a -> list a = o -> list/sort cmp
+
+-- Lists, in lexicographic order.
+; list : a => ord a => ord (list a) = o -> { cmp = lex }
+
+-- The reverse of an order.
+; reverse : a => ord a -> ord a = o -> { cmp = x -> y -> o.cmp y x }
+
+; lex : a => ord a => list a -> list a -> order = o ->
+    | []      -> []      -> #eq
+    | []      -> _       -> #lt
+    | _       -> []      -> #gt
+    | x >+ xs -> y >+ ys -> (cmp x y |> | #eq -> lex xs ys | r -> r)
