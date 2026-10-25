@@ -27,5 +27,5 @@ jobs:
     - name: Test
       run: go test -v ./...
 
-    - name: Build the WebAssembly checker
-      run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o /dev/null ./cmd/scrap-check
+    - name: Build the WebAssembly module
+      run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o /dev/null ./cmd/scrap-wasm
