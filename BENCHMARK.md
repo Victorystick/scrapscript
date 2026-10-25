@@ -30,6 +30,7 @@ the same machine; each milestone below names it.
 | Benchmark | Measures |
 |---|---|
 | `Scan` | The scanner, on about 4 MB of source. |
+| `ScanLib` | The scanner, on the scraps in `lib/` repeated to about 4 MB: indented and commented, unlike `Scan`'s dense source. |
 | `Parse` | The parser, on a 1 MB where-chain. |
 | `Infer` | Type inference on 1000 bindings. |
 | `Read` | The front end for a program and its drafts: loading, parsing and checking `Eval/echo`. |

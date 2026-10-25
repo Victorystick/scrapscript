@@ -2,6 +2,8 @@ package scanner
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -251,8 +253,8 @@ func checkTokens(t *testing.T, src []byte, toks Tokens) {
 		if start < prev {
 			t.Fatalf("%q: token %d starts at %d, before the previous token ends at %d", src, i, start, prev)
 		}
-		trivia := scanner{src: src, pos: prev}
-		if trivia.skipWhitespace(); trivia.pos != start {
+		trivia := scanner{src: src}
+		if trivia.skipTrivia(prev) != start {
 			t.Fatalf("%q: non-trivia %q between tokens", src, src[prev:start])
 		}
 		if end <= start && i < n-1 {
@@ -283,6 +285,31 @@ const benchSource = `f "b" ; f = | "a" -> 1 | "b" -> 2 | _ -> 0
 
 func BenchmarkScan(b *testing.B) {
 	src := bytes.Repeat([]byte(benchSource), 1<<14) // ~4 MB
+	b.SetBytes(int64(len(src)))
+	var n int
+	for b.Loop() {
+		toks, _ := Scan(src)
+		n = len(toks.Kinds)
+	}
+	b.ReportMetric(float64(len(src))/float64(n), "bytes/token")
+}
+
+// BenchmarkScanLib scans the scraps in lib, which unlike benchSource are
+// indented and commented, repeated to about 4 MB.
+func BenchmarkScanLib(b *testing.B) {
+	files, err := filepath.Glob("../lib/*.scrap")
+	if err != nil || len(files) == 0 {
+		b.Fatal("no scraps in lib", err)
+	}
+	var lib []byte
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			b.Fatal(err)
+		}
+		lib = append(append(lib, src...), '\n')
+	}
+	src := bytes.Repeat(lib, 4<<20/len(lib))
 	b.SetBytes(int64(len(src)))
 	var n int
 	for b.Loop() {
