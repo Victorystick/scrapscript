@@ -46,6 +46,8 @@ func TestPrint(t *testing.T) {
 	expect(t, `#some (#some 1)`, `#some (#some 1)`)
 	expect(t, `(f x).a`, `(f x).a`)
 	expect(t, `{ a = (x ; x = 1) }`, `{ a = x ; x = 1 }`)
+	expect(t, `{ ..r, a, b = b, c = a }`, `{ ..r, a, b = b, c = a }`)
+	expect(t, `| { a, b } -> a`, `| { a, b } -> a`)
 	expect(t, `f ; f : a => (a -> a) -> list (a -> a) = g -> [g]`,
 		`f
 ; f : a => (a -> a) -> list (a -> a) = g -> [ g ]`)

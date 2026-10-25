@@ -45,20 +45,20 @@
 ; eval-lit = env -> | #lit n -> #ok n
 
 ; eval-ops = self -> ext -> env ->
-    | #add { l = l, r = r } -> both (self env l) (self env r) (a -> b -> #ok (a + b))
-    | #mul { l = l, r = r } -> both (self env l) (self env r) (a -> b -> #ok (a * b))
+    | #add { l, r } -> both (self env l) (self env r) (a -> b -> #ok (a + b))
+    | #mul { l, r } -> both (self env l) (self env r) (a -> b -> #ok (a * b))
     | #neg e -> then (self env e) (a -> #ok (0 - a))
     | other -> ext env other
 
 ; eval-cond = self -> ext -> env ->
-    | #less { l = l, r = r } -> both (self env l) (self env r) (a -> b -> #ok (less a b))
+    | #less { l, r } -> both (self env l) (self env r) (a -> b -> #ok (less a b))
     | #if { cond = c, yes = y, no = n } -> then (self env c) (| 0 -> self env n | _ -> self env y)
     | other -> ext env other
 
 ; eval-vars = self -> ext -> env ->
     | #var name -> lookup name env
-    | #let { name = name, value = v, body = b } ->
-        then (self env v) (a -> self ({ name = name, value = a } >+ env) b)
+    | #let { name, value = v, body = b } ->
+        then (self env v) (a -> self ({ name, value = a } >+ env) b)
     | other -> ext env other
 
 ; lookup : text -> env -> result = name ->
@@ -73,19 +73,19 @@
 ; show-lit = | #lit n -> int/to-text n
 
 ; show-ops = self -> ext ->
-    | #add { l = l, r = r } -> paren (self l ++ " + " ++ self r)
-    | #mul { l = l, r = r } -> paren (self l ++ " * " ++ self r)
+    | #add { l, r } -> paren (self l ++ " + " ++ self r)
+    | #mul { l, r } -> paren (self l ++ " * " ++ self r)
     | #neg e -> "-" ++ self e
     | other -> ext other
 
 ; show-cond = self -> ext ->
-    | #less { l = l, r = r } -> paren (self l ++ " < " ++ self r)
+    | #less { l, r } -> paren (self l ++ " < " ++ self r)
     | #if { cond = c, yes = y, no = n } -> "if " ++ self c ++ " then " ++ self y ++ " else " ++ self n
     | other -> ext other
 
 ; show-vars = self -> ext ->
     | #var name -> name
-    | #let { name = name, value = v, body = b } -> "let " ++ name ++ " = " ++ self v ++ " in " ++ self b
+    | #let { name, value = v, body = b } -> "let " ++ name ++ " = " ++ self v ++ " in " ++ self b
     | other -> ext other
 
 ; paren = s -> "(" ++ s ++ ")"
