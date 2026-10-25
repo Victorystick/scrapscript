@@ -49,7 +49,7 @@ func TestCheck(t *testing.T) {
 		{"type error before evaluation", request{Source: `1 + "a"`, Command: "eval"}, response{}, "cannot unify 'text' with 'int'"},
 		{"tests", request{Source: `{ adds = #eq { got = 1 + 1, want = 2 }, fails = [#pass, #fail "why"] }`, Command: "test"},
 			response{
-				Type: "{ adds : [ #eq { got : int, want : int }, ..a ], fails : list [ #fail text, #pass, ..b ] }",
+				Type: "{ adds : [ #eq { got : int, want : int } ], fails : list [ #fail text, #pass ] }",
 				Results: []result{
 					{Path: "adds"},
 					{Path: "fails[0]"},

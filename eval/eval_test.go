@@ -493,8 +493,8 @@ func TestImportTypeMember(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if typ, err := env.Infer(scrap); err != nil || typ != "{ none : [ #none, ..a ] }" {
-		t.Errorf("Expected { none : [ #none, ..a ] }, got %s, %v", typ, err)
+	if typ, err := env.Infer(scrap); err != nil || typ != "{ none : [ #none ] }" {
+		t.Errorf("Expected { none : [ #none ] }, got %s, %v", typ, err)
 	}
 	if val, err := env.Eval(scrap); err != nil || env.Print(val) != "{ none = #none }" {
 		t.Errorf("Expected { none = #none }, got %v, %v", val, err)

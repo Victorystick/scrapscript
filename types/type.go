@@ -863,6 +863,9 @@ func (r *Registry) Describe(res Result) string {
 	s := stringer{reg: r}
 	typ := r.Resolve(res.Type)
 	s.flags(typ, false)
+	for _, p := range res.Params {
+		s.tail(p.Var, outputBit|inputBit)
+	}
 	s.reserveBody(typ)
 	name, named := r.names[typ]
 	_, recurs := s.defs[name.def]
@@ -918,7 +921,9 @@ func (r *Registry) String(ref TypeRef) string {
 //
 // A tag that may or may not be present shows as the type that accepts the
 // most and returns the least: present if it is in an input position, a
-// function's argument, and absent otherwise.
+// function's argument, and absent otherwise. Likewise, an enum's row variable
+// that is only in output positions shows as closed: nothing can observe it,
+// so the type is that of every row it may be.
 func (r *Registry) Strings(refs ...TypeRef) (strs []string, where string) {
 	s := stringer{reg: r}
 	for _, ref := range refs {
@@ -960,6 +965,32 @@ type stringer struct {
 	mayBe bool
 	// The enums that flags has visited, by the positions it visited them in.
 	visited map[TypeRef]uint8
+	// The positions that row variables are in, as for visited. Those of
+	// records and in the arguments of aliases count as both.
+	tails map[TypeRef]uint8
+}
+
+// The positions that flags visits types in.
+const (
+	outputBit uint8 = 1 << iota
+	inputBit
+)
+
+// tail records that the row variable ending row, if any, is in positions.
+func (s *stringer) tail(row TypeRef, positions uint8) {
+	v := s.reg.rowTail(row)
+	if !s.reg.isVar(v) {
+		return
+	}
+	if s.tails == nil {
+		s.tails = make(map[TypeRef]uint8)
+	}
+	s.tails[v] |= positions
+}
+
+// hidden reports whether the row variable v shows as closing its row.
+func (s *stringer) hidden(v TypeRef) bool {
+	return !s.mayBe && s.tails[v] == outputBit
 }
 
 // flags finds the flag variables of ref that are in input positions, if
@@ -969,9 +1000,9 @@ func (s *stringer) flags(ref TypeRef, input bool) {
 	n := s.reg.at(ref)
 	switch n.kind {
 	case enumKind:
-		bit := uint8(1)
+		bit := outputBit
 		if input {
-			bit = 2
+			bit = inputBit
 		}
 		if s.visited[ref]&bit != 0 {
 			return
@@ -980,8 +1011,12 @@ func (s *stringer) flags(ref TypeRef, input bool) {
 			s.visited = make(map[TypeRef]uint8)
 		}
 		s.visited[ref] |= bit
+		s.tail(n.a, bit)
 		s.flags(n.a, input)
-	case listKind, recordKind:
+	case recordKind:
+		s.tail(n.a, outputBit|inputBit)
+		s.flags(n.a, input)
+	case listKind:
 		s.flags(n.a, input)
 	case funcKind:
 		s.flags(n.a, !input)
@@ -1055,6 +1090,9 @@ func (s *stringer) define(d *typeDef) {
 	s.taken[name] = true
 	s.defs[d] = name
 	s.order = append(s.order, d)
+	for _, p := range d.params {
+		s.tail(p, outputBit|inputBit)
+	}
 	s.reserveBody(s.reg.Resolve(d.body))
 }
 
@@ -1070,6 +1108,8 @@ func (s *stringer) reserve(ref TypeRef) {
 	if name, ok := s.reg.names[ref]; ok {
 		s.define(name.def)
 		for _, arg := range name.args {
+			// A row argument shows by its name.
+			s.tail(arg, outputBit|inputBit)
 			s.reserve(arg)
 		}
 		return
@@ -1293,7 +1333,7 @@ func (s *stringer) row(row TypeRef, open, close byte, label func(string, TypeRef
 		s.WriteByte(' ')
 		label(e.label, e.payload)
 	}
-	isOpen := s.reg.at(row).kind != emptyKind
+	isOpen := s.reg.at(row).kind != emptyKind && !s.hidden(row)
 	if isOpen {
 		if len(entries) > 0 {
 			s.WriteByte(',')

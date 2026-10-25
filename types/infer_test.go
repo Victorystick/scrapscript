@@ -30,8 +30,8 @@ func TestInfer(t *testing.T) {
 		{`{ ..base, a = ~01 } ; base = { a = ~00 }`, `{ a : byte }`},
 		// // Enums
 
-		{`#r`, `[ #r, ..a ]`},
-		{`#l 4`, `[ #l int, ..a ]`},
+		{`#r`, `[ #r ]`},
+		{`#l 4`, `[ #l int ]`},
 		{`f (#horse "Lucy") ; f : [#horse text, #zebra int] -> int = _ -> 1`, `int`},
 		// Functions
 		{`a -> a`, `a -> a`},
@@ -80,7 +80,7 @@ func TestInfer(t *testing.T) {
 		{`"to" |> (a -> b -> a) <| 2`, `text`},
 		{`4 |> a -> b -> a`, `a -> int`},
 
-		{`#fun (x -> x * 2)`, `[ #fun (int -> int), ..a ]`},
+		{`#fun (x -> x * 2)`, `[ #fun (int -> int) ]`},
 
 		{`| "/" -> (status 200 <| page "you're on the index")
 		| "/about" -> (status 200 <| page "you're on the about page")
@@ -149,17 +149,17 @@ func TestInfer(t *testing.T) {
 		{`| [1, 2] ++ ns -> ns | _ -> [] <| [1, 2, 3]`, `list int`},
 		{`| ns ++ [2, last] -> ns +< last | _ -> [] <| [1, 2, 3]`, `list int`},
 		// Is empty.
-		{`| [] -> #true | _ -> #false`, `list a -> [ #false, #true, ..b ]`},
-		{`| a >+ _ -> #first a | _ -> #empty`, `list a -> [ #empty, #first a, ..b ]`},
+		{`| [] -> #true | _ -> #false`, `list a -> [ #false, #true ]`},
+		{`| a >+ _ -> #first a | _ -> #empty`, `list a -> [ #empty, #first a ]`},
 		// Unifies nested types.
-		{`| [] -> { empty = #true } | _ -> { empty = #false }`, `list a -> { empty : [ #false, #true, ..b ] }`},
+		{`| [] -> { empty = #true } | _ -> { empty = #false }`, `list a -> { empty : [ #false, #true ] }`},
 		{`| 1 -> { list = [] } | _ -> { list = [ 1 ] }`, `int -> { list : list int }`},
 		{`| #true -> [1] | #false -> []`, `[ #false, #true ] -> list int`},
 
 		// A tag without a payload has the payload ().
-		{`[#a, #a ()]`, `list [ #a, ..a ]`},
+		{`[#a, #a ()]`, `list [ #a ]`},
 		// Tags are open; a payload tag is nullary.
-		{`#true #false`, `[ #true [ #false, ..a ], ..b ]`},
+		{`#true #false`, `[ #true [ #false ] ]`},
 		// Without a catch-all, a match accepts at most the tags it lists.
 		{`| #a #x -> 1 | #b -> 2`, `[ #a [ #x ], #b ] -> int`},
 		{`| #a -> 1 | _ -> 2`, `[ #a, ..a ] -> int`},
@@ -177,6 +177,10 @@ func TestInfer(t *testing.T) {
 		// a tag that may be present is present in an input position, and
 		// absent where it is only in output positions.
 		{`x -> { a = g x, b = x } ; g = | #a -> 0`, `[ #a ] -> { a : int, b : [ #a ] }`},
+		// Likewise, a row variable only in output positions shows as closed.
+		{`| #true -> #true -> #true | _ -> _ -> #false`, `[ #true, ..a ] -> [ #true, ..b ] -> [ #false, #true ]`},
+		{`f -> (| #a -> 0 | _ -> 1) (f ())`, `(() -> [ #a, ..a ]) -> int`},
+		{`x ; x : r => int -> h r = _ -> #a ; h : row -> type = r => [#a, ..r]`, "int -> h a\n; h = a => [ #a, ..a ]"},
 		// A catch-all binder excludes the tags that earlier arms cover; each use
 		// of it may or may not have them.
 		{`| #a -> 0 | x -> 1`, `[ #a, ..a ] -> int`},
@@ -212,7 +216,7 @@ func TestInfer(t *testing.T) {
 		{`f ; f = | 0 -> 0 | n -> f (n - 1)`, `int -> int`},
 		{`even
 ; even = | 0 -> #true | n -> odd (n - 1)
-; odd = | 0 -> #false | n -> even (n - 1)`, `int -> [ #false, #true, ..a ]`},
+; odd = | 0 -> #false | n -> even (n - 1)`, `int -> [ #false, #true ]`},
 
 		// Recursive types are cycles, which print by name where they recur.
 		{`t ; t : type = [#a t]`, "type = t\n; t : type = [ #a t ]"},

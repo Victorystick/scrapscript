@@ -402,6 +402,19 @@ absent otherwise. Errors print every label that may be present. Open: reading
 a closed enum in an input position of an annotation as "at most those tags",
 so that printed types read back as general as they were inferred.
 
+An enum's row variable that is only in output positions prints as closed too:
+`| #true -> #true -> #true | _ -> _ -> #false` prints as
+`[#true, ..a] -> [#true, ..b] -> [#false, #true]`, though its result has a row
+variable of its own, so that it can join other tags, as in
+`[both #true #true, #maybe]`. Nothing can observe such a variable, so the type
+is that of every row it may be. A variable prints if it is also in an input
+position, as in `[#a, #b, ..r] -> [#b, ..r]`, ends a record, or is an alias's
+row argument. Errors print every variable. Open: reading a closed enum in an
+output position of an annotation as having a hidden row variable, so that
+such a printed type reads back as general as it was inferred. The variable
+can't be rigid, or `[#a] -> [#a] = x -> x` would no longer check, since its
+result is its closed argument.
+
 Rows compare by label, not position: `[#a int, #b text]` and
 `[#b text, #a int]` are the same type. To keep each label unique, a row variable
 lacks the labels written before it: in `{ a : t, ..r }`, `r` can never be bound
