@@ -28,4 +28,4 @@ jobs:
       run: go test -v ./...
 
     - name: Build the WebAssembly checker
-      run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o /dev/null ./cmd/scrap-check
+      run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o /dev/null ./cmd/scrap-wasm

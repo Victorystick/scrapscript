@@ -16,11 +16,11 @@ func alloc(n int32) unsafe.Pointer {
 	return unsafe.Pointer(unsafe.SliceData(input))
 }
 
-// check checks the request in the buffer from alloc, and returns the length
-// of its response, which output points to.
+// run runs the request in the buffer from alloc, and returns the length of
+// its response, which output points to.
 //
-//go:wasmexport check
-func checkInput() int32 {
+//go:wasmexport run
+func run() int32 {
 	output = handle(input)
 	input = nil
 	return int32(len(output))

@@ -1,11 +1,11 @@
-// Command scrap-check is the type checker as a WebAssembly module, for hosts
+// Command scrap-wasm is the scrap tool as a WebAssembly module, for hosts
 // such as a scrapyard that check scraps before storing them, or a web page
 // that runs them. Build it with:
 //
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o scrap-check.wasm ./cmd/scrap-check
+//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o scrap-wasm.wasm ./cmd/scrap-wasm
 //
-// The host initializes the module once (_initialize) and then checks any
-// number of scraps with it. Each check is a JSON request,
+// The host initializes the module once (_initialize) and then runs any
+// number of requests with it. Each is JSON,
 //
 //	{"source": "...", "sources": {"<sha256>": "...", ...}}
 //
