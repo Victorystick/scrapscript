@@ -79,6 +79,12 @@ var printed = []struct{ source, result string }{
 ; a = 1
 ; h' = a' -> a''
 ; a'' = 2`},
+	// A punned field stays punned unless its value is renamed.
+	{`{ f = (a -> (h ; h = b -> { a })) 1, g = (a -> (h ; h = c -> { a })) 2 }`, `{ f = h, g = h' }
+; h = b -> { a }
+; a = 1
+; h' = c -> { a = a' }
+; a' = 2`},
 	// Annotations, and the sort bindings that they refer to, are kept.
 	{`get ; get : pair -> int = p -> p.a ; pair : type = { a : int, b : int } ; unused = 1`, `get
 ; get : pair -> int = p -> p.a

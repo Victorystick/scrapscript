@@ -473,6 +473,10 @@ func (p *parser) parseRow(close token.Token, width int, label func()) (tail ast.
 	return tail, info
 }
 
+// parseRecord parses a record, whose fields may be punned:
+//
+//	record = "{" [ ".." expr "," ] [ field { "," field } ] "}"
+//	field  = NAME [ "=" expr ]
 func (p *parser) parseRecord() ast.Node {
 	p.expect(token.LBRACE)
 	start := p.at()
@@ -498,10 +502,15 @@ func (p *parser) parseRecord() ast.Node {
 
 		key := p.identTok()
 
-		p.expect(token.ASSIGN)
-		p.next()
-
-		x := p.parseExpr()
+		// A field without a value is punned: `{ x }` is `{ x = x }`, and its
+		// value is the key as an identifier.
+		var x ast.Node
+		if p.tok == token.ASSIGN {
+			p.next()
+			x = p.parseExpr()
+		} else {
+			x = p.add(ast.Ident, key, 0, 0)
+		}
 
 		p.scratch = append(p.scratch, ast.Node(key), x)
 

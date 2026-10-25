@@ -91,6 +91,8 @@ func TestParseRecord(t *testing.T) {
 		`{ a = 1, b = "x"}`,
 		`{ ..other, a = 1, b = "x"}`,
 		`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`,
+		`{ a, b = 1, c }`,
+		`{ ..other, a }`,
 	}
 
 	for _, src := range valid {

@@ -102,6 +102,10 @@ var expressions = []struct {
 	// Destructuring.
 	{`{ a = 1, b = 2 } |> | { a = c, b = d } -> c + d`, `3`},
 	{`{ a = 1 } |> | { a = 2 } -> 0 | { a = c } -> c`, `1`},
+	// Punned fields: `{ a }` is `{ a = a }`, in literals and patterns.
+	{`{ a, b = 2 } ; a = 1`, `{ a = 1, b = 2 }`},
+	{`{ ..r, a } ; a = 3 ; r = { a = 1, b = 2 }`, `{ a = 3, b = 2 }`},
+	{`{ a = 1, b = 2 } |> | { a, b } -> a + b`, `3`},
 	{`3 |> a -> b -> a`, `(a -> b -> a) 3`},
 	// Matches in one frame keep their own slots, which closures read later.
 	{`[f 10, h 10] ; f = 1 |> y -> (g ; g = z -> y + z) ; h = 2 |> y -> (g ; g = z -> y * z)`, `[ 11, 20 ]`},

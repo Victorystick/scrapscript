@@ -166,7 +166,7 @@ prints 189 KB.
 ## 9. The language falls short of its spec
 
 Gaps in the language itself, found by writing the libraries; most important
-first. 1 and 2 change what the language promises, 5 is quick.
+first. 1 and 2 change what the language promises.
 
 - [ ] Comparisons and equality. SPEC.md lists `== /= < <= > >=`, but `==`
       is a parse error and `1 < 2` fails with `can't infer binary expression
@@ -207,9 +207,9 @@ first. 1 and 2 change what the language promises, 5 is quick.
       section 4's open text-prefix patterns (`"he" ++ rest`) in favour:
       lib/parser.scrap works on `list text` and hand-writes `strip` for
       lack of them.
-- [ ] Field punning. SPEC.md has `{ x }` for `{ x = x }` in literals and
-      patterns, but `{ x } ; x = 1` is a parse error. Every library's export
-      record is `{ parser = parser, outcome = outcome, … }`.
+- [x] Field punning: `{ x }` is `{ x = x }` in literals and patterns, as
+      SPEC.md has it. The parser makes the key an identifier, and the
+      printer keeps a punned field punned while its value prints as the key.
 - [ ] Specify the prelude (section 14 lists it as open). `[#some v, #none]`,
       `[#lt, #eq, #gt]` and `[#true, #false]` are spelled out everywhere:
       add builtin aliases `bool`, `option a`, `result e a` and `order`,
