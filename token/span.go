@@ -21,6 +21,7 @@ func (s *Source) Error(span Span, msg string) Error {
 		Range: span,
 		Msg:   msg,
 		Line:  s.GetLine(pos.Line),
+		Src:   s.bytes,
 	}
 }
 

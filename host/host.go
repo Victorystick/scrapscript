@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Victorystick/scrapscript/eval"
+	"github.com/Victorystick/scrapscript/highlight"
 	"github.com/Victorystick/scrapscript/token"
 	"github.com/Victorystick/scrapscript/yards"
 )
@@ -99,14 +100,16 @@ func Main(iface Interface, run Run) int {
 			return status
 		}
 	}
-	fmt.Fprintf(os.Stderr, "%s: %s\n", name, token.Render(err, isTerminal(os.Stderr)))
+	fmt.Fprintf(os.Stderr, "%s: %s\n", name, token.Render(err, highlighter(os.Stderr)))
 	return 1
 }
 
-// isTerminal returns true if f is a terminal, which errors are colored for.
-func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+// highlighter returns what highlights errors for f, if it is a terminal.
+func highlighter(f *os.File) token.Highlighter {
+	if info, err := f.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+		return highlight.ANSI
+	}
+	return nil
 }
 
 // readScript reads the script that arg refers to, as a reference or a path.

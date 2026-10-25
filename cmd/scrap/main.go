@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Victorystick/scrapscript/eval"
+	"github.com/Victorystick/scrapscript/highlight"
 	"github.com/Victorystick/scrapscript/token"
 	"github.com/Victorystick/scrapscript/yards"
 )
@@ -62,7 +63,7 @@ func main() {
 
 func must[T any](val T, err error) T {
 	if err != nil {
-		fmt.Fprintln(os.Stderr, token.Render(err, isTerminal(os.Stderr)))
+		fmt.Fprintln(os.Stderr, token.Render(err, highlighter(os.Stderr)))
 		os.Exit(1)
 	}
 	return val
@@ -141,8 +142,10 @@ func hashScrap(args []string) {
 	fmt.Println(scrap.Sha256())
 }
 
-// isTerminal returns true if f is a terminal, which errors are colored for.
-func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+// highlighter returns what highlights errors for f, if it is a terminal.
+func highlighter(f *os.File) token.Highlighter {
+	if info, err := f.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+		return highlight.ANSI
+	}
+	return nil
 }
