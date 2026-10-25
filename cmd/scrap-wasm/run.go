@@ -27,6 +27,12 @@
 //     "path", and whether it "failed" and why, "message".
 //
 // If evaluating fails, the response has the error next to the type.
+//
+// "highlight" neither checks nor runs the scrap, which needn't parse. The
+// response has its ranges for syntax highlighting, "highlights", for the
+// CSS Custom Highlight API: per class, named as the highlight package names
+// them, its ranges as start and end pairs, in UTF-16 code units as
+// JavaScript indexes strings.
 package main
 
 import (
@@ -36,8 +42,11 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/Victorystick/scrapscript/eval"
+	"github.com/Victorystick/scrapscript/highlight"
 	"github.com/Victorystick/scrapscript/token"
 )
 
@@ -50,11 +59,12 @@ type request struct {
 }
 
 type response struct {
-	Type    string   `json:"type,omitempty"`
-	Value   string   `json:"value,omitempty"`
-	Results []result `json:"results,omitzero"`
-	Error   string   `json:"error,omitempty"`
-	Missing []string `json:"missing,omitempty"`
+	Highlights map[string][]int `json:"highlights,omitempty"`
+	Type       string           `json:"type,omitempty"`
+	Value      string           `json:"value,omitempty"`
+	Results    []result         `json:"results,omitzero"`
+	Error      string           `json:"error,omitempty"`
+	Missing    []string         `json:"missing,omitempty"`
 }
 
 type result struct {
@@ -100,6 +110,8 @@ func (s sources) FetchSha256(key string) ([]byte, error) {
 func respond(req request) response {
 	switch req.Command {
 	case "", "type", "eval", "test":
+	case "highlight":
+		return response{Highlights: highlights(req.Source)}
 	default:
 		return response{Error: "bad request: unknown command " + strconv.Quote(req.Command)}
 	}
@@ -107,26 +119,26 @@ func respond(req request) response {
 	env.UseFetcher(sources(req.Sources))
 	s, err := env.Read([]byte(req.Source))
 	if err != nil {
-		return response{Error: token.Render(err, false)}
+		return response{Error: token.Render(err, nil)}
 	}
 	if missing := missing(env, s, req.Sources); len(missing) > 0 {
 		return response{Missing: missing}
 	}
 	t, err := env.Infer(s)
 	if err != nil {
-		return response{Error: token.Render(err, false)}
+		return response{Error: token.Render(err, nil)}
 	}
 	switch req.Command {
 	case "eval":
 		v, err := env.PrintScrap(s)
 		if err != nil {
-			return response{Type: t, Error: token.Render(err, false)}
+			return response{Type: t, Error: token.Render(err, nil)}
 		}
 		return response{Type: t, Value: v}
 	case "test":
 		results, err := env.Test(s)
 		if err != nil {
-			return response{Type: t, Error: token.Render(err, false)}
+			return response{Type: t, Error: token.Render(err, nil)}
 		}
 		res := response{Type: t, Results: make([]result, len(results))}
 		for i, r := range results {
@@ -135,6 +147,29 @@ func respond(req request) response {
 		return res
 	}
 	return response{Type: t}
+}
+
+// highlights returns the ranges of src's highlight classes, in UTF-16 code
+// units.
+func highlights(src string) map[string][]int {
+	s := highlight.Highlight([]byte(src))
+	res := map[string][]int{}
+	// The offsets only grow, so one pass over src converts them all.
+	at, units := 0, 0
+	unitsAt := func(offset int) int {
+		for at < offset {
+			r, w := utf8.DecodeRuneInString(src[at:])
+			at += w
+			units += utf16.RuneLen(r)
+		}
+		return units
+	}
+	for i, c := range s.Classes {
+		name := c.String()
+		start := unitsAt(int(s.Starts[i]))
+		res[name] = append(res[name], start, unitsAt(int(s.Ends[i])))
+	}
+	return res
 }
 
 // missing returns the hashes of the scraps that s refers to, directly or

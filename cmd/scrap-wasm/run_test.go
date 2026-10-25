@@ -56,6 +56,11 @@ func TestCheck(t *testing.T) {
 					{Path: "fails[1]", Failed: true, Message: "why"},
 				},
 			}, ""},
+		{"highlights without parsing", request{Source: `#a 1 + 2 +`, Command: "highlight"},
+			response{Highlights: map[string][]int{"constructor": {0, 2}, "number": {3, 4, 7, 8}, "operator": {5, 6, 9, 10}}}, ""},
+		// "é" is one UTF-16 code unit, and "😀" two, where both take more bytes.
+		{"highlights in UTF-16", request{Source: `"é😀" 1`, Command: "highlight"},
+			response{Highlights: map[string][]int{"string": {0, 5}, "number": {6, 7}}}, ""},
 		{"no tests", request{Source: `{}`, Command: "test"}, response{Type: "{}", Results: []result{}}, ""},
 		{"not a test scrap", request{Source: `1`, Command: "test"}, response{}, "is not a test case"},
 		{"unknown command", request{Source: `1`, Command: "push"}, response{}, `bad request: unknown command "push"`},

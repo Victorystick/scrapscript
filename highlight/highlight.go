@@ -6,7 +6,6 @@ package highlight
 import (
 	"bytes"
 	"fmt"
-	"html"
 	"strings"
 
 	"github.com/Victorystick/scrapscript/scanner"
@@ -181,22 +180,5 @@ func ANSI(src []byte, start, end int) string {
 		at = to
 	}
 	b.Write(src[at:end])
-	return b.String()
-}
-
-// HTML returns src as HTML, with each span in a <span> whose class is
-// hl- and the class's name, dots as dashes: hl-string-special.
-func HTML(src []byte) string {
-	s := Highlight(src)
-	var b strings.Builder
-	at := 0
-	for i, c := range s.Classes {
-		start, end := int(s.Starts[i]), int(s.Ends[i])
-		b.WriteString(html.EscapeString(string(src[at:start])))
-		fmt.Fprintf(&b, `<span class="hl-%s">%s</span>`,
-			strings.ReplaceAll(c.String(), ".", "-"), html.EscapeString(string(src[start:end])))
-		at = end
-	}
-	b.WriteString(html.EscapeString(string(src[at:])))
 	return b.String()
 }

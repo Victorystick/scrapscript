@@ -46,10 +46,3 @@ func TestANSI(t *testing.T) {
 		t.Errorf("ANSI = %q, want %q", got, want)
 	}
 }
-
-func TestHTML(t *testing.T) {
-	want := `<span class="hl-constructor">#a</span> <span class="hl-operator">&lt;|</span> <span class="hl-string">&#34;&lt;b&gt;&#34;</span> <span class="hl-comment-doc">--- &amp;</span>`
-	if got := HTML([]byte(`#a <| "<b>" --- &`)); got != want {
-		t.Errorf("HTML = %q, want %q", got, want)
-	}
-}
