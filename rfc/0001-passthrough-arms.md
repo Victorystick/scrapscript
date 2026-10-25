@@ -164,8 +164,34 @@ and the core (section 5) is unchanged. Consequences:
   arms mix freely and the default is visible at the end. It is longer than
   `?`, and `..` already means a rest inside patterns, so `| ..` and
   `| { .. }` would sit close together.
-- **A library function.** Works for values (`replace 0 1`) but not
-  patterns: a function cannot take `#err _` as an argument.
+- **Library functions.** A function cannot take a pattern as an argument,
+  so a library can cover the shape only in pieces:
+  - *One combinator per type*, for the cases that recur:
+    ```scrap
+    ; then    = next    -> | #eq -> next () | o -> o        -- orderings
+    ; or-else = recover -> | #err e -> recover e | ok -> ok  -- results
+    ```
+    `int/cmp a b |> then (_ -> text/cmp x y)` and
+    `p input |> or-else (_ -> one-of ps input)` read well and keep their
+    precise types. This covers the comparator and recovery uses, and is
+    worth doing whether or not `?` lands. The cost is a function per type,
+    and a thunk where the next value should not be computed early.
+  - *A generic passthrough* over a partial function returning an option:
+    ```scrap
+    ; passthrough = f -> x -> f x |> | #some y -> y | #none -> x
+    desugar = passthrough (| #neg a -> #some (#mul { l = #lit -1, r = a }) | _ -> #none)
+    ```
+    It still writes a catch-all arm, now `| _ -> #none`, so it saves
+    nothing. It is also less precise: the result keeps `#neg`, because
+    `x` is no longer a name pattern that excludes the covered tags.
+  - *Replacing a value*, `replace 0 1`, would be
+    `old -> new -> x -> x == old |> | #true -> new | #false -> x`, but `==`
+    is not implemented yet (TODO.md, section 9). Once it is, this covers
+    sentinels on types with equality, though not patterns such as
+    `#some 0` or `[]` bound to a name.
+
+  Taken together, the per-type combinators cover the common uses, and what
+  is left for `?` is rewriting a few tags in a tree pass.
 
 ## Spec changes
 
