@@ -11,6 +11,8 @@ against the base commit with interleaved runs and benchstat.
 - SPEC.md is the target language spec and decides design questions; README.md
   is for users; TODO.md tracks architectural blemishes; BENCHMARK.md and
   bench/run.sh track performance.
+- Design proposals go in rfc/ (see rfc/README.md); an accepted one is folded
+  into SPEC.md.
 - Design principles:
   - An import means the same as its source inlined in parentheses, so
     whatever works across imports must work locally too.
