@@ -12,25 +12,25 @@
 -- Exports its types next to its functions: `parser a` and `outcome a` are
 -- type members, used as `p.parser int` in type position.
 
-{ parser = parser
-, outcome = outcome
-, run = run
-, succeed = succeed
-, problem = problem
-, keep = keep
-, skip = skip
-, map = map
-, and-then = and-then
-, one-of = one-of
-, many = many
-, many1 = many1
-, char-if = char-if
-, symbol = symbol
-, digit = digit
-, int = int
-, word = word
-, spaces = spaces
-, end = end
+{ parser
+, outcome
+, run
+, succeed
+, problem
+, keep
+, skip
+, map
+, and-then
+, one-of
+, many
+, many1
+, char-if
+, symbol
+, digit
+, int
+, word
+, spaces
+, end
 }
 
 -- A parser takes the characters left and gives a value with the characters

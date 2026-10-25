@@ -5,10 +5,10 @@
 -- Each function makes one kind of case. They are open enums, so cases of
 -- different kinds can share a list.
 
-{ eq = eq
-, float-eq = float-eq
+{ eq
+, float-eq
 , pass = #pass
-, fail = fail
+, fail
 }
 
 -- Passes if got and want are the same value, which must hold no functions.

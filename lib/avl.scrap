@@ -4,18 +4,18 @@
 -- Exports its types next to its functions: `tree k v`, `node k v` and
 -- `order k` are type members, used as `avl.tree text int` in type position.
 
-{ tree = tree
-, node = node
-, order = order
+{ tree
+, node
+, order
 , empty = #leaf
-, size = size
-, lookup = lookup
-, insert = insert
-, upsert = upsert
-, remove = remove
-, fold = fold
-, to-list = to-list
-, from-list = from-list
+, size
+, lookup
+, insert
+, upsert
+, remove
+, fold
+, to-list
+, from-list
 }
 
 ; tree : type -> type -> type = k => v => [#leaf, #node (node k v)]
