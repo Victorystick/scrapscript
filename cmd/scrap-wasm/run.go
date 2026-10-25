@@ -13,17 +13,29 @@
 // response: {"type": "..."} if it checks, {"error": "..."} if it doesn't, or
 // {"missing": ["<sha256>", ...]} if the sources lack scraps that it refers
 // to, directly or not. The host fetches those and asks again, so that the
-// module never waits on the host.
+// module never waits on the host. A source whose sha256 isn't its hash is
+// an error.
 //
-// With "eval": true in the request, a scrap that checks is evaluated too.
-// The response then has its value as `scrap eval` prints it, "value", or
-// the error that stopped it, "error", next to its type.
+// A request's "command" says what to do with a scrap that checks, as the
+// commands of the scrap CLI do:
+//
+//   - "type", the default, only checks it.
+//   - "eval" evaluates it too. The response has its value as `scrap eval`
+//     prints it, "value", next to its type.
+//   - "test" runs the test cases it holds, as `scrap test` does. The
+//     response has a result for each, "results", next to its type: its
+//     "path", and whether it "failed" and why, "message".
+//
+// If evaluating fails, the response has the error next to the type.
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/token"
@@ -34,14 +46,21 @@ func main() {}
 type request struct {
 	Source  string            `json:"source"`
 	Sources map[string]string `json:"sources"`
-	Eval    bool              `json:"eval"`
+	Command string            `json:"command"`
 }
 
 type response struct {
 	Type    string   `json:"type,omitempty"`
 	Value   string   `json:"value,omitempty"`
+	Results []result `json:"results,omitempty"`
 	Error   string   `json:"error,omitempty"`
 	Missing []string `json:"missing,omitempty"`
+}
+
+type result struct {
+	Path    string `json:"path"`
+	Failed  bool   `json:"failed,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // handle checks the JSON request in input and returns its JSON response.
@@ -51,7 +70,7 @@ func handle(input []byte) []byte {
 	if err := json.Unmarshal(input, &req); err != nil {
 		res.Error = "bad request: " + err.Error()
 	} else {
-		res = check(req)
+		res = respond(req)
 	}
 	out, err := json.Marshal(res)
 	if err != nil {
@@ -65,14 +84,25 @@ type sources map[string]string
 
 var errNotFound = errors.New("no scrap found")
 
+// FetchSha256 returns the source with the sha256 key, which it verifies, as
+// the scrap CLI does with what it fetches.
 func (s sources) FetchSha256(key string) ([]byte, error) {
-	if src, ok := s[key]; ok {
-		return []byte(src), nil
+	src, ok := s[key]
+	if !ok {
+		return nil, errNotFound
 	}
-	return nil, errNotFound
+	if fmt.Sprintf("%x", sha256.Sum256([]byte(src))) != key {
+		return nil, fmt.Errorf("the source of $source:%s has a different hash", key)
+	}
+	return []byte(src), nil
 }
 
-func check(req request) response {
+func respond(req request) response {
+	switch req.Command {
+	case "", "type", "eval", "test":
+	default:
+		return response{Error: "bad request: unknown command " + strconv.Quote(req.Command)}
+	}
 	env := eval.NewEnvironment()
 	env.UseFetcher(sources(req.Sources))
 	s, err := env.Read([]byte(req.Source))
@@ -86,14 +116,25 @@ func check(req request) response {
 	if err != nil {
 		return response{Error: token.Render(err, false)}
 	}
-	if !req.Eval {
-		return response{Type: t}
+	switch req.Command {
+	case "eval":
+		v, err := env.PrintScrap(s)
+		if err != nil {
+			return response{Type: t, Error: token.Render(err, false)}
+		}
+		return response{Type: t, Value: v}
+	case "test":
+		results, err := env.Test(s)
+		if err != nil {
+			return response{Type: t, Error: token.Render(err, false)}
+		}
+		res := response{Type: t, Results: make([]result, len(results))}
+		for i, r := range results {
+			res.Results[i] = result{Path: r.Path, Failed: r.Failed, Message: r.Message}
+		}
+		return res
 	}
-	v, err := env.PrintScrap(s)
-	if err != nil {
-		return response{Type: t, Error: token.Render(err, false)}
-	}
-	return response{Type: t, Value: v}
+	return response{Type: t}
 }
 
 // missing returns the hashes of the scraps that s refers to, directly or
