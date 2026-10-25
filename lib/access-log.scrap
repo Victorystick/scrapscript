@@ -16,7 +16,7 @@
 
 -- "METHOD PATH STATUS MILLIS"
 ; line : p.parser request =
-    p.succeed (method -> path -> status -> ms -> { path = path, status = status, ms = ms })
+    p.succeed (method -> path -> status -> ms -> { path, status, ms })
       |> p.keep p.word
       |> p.skip p.spaces
       |> p.keep p.word

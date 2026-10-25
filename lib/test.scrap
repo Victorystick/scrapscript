@@ -13,11 +13,11 @@
 
 -- Passes if got and want are the same value, which must hold no functions.
 ; eq : a => r => a -> a -> [#eq { got : a, want : a }, ..r]
-  = got -> want -> #eq { got = got, want = want }
+  = got -> want -> #eq { got, want }
 
 -- Passes if got is no more than within from want.
 ; float-eq : r => float -> float -> float -> [#float-eq { got : float, want : float, within : float }, ..r]
-  = within -> got -> want -> #float-eq { got = got, want = want, within = within }
+  = within -> got -> want -> #float-eq { got, want, within }
 
 -- Fails, saying why.
 ; fail : r => text -> [#fail text, ..r]
