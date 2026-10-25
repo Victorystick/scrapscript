@@ -56,6 +56,7 @@ func TestCheck(t *testing.T) {
 					{Path: "fails[1]", Failed: true, Message: "why"},
 				},
 			}, ""},
+		{"no tests", request{Source: `{}`, Command: "test"}, response{Type: "{}", Results: []result{}}, ""},
 		{"not a test scrap", request{Source: `1`, Command: "test"}, response{}, "is not a test case"},
 		{"unknown command", request{Source: `1`, Command: "push"}, response{}, `bad request: unknown command "push"`},
 		{"wrong hash", request{
@@ -97,4 +98,12 @@ func sorted(xs ...string) []string {
 		xs[0], xs[1] = xs[1], xs[0]
 	}
 	return xs
+}
+
+// A test scrap without cases has an empty list of results, not none, which
+// would look like a response to "type".
+func TestNoTestsJSON(t *testing.T) {
+	if got := string(handle([]byte(`{"source":"{}","command":"test"}`))); got != `{"type":"{}","results":[]}` {
+		t.Errorf("got %s", got)
+	}
 }

@@ -52,7 +52,7 @@ type request struct {
 type response struct {
 	Type    string   `json:"type,omitempty"`
 	Value   string   `json:"value,omitempty"`
-	Results []result `json:"results,omitempty"`
+	Results []result `json:"results,omitzero"`
 	Error   string   `json:"error,omitempty"`
 	Missing []string `json:"missing,omitempty"`
 }
