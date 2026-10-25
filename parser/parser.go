@@ -29,11 +29,10 @@ type parser struct {
 	errors scanner.Errors
 }
 
+// next advances to the next token. The parser only consumes tokens it has
+// checked, and never EOF, which is last, so next stays within the tokens.
 func (p *parser) next() {
-	// The last token is EOF; stay there.
-	if p.i < len(p.tokens.Kinds)-1 {
-		p.i++
-	}
+	p.i++
 	p.tok = p.tokens.Kinds[p.i]
 }
 
@@ -83,10 +82,16 @@ func (p *parser) flush(start int) (lhs, rhs uint32) {
 	return lhs, uint32(len(p.extra))
 }
 
+// expect fails unless the current token is tok. Its failure is a separate
+// call, so that the check itself is cheap enough to inline.
 func (p *parser) expect(tok token.Token) {
 	if p.tok != tok {
-		p.bail(fmt.Sprint("Expected ", tok, " got ", p.tok))
+		p.expected(tok)
 	}
+}
+
+func (p *parser) expected(tok token.Token) {
+	p.bail(fmt.Sprint("Expected ", tok, " got ", p.tok))
 }
 
 func (p *parser) unexpected() {
