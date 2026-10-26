@@ -516,9 +516,9 @@ func TestCompileTypes(t *testing.T) {
 
 func TestCompileErrors(t *testing.T) {
 	tests := []struct{ source, err string }{
-		{`| [a, a] -> a`, "cannot bind a twice"},
+		{`| [a, a] -> a`, "cannot bind 'a' twice"},
 		{`| 1.0 -> 1`, "cannot match on floats"},
-		{`nope`, "unknown variable nope"},
+		{`nope`, "unknown variable 'nope'"},
 		{`| a + b -> a`, "unsupported pattern"},
 	}
 	for _, tt := range tests {

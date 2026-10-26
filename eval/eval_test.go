@@ -180,6 +180,13 @@ var expressions = []struct {
 	{`f (#a { x = 1 }) ; f = | #a { x = x } -> x | r -> ext r ; ext = | #b -> 2`, `1`},
 	{`{ a = f (#a 1) 5, b = f #b 0 } ; f = | #a x -> _ -> x | r -> 0 -> ext r | _ -> _ -> 2 ; ext = | #b -> 3`, `{ a = 1, b = 3 }`},
 	{`{ a = f (#wrap #a), b = f (#wrap #b) } ; f = | #wrap #a -> 1 | #wrap r -> ext r ; ext = | #b -> 2`, `{ a = 1, b = 2 }`},
+	// Destructuring bindings bind a record's fields, punned or renamed.
+	{`max 3 4 ; { max, sort } = ord int/cmp ; ord = cmp -> { max = a -> b -> cmp a b |> | #lt -> b | _ -> a, sort = 0 }`, `4`},
+	{`a + c ; { a, b = c } = { a = 1, b = 2, d = 3 }`, `3`},
+	{`{ a = id 1, b = id "x" } ; { id } = { id = x -> x }`, `{ a = 1, b = "x" }`},
+	{`a + b ; { a } = r ; { b } = r ; r = { a = 1, b = 2 }`, `3`},
+	{`f 2 ; f = x -> (inc x ; { inc } = { inc = y -> y + 1 })`, `3`},
+	{`f (#some 1) ; { f, none } = ({ f = | #some n -> n | #none -> 0, none = #none } ; option = a => [#some a, #none])`, `1`},
 }
 
 func TestScrapItentity(t *testing.T) {
@@ -214,9 +221,9 @@ var failures = []struct {
 	{`1 -> x`, `function parameter must be an identifier`},
 	{`#left 5 |> | #l n -> n | #r n -> n`, `cannot unify '[ #l a, #r a ]' with '[ #left int, ..b ]'`},
 	{`{ a = 2 } |> | { a = a, b = b } -> ()`, `cannot unify '{ a : a, b : b }' with '{ a : int }'`},
-	{`{ a = 2, b = 1 } |> | { a = a, b = a } -> ()`, `cannot bind a twice`},
-	{`f ; f : c -> int = _ -> 1 ; c : type = [#a, #a]`, `cannot define tag #a more than once`},
-	{`g ; g : [#x f] -> int = _ -> 1 ; f = x -> 2`, `unknown type f`},
+	{`{ a = 2, b = 1 } |> | { a = a, b = a } -> ()`, `cannot bind 'a' twice`},
+	{`f ; f : c -> int = _ -> 1 ; c : type = [#a, #a]`, `cannot define tag '#a' more than once`},
+	{`g ; g : [#x f] -> int = _ -> 1 ; f = x -> 2`, `unknown type 'f'`},
 	{`a::x`, `Expected EOF got DEFINE`},
 	{`["a"] +< ~be`, `cannot unify 'list text' with 'bytes'`},
 	{`1 >+ [~~abcd]`, `cannot unify 'bytes' with 'int'`},
@@ -224,6 +231,11 @@ var failures = []struct {
 	{`{ b = 1 }.a`, `cannot unify '{ b : int }' with '{ a : a, ..b }'`},
 	{`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`, `cannot unify '{ a : int, c : int }' with '{ a : int, b : text, ..a }'`},
 	{`{ ..{ a = 2 }, a = "x"}`, `cannot unify 'int' with 'text'`},
+	{`a ; { a } = { b = 1 }`, `cannot unify '{ b : int }' with '{ a : a, ..b }'`},
+	{`a ; { a } = 1`, `cannot unify 'int' with '{ a : a, ..b }'`},
+	{`a ; { a } = r ; { a } = r ; r = { a = 1 }`, `cannot bind 'a' twice`},
+	{`f 1 ; { f } = { f = x -> f x }`, `a destructured record can't be recursive`},
+	{`u ; { u } = ({ u = t } ; t = a => [#some a, #none])`, `cannot use type 'u' as a value`},
 	// Builtins fail on their values.
 	{`list/repeat -1 0`, `list/repeat: negative count -1`},
 	{`text/repeat -1 "a"`, `text/repeat: negative count -1`},
@@ -430,6 +442,21 @@ func TestEvalImport(t *testing.T) {
 		if got := env.Print(val); got != "4" {
 			t.Errorf("Expected: %#v, got: %#v", "4", got)
 		}
+	}
+}
+
+func TestDestructureImport(t *testing.T) {
+	env := NewEnvironment()
+	env.UseFetcher(MapFetcher{
+		"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445": `{ inc = n -> n + 1, two = 2 }`,
+	})
+
+	val, err := eval(env, `inc two ; { inc, two } = $source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env.Print(val); got != "3" {
+		t.Errorf("Expected 3, got %s", got)
 	}
 }
 

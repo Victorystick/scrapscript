@@ -83,7 +83,7 @@ func (c *context) kinds(a *alias) {
 
 	if a.annotation != ast.None {
 		if got, want := c.kind(a.annotation), a.kind(); got != want {
-			c.bail(a.annotation, fmt.Sprintf("%s has kind %s, not %s", a.name, want, got))
+			c.bail(a.annotation, fmt.Sprintf("'%s' has kind '%s', not '%s'", a.name, want, got))
 		}
 	}
 }
@@ -97,7 +97,7 @@ func (c *context) params(t ast.Node) ([]param, ast.Node) {
 		p := c.src.TokenText(tok)
 		for _, q := range params {
 			if q.name == p {
-				c.bail(t, fmt.Sprintf("cannot bind type variable %s twice", p))
+				c.bail(t, fmt.Sprintf("cannot bind type variable '%s' twice", p))
 			}
 		}
 		params = append(params, param{name: p})
@@ -144,7 +144,7 @@ func (c *context) kind(x ast.Node) string {
 		case c.src.Kind(arg) == ast.Func:
 			c.bail(arg, "higher kinds are not supported yet")
 		case c.src.Kind(arg) != ast.Ident || k != "type" && k != "row":
-			c.bail(arg, fmt.Sprintf("%s is not a kind", k))
+			c.bail(arg, fmt.Sprintf("'%s' is not a kind", k))
 		default:
 			b.WriteString(k)
 			b.WriteString(" -> ")
@@ -152,7 +152,7 @@ func (c *context) kind(x ast.Node) string {
 		x = result
 	}
 	if c.src.Kind(x) != ast.Ident || c.src.NodeText(x) != "type" {
-		c.bail(x, fmt.Sprintf("%s is not a kind of types", c.src.NodeText(x)))
+		c.bail(x, fmt.Sprintf("'%s' is not a kind of types", c.src.NodeText(x)))
 	}
 	b.WriteString("type")
 	return b.String()
@@ -255,7 +255,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 		name := c.src.TokenText(c.src.Main(x))
 		if v := c.tvars.Get(name); v != nil {
 			if v.val.row {
-				c.bail(x, fmt.Sprintf("%s is a row, not a type", name))
+				c.bail(x, fmt.Sprintf("'%s' is a row, not a type", name))
 			}
 			return v.val.ref
 		}
@@ -266,9 +266,9 @@ func (c *context) typ(x ast.Node) TypeRef {
 			return ref
 		}
 		if name == "list" {
-			c.bail(x, fmt.Sprintf("list takes %s, not 0", typeArguments(1)))
+			c.bail(x, fmt.Sprintf("'list' takes %s, not 0", typeArguments(1)))
 		}
-		c.bail(x, fmt.Sprintf("unknown type %s", name))
+		c.bail(x, fmt.Sprintf("unknown type '%s'", name))
 	case ast.Import, ast.Access:
 		return c.applyStatic(x, x, c.static(x), nil)
 	case ast.Literal:
@@ -287,7 +287,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 			tagTok, payload := c.src.Variant(v)
 			tag := c.src.TokenText(tagTok)
 			if _, ok := tags[tag]; ok {
-				c.bail(v, fmt.Sprintf("cannot define tag #%s more than once", tag))
+				c.bail(v, fmt.Sprintf("cannot define tag '#%s' more than once", tag))
 			}
 			tags[tag] = HoleRef
 			if payload != ast.None {
@@ -301,7 +301,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 		for i := range fields.Len() {
 			k := c.src.TokenText(fields.Key(i))
 			if _, ok := ref[k]; ok {
-				c.bail(fields.Value(i), fmt.Sprintf("cannot define field %s more than once", k))
+				c.bail(fields.Value(i), fmt.Sprintf("cannot define field '%s' more than once", k))
 			}
 			ref[k] = c.typ(fields.Value(i))
 		}
@@ -310,7 +310,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 		c.bail(x, "type variables must be bound at the start of an annotation")
 	}
 
-	c.bail(x, fmt.Sprintf("%s is not a type", c.src.NodeText(x)))
+	c.bail(x, fmt.Sprintf("'%s' is not a type", c.src.NodeText(x)))
 	return NoType
 }
 
@@ -322,10 +322,10 @@ func (c *context) rowTail(tail ast.Node) TypeRef {
 	name := c.src.TokenText(c.src.Main(tail))
 	v := c.tvars.Get(name)
 	if v == nil {
-		c.bail(tail, fmt.Sprintf("unknown row variable %s", name))
+		c.bail(tail, fmt.Sprintf("unknown row variable '%s'", name))
 	}
 	if !v.val.row {
-		c.bail(tail, fmt.Sprintf("%s is a type, not a row", name))
+		c.bail(tail, fmt.Sprintf("'%s' is a type, not a row", name))
 	}
 	return v.val.ref
 }
@@ -357,13 +357,13 @@ func (c *context) application(x ast.Node) TypeRef {
 			}
 			if name == "list" {
 				if len(args) != 1 {
-					c.bail(x, fmt.Sprintf("list takes %s, not %d", typeArguments(1), len(args)))
+					c.bail(x, fmt.Sprintf("'list' takes %s, not %d", typeArguments(1), len(args)))
 				}
 				return c.reg.List(c.typ(args[0]))
 			}
 		}
 	}
-	c.bail(fn, fmt.Sprintf("%s is not a type constructor", c.src.NodeText(fn)))
+	c.bail(fn, fmt.Sprintf("'%s' is not a type constructor", c.src.NodeText(fn)))
 	return NoType
 }
 
@@ -371,9 +371,9 @@ func (c *context) application(x ast.Node) TypeRef {
 func (c *context) apply(x ast.Node, a *alias, args []ast.Node) TypeRef {
 	if len(args) != len(a.params) {
 		if len(a.params) == 0 {
-			c.bail(x, fmt.Sprintf("%s is not a type constructor", a.name))
+			c.bail(x, fmt.Sprintf("'%s' is not a type constructor", a.name))
 		}
-		c.bail(x, fmt.Sprintf("%s takes %s, not %d", a.name, typeArguments(len(a.params)), len(args)))
+		c.bail(x, fmt.Sprintf("'%s' takes %s, not %d", a.name, typeArguments(len(a.params)), len(args)))
 	}
 	if len(args) == 0 {
 		return c.alias(x, a)
@@ -401,7 +401,7 @@ func (c *context) typeArgs(name string, rows []bool, args []ast.Node) []TypeRef 
 				continue
 			}
 		}
-		c.bail(arg, fmt.Sprintf("type argument %d of %s must be a row variable, not %s",
+		c.bail(arg, fmt.Sprintf("type argument %d of '%s' must be a row variable, not '%s'",
 			i+1, name, c.src.NodeText(arg)))
 	}
 	return refs
@@ -425,9 +425,9 @@ func (c *context) applyStatic(x, fn ast.Node, s static, args []ast.Node) TypeRef
 func (c *context) applyResult(x ast.Node, name string, res Result, args []ast.Node) TypeRef {
 	if len(args) != len(res.Params) {
 		if len(res.Params) == 0 {
-			c.bail(x, fmt.Sprintf("%s is not a type constructor", name))
+			c.bail(x, fmt.Sprintf("'%s' is not a type constructor", name))
 		}
-		c.bail(x, fmt.Sprintf("%s takes %s, not %d", name, typeArguments(len(res.Params)), len(args)))
+		c.bail(x, fmt.Sprintf("'%s' takes %s, not %d", name, typeArguments(len(res.Params)), len(args)))
 	}
 	if len(args) == 0 {
 		return c.reg.reference(name, res.Type, nil)
@@ -507,7 +507,7 @@ func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 	a.pending, a.args = false, nil
 	if back != NoType {
 		if !c.reg.guarded(ref, back) {
-			c.bail(a.use, fmt.Sprintf("recursive type %s must recur within a tag's payload", a.name))
+			c.bail(a.use, fmt.Sprintf("recursive type '%s' must recur within a tag's payload", a.name))
 		}
 		c.reg.link(back, ref)
 	}
@@ -569,7 +569,7 @@ func (c *context) independently(f func() TypeRef) TypeRef {
 func (c *context) recur(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 	for i, ref := range refs {
 		if c.reg.Resolve(ref) != c.reg.Resolve(a.args[i]) {
-			c.bail(x, fmt.Sprintf("recursive type %s must recur with the same type arguments", a.name))
+			c.bail(x, fmt.Sprintf("recursive type '%s' must recur with the same type arguments", a.name))
 		}
 	}
 	if a.back == NoType {

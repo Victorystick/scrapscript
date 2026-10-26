@@ -48,6 +48,10 @@ func TestPrint(t *testing.T) {
 	expect(t, `{ a = (x ; x = 1) }`, `{ a = x ; x = 1 }`)
 	expect(t, `{ ..r, a, b = b, c = a }`, `{ ..r, a, b = b, c = a }`)
 	expect(t, `| { a, b } -> a`, `| { a, b } -> a`)
+	expect(t, `max 3 4 ; {max,sort=s} = ord.on int/cmp ; x = 1`, `max 3 4
+; { max, sort = s } = ord.on int/cmp
+; x = 1`)
+	expect(t, `{ a = (a ; { a } = r) }`, `{ a = a ; { a } = r }`)
 	expect(t, `f ; f : a => (a -> a) -> list (a -> a) = g -> [g]`,
 		`f
 ; f : a => (a -> a) -> list (a -> a) = g -> [ g ]`)
@@ -109,6 +113,7 @@ var trees = []string{
 	`a ++ b ++ c`,
 	`a ++ (b ++ c)`,
 	`a + (b |> f)`,
+	`a ; { a, b = c } = r ; { d } = r`,
 }
 
 func TestTrees(t *testing.T) {

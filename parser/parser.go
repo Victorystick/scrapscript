@@ -314,6 +314,9 @@ func (p *parser) ident() ast.Node {
 }
 
 func (p *parser) parseWhereExpr(x ast.Node) ast.Node {
+	if p.tok == token.LBRACE {
+		return p.parseDestructure(x)
+	}
 	id := p.identTok()
 	typ := ast.None
 	if p.tok == token.DEFINE {
@@ -332,6 +335,56 @@ func (p *parser) parseWhereExpr(x ast.Node) ast.Node {
 	}
 	val := p.parseBody()
 	return p.add(ast.Where, id, uint32(x), p.addExtra(typ, val, 0))
+}
+
+// parseDestructure parses a binding that destructures a record into names,
+// whose fields may be punned:
+//
+//	binding = "{" field { "," field } "}" "=" body
+//	field   = NAME [ "=" NAME ]
+//
+// It is sugar: a binding of the record to the name of the '{' token, which
+// no identifier can have (see ast.SourceExpr.Name), followed by a binding of
+// each name to its field of that record. So `{ a, b = c } = r` is
+// `{ = r ; a = {.a ; c = {.b`, which binds a and c in the group.
+func (p *parser) parseDestructure(x ast.Node) ast.Node {
+	brace := p.at()
+	p.next()
+
+	// Fields are collected as key token, name token pairs.
+	top := len(p.scratch)
+	for p.tok != token.RBRACE {
+		key := p.identTok()
+		name := key
+		if p.tok == token.ASSIGN {
+			p.next()
+			name = p.identTok()
+		}
+		p.scratch = append(p.scratch, ast.Node(key), ast.Node(name))
+
+		if p.tok != token.COMMA {
+			break
+		}
+		p.next()
+		p.noTrailingComma(token.RBRACE, "record")
+	}
+	p.expect(token.RBRACE)
+	if len(p.scratch) == top {
+		p.bail("A destructuring binding must bind a name.")
+	}
+	p.next()
+	p.expect(token.ASSIGN)
+	p.next()
+
+	val := p.parseBody()
+	x = p.add(ast.Where, brace, uint32(x), p.addExtra(ast.None, val, 0))
+	for i := top; i < len(p.scratch); i += 2 {
+		rec := p.add(ast.Ident, brace, 0, 0)
+		field := p.add(ast.Access, ast.Tok(p.scratch[i]), uint32(rec), 0)
+		x = p.add(ast.Where, ast.Tok(p.scratch[i+1]), uint32(x), p.addExtra(ast.None, field, 0))
+	}
+	p.scratch = p.scratch[:top]
+	return x
 }
 
 // isKind returns true if the annotation t is a kind: a type whose final

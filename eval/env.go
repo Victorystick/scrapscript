@@ -148,7 +148,7 @@ func (e *Environment) load(s *Scrap) error {
 			return err
 		}
 		if dep.loading {
-			return s.expr.Error(n, fmt.Sprintf("%s refers back to this scrap", s.expr.NodeText(n)))
+			return s.expr.Error(n, fmt.Sprintf("'%s' refers back to this scrap", s.expr.NodeText(n)))
 		}
 		if err := e.load(dep); err != nil {
 			return err

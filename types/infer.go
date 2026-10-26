@@ -161,11 +161,11 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 	case ast.Literal:
 		return literalTypeRef(c.src.LiteralKind(x))
 	case ast.Ident:
-		name := c.src.TokenText(c.src.Main(x))
+		name := c.src.Name(c.src.Main(x))
 		bound := c.scope.Get(name)
 		if bound == nil {
 			if a := c.aliases.Lookup(name); a != nil && a.value == ast.None {
-				c.bail(x, fmt.Sprintf("cannot use type %s as a value", name))
+				c.bail(x, fmt.Sprintf("cannot use type '%s' as a value", name))
 			}
 			c.bail(x, "unbound variable: "+name)
 		}
@@ -177,13 +177,19 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 	case ast.Record:
 		return c.record(x)
 	case ast.Access:
-		if c.static(x).isType() {
-			c.bail(x, fmt.Sprintf("cannot use type %s as a value", c.src.NodeText(x)))
-		}
 		rec, key := c.src.Access(x)
+		// The record of a destructured field is the '{' of its binding, so
+		// errors name the field and point at it.
+		at, text := rec, c.src.NodeText(x)
+		if c.src.Tokens.Kinds[c.src.Main(rec)] == token.LBRACE {
+			at, text = x, c.src.TokenText(key)
+		}
+		if c.static(x).isType() {
+			c.bail(at, fmt.Sprintf("cannot use type '%s' as a value", text))
+		}
 		field := c.reg.Var()
 		row := c.reg.extend(c.reg.labels.Of(c.src.TokenText(key)), field, c.reg.Var())
-		c.ensure(rec, c.infer(rec), c.reg.add(node{kind: recordKind, a: row}))
+		c.ensure(at, c.infer(rec), c.reg.add(node{kind: recordKind, a: row}))
 		return field
 	case ast.Variant:
 		tag, payload := c.src.Variant(x)
@@ -224,7 +230,7 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 	case ast.Import:
 		res := c.imported(x)
 		if res.Sort {
-			c.bail(x, fmt.Sprintf("cannot use type %s as a value", c.src.NodeText(x)))
+			c.bail(x, fmt.Sprintf("cannot use type '%s' as a value", c.src.NodeText(x)))
 		}
 		return c.reg.Instantiate(res.Type)
 	}
@@ -240,7 +246,7 @@ func (c *context) scrap(x ast.Node) Result {
 	case ast.Where:
 		return where(c, x, c.scrap)
 	case ast.Ident:
-		name := c.src.TokenText(c.src.Main(x))
+		name := c.src.Name(c.src.Main(x))
 		if c.scope.Get(name) == nil {
 			if a := c.aliases.Lookup(name); a != nil && a.value == ast.None {
 				return c.export(x, a)
@@ -386,7 +392,7 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 	for _, b := range binds {
 		if _, id, typ, _ := c.src.Where(b); typ != ast.None && !c.src.Sort(b) {
 			annotated[b] = true
-			c.bind(c.src.TokenText(id), c.annotation(typ, func(string) TypeRef { return c.reg.Gen() }))
+			c.bind(c.src.Name(id), c.annotation(typ, func(string) TypeRef { return c.reg.Gen() }))
 		}
 	}
 
@@ -412,7 +418,7 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 		vars := make([]TypeRef, len(comp.Binds))
 		for i, b := range comp.Binds {
 			vars[i] = c.reg.Var()
-			c.bind(c.src.TokenText(c.src.Main(b)), vars[i])
+			c.bind(c.src.Name(c.src.Main(b)), vars[i])
 		}
 		for i, b := range comp.Binds {
 			_, _, _, val := c.src.Where(b)
@@ -438,7 +444,10 @@ func (c *context) functions(comps []ast.Component) {
 		for _, b := range comp.Binds {
 			_, id, _, val := c.src.Where(b)
 			if val, _ = c.src.Group(val); c.src.Kind(val) != ast.Func && c.src.Kind(val) != ast.MatchFunc {
-				c.bail(b, fmt.Sprintf("%s is recursive, so it must be a function", c.src.TokenText(id)))
+				if c.src.Tokens.Kinds[id] == token.LBRACE {
+					c.bail(b, "a destructured record can't be recursive")
+				}
+				c.bail(b, fmt.Sprintf("'%s' is recursive, so it must be a function", c.src.TokenText(id)))
 			}
 		}
 	}
@@ -473,7 +482,7 @@ func (c *context) record(x ast.Node) TypeRef {
 	for i := range fields.Len() {
 		k, v := c.src.TokenText(fields.Key(i)), fields.Value(i)
 		if _, ok := ref[k]; ok || members[k] {
-			c.bail(v, fmt.Sprintf("cannot set %s twice", k))
+			c.bail(v, fmt.Sprintf("cannot set '%s' twice", k))
 		}
 		// A type is a member, and not part of the record's value.
 		if c.typeOnly(v) {
@@ -667,7 +676,7 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 			return
 		}
 		if m.bound[name] {
-			c.bail(x, fmt.Sprintf("cannot bind %s twice", name))
+			c.bail(x, fmt.Sprintf("cannot bind '%s' twice", name))
 		}
 		m.bound[name] = true
 		if tags := c.covered(m, at); len(tags) > 0 {

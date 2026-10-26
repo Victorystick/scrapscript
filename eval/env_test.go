@@ -171,12 +171,12 @@ func TestErrorsInScrapsReferredTo(t *testing.T) {
 
 func TestPathImportFailures(t *testing.T) {
 	examples := []struct{ source, error string }{
-		{`$"./a.scrap"`, `$"./a.scrap" refers back to this scrap`},
+		{`$"./a.scrap"`, `'$"./a.scrap"' refers back to this scrap`},
 		{`$"../inc.scrap"`, `cannot refer to a path outside the current directory`},
 		{`$"/inc.scrap"`, `cannot refer to an absolute path`},
 		{`$"./missing.scrap"`, `file does not exist`},
 		{`$"sub/../../inc.scrap"`, `cannot refer to a path outside the current directory`},
-		{`$"./choice.scrap" + 1`, `cannot use type $"./choice.scrap" as a value`},
+		{`$"./choice.scrap" + 1`, `cannot use type '$"./choice.scrap"' as a value`},
 	}
 
 	for _, ex := range examples {

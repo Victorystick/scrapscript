@@ -7,11 +7,14 @@ import "testing"
 // TestRoundTrip checks that each still breaks, so a fix must remove it here.
 var brokenRoundTrips = map[string]string{
 	// The bindings print as one where-group, in which r is recursive.
-	`f ; f = (| 0 -> 0 | n -> r.k (n - 1) ; r = { k = m -> f m })`: "r is recursive, so it must be a function",
+	`f ; f = (| 0 -> 0 | n -> r.k (n - 1) ; r = { k = m -> f m })`: "'r' is recursive, so it must be a function",
 }
 
 // More sources to round-trip, beyond those of the other eval tests.
 var roundTrips = []string{
+	// Destructured closures print as their values.
+	`f ; f = x -> max x 1 ; { max } = { max = a -> b -> a + b }`,
+	`x -> (max x 1 ; { max, min = lo } = { max = a -> b -> a + b, min = 1 })`,
 	// Closures of one lambda print with their own captures.
 	`list/map mk [1, 2] ; mk = n -> (f ; f = x -> x + n)`,
 	`list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x)) [1, 2, 3]`,
