@@ -1,6 +1,6 @@
 //go:build wasip1
 
-package main
+package wasmhost
 
 import "unsafe"
 
@@ -16,12 +16,12 @@ func alloc(n int32) unsafe.Pointer {
 	return unsafe.Pointer(unsafe.SliceData(input))
 }
 
-// run runs the request in the buffer from alloc, and returns the length of
-// its response, which output points to.
+// run answers the request in the buffer from alloc, and returns the length
+// of its response, which output points to.
 //
 //go:wasmexport run
 func run() int32 {
-	output = handle(input)
+	output = handler(input)
 	input = nil
 	return int32(len(output))
 }

@@ -1,15 +1,15 @@
 // Command scrap-wasm is the scrap tool as a WebAssembly module, for hosts
 // such as a scrapyard that check scraps before storing them, or a web page
-// that runs them. Build it with:
+// that runs them. Its host runs requests with it as wasmhost describes, and
+// builds it with:
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o scrap-wasm.wasm ./cmd/scrap-wasm
 //
-// The host initializes the module once (_initialize) and then runs any
-// number of requests with it. Each is JSON,
+// Each request is JSON,
 //
-//	{"source": "...", "sources": {"<sha256>": "...", ...}}
+//	{"source": "...", "sources": {"<sha256>": "...", ...}, "drafts": {...}}
 //
-// with the sources of the scraps it refers to by hash, and has a JSON
+// with the scraps it refers to, as wasmhost.Scraps, and has a JSON
 // response: {"type": "..."} if it checks, {"error": "..."} if it doesn't, or
 // {"missing": ["<sha256>", ...]} if the sources lack scraps that it refers
 // to, directly or not. The host fetches those and asks again, so that the
@@ -36,26 +36,27 @@
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"sort"
 	"strconv"
 	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/highlight"
+	"github.com/Victorystick/scrapscript/host/wasmhost"
 	"github.com/Victorystick/scrapscript/token"
 )
 
 func main() {}
 
+func init() {
+	wasmhost.Serve(handle)
+}
+
 type request struct {
-	Source  string            `json:"source"`
-	Sources map[string]string `json:"sources"`
-	Command string            `json:"command"`
+	wasmhost.Scraps
+	Source  string `json:"source"`
+	Command string `json:"command"`
 }
 
 type response struct {
@@ -89,24 +90,6 @@ func handle(input []byte) []byte {
 	return out
 }
 
-// sources is a Fetcher of the scraps in a request, by hash.
-type sources map[string]string
-
-var errNotFound = errors.New("no scrap found")
-
-// FetchSha256 returns the source with the sha256 key, which it verifies, as
-// the scrap CLI does with what it fetches.
-func (s sources) FetchSha256(key string) ([]byte, error) {
-	src, ok := s[key]
-	if !ok {
-		return nil, errNotFound
-	}
-	if fmt.Sprintf("%x", sha256.Sum256([]byte(src))) != key {
-		return nil, fmt.Errorf("the source of $source:%s has a different hash", key)
-	}
-	return []byte(src), nil
-}
-
 func respond(req request) response {
 	switch req.Command {
 	case "", "type", "eval", "test":
@@ -116,12 +99,16 @@ func respond(req request) response {
 		return response{Error: "bad request: unknown command " + strconv.Quote(req.Command)}
 	}
 	env := eval.NewEnvironment()
-	env.UseFetcher(sources(req.Sources))
+	req.Use(env)
 	s, err := env.Read([]byte(req.Source))
 	if err != nil {
 		return response{Error: token.Render(err, nil)}
 	}
-	if missing := missing(env, s, req.Sources); len(missing) > 0 {
+	missing, err := req.Missing(env, s)
+	if err != nil {
+		return response{Error: token.Render(err, nil)}
+	}
+	if len(missing) > 0 {
 		return response{Missing: missing}
 	}
 	t, err := env.Infer(s)
@@ -170,36 +157,4 @@ func highlights(src string) map[string][]int {
 		res[name] = append(res[name], start, unitsAt(int(s.Ends[i])))
 	}
 	return res
-}
-
-// missing returns the hashes of the scraps that s refers to, directly or
-// through the scraps in srcs, that aren't in srcs, sorted. References that
-// can't be fetched for other reasons are left for inference to report.
-func missing(env *eval.Environment, s *eval.Scrap, srcs map[string]string) []string {
-	seen := make(map[string]bool)
-	var missing []string
-	var visit func(s *eval.Scrap)
-	visit = func(s *eval.Scrap) {
-		expr := s.Expr()
-		for _, n := range expr.Imports() {
-			if _, ok := expr.Path(n); ok {
-				continue
-			}
-			scheme, digest := expr.Hash(n)
-			if scheme != "source" || seen[digest] {
-				continue
-			}
-			seen[digest] = true
-			if _, ok := srcs[digest]; !ok {
-				missing = append(missing, digest)
-				continue
-			}
-			if dep, err := env.Fetch(scheme, digest); err == nil {
-				visit(dep)
-			}
-		}
-	}
-	visit(s)
-	sort.Strings(missing)
-	return missing
 }

@@ -429,7 +429,7 @@ func (g *generator) bindings(pkg, hash string, sources map[string]string, top *g
 
 	w("// Load checks that the scrap app implements the interface, and returns its\n")
 	w("// value. The environment must find the scraps that the interface refers to,\n")
-	w("// as with Interface.Fetcher.\n")
+	w("// as yards.ByMap(Interface.Sources) does.\n")
 	w("func Load(env *eval.Environment, app *eval.Scrap) (%s, error) {\n", top.expr)
 	w("\tvar zero %s\n", top.expr)
 	w("\tiface, err := env.Read([]byte(Interface.Source()))\n\tif err != nil {\n\t\treturn zero, err\n\t}\n")
@@ -685,14 +685,14 @@ import (
 	"os"
 
 	"github.com/Victorystick/scrapscript/eval"
-	"github.com/Victorystick/scrapscript/host"
+	"github.com/Victorystick/scrapscript/host/cli"
 )
 
 // main runs the host's command line, and then run, which the host
 // implements, with the value of the script that it names, once the script
 // is checked against the interface.
 func main() {
-	os.Exit(host.Main(Interface, func(env *eval.Environment, script *eval.Scrap, args []string) (int, error) {
+	os.Exit(cli.Main(Interface, func(env *eval.Environment, script *eval.Scrap, args []string) (int, error) {
 		p, err := Load(env, script)
 		if err != nil {
 			return 0, err

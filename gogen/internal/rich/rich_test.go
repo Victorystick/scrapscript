@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Victorystick/scrapscript/eval"
+	"github.com/Victorystick/scrapscript/yards"
 )
 
 const app = `{ init = 5
@@ -23,7 +24,7 @@ const app = `{ init = 5
 func load(t *testing.T, source string) (Api, error) {
 	t.Helper()
 	env := eval.NewEnvironment()
-	env.UseFetcher(Interface.Fetcher())
+	env.UseFetcher(yards.ByMap(Interface.Sources))
 	s, err := env.Read([]byte(source))
 	if err != nil {
 		t.Fatal(err)

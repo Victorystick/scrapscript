@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Victorystick/scrapscript/host/wasmhost"
 )
 
 func hash(src string) string {
@@ -29,19 +31,18 @@ func TestCheck(t *testing.T) {
 		{"checks", request{Source: `1 + 2`}, response{Type: "int"}, ""},
 		{"type error", request{Source: `1 + "a"`}, response{}, "cannot unify 'text' with 'int'"},
 		{"parse error", request{Source: `1 +`}, response{}, "parse error"},
-		{"path", request{Source: `$"./inc.scrap" 1`}, response{}, "cannot refer to a path here"},
 		{"missing", request{Source: use}, response{Missing: sorted(hash(inc), hash(twice))}, ""},
 		{"missing transitively", request{
-			Source:  `$source:` + hash(use) + ` 1`,
-			Sources: map[string]string{hash(use): use},
+			Source: `$source:` + hash(use) + ` 1`,
+			Scraps: wasmhost.Scraps{Sources: map[string]string{hash(use): use}},
 		}, response{Missing: sorted(hash(inc), hash(twice))}, ""},
-		{"with imports", request{Source: use + ` 1`, Sources: both}, response{Type: "int"}, ""},
+		{"with imports", request{Source: use + ` 1`, Scraps: wasmhost.Scraps{Sources: both}}, response{Type: "int"}, ""},
 		{"ill-typed import", request{
-			Source:  `$source:` + hash(`1 + "a"`),
-			Sources: map[string]string{hash(`1 + "a"`): `1 + "a"`},
+			Source: `$source:` + hash(`1 + "a"`),
+			Scraps: wasmhost.Scraps{Sources: map[string]string{hash(`1 + "a"`): `1 + "a"`}},
 		}, response{}, "cannot unify 'text' with 'int'"},
 		{"evaluates", request{Source: `1 + 2`, Command: "eval"}, response{Type: "int", Value: "3"}, ""},
-		{"evaluates imports", request{Source: use + ` 1`, Sources: both, Command: "eval"}, response{Type: "int", Value: "3"}, ""},
+		{"evaluates imports", request{Source: use + ` 1`, Scraps: wasmhost.Scraps{Sources: both}, Command: "eval"}, response{Type: "int", Value: "3"}, ""},
 		{"prints functions as scraps", request{Source: "inc\n; inc = x -> x + 1", Command: "eval"},
 			response{Type: "int -> int", Value: "inc\n; inc = x -> x + 1"}, ""},
 		{"evaluation fails", request{Source: `list/repeat -1 0`, Command: "eval"},
@@ -64,9 +65,38 @@ func TestCheck(t *testing.T) {
 		{"no tests", request{Source: `{}`, Command: "test"}, response{Type: "{}", Results: []result{}}, ""},
 		{"not a test scrap", request{Source: `1`, Command: "test"}, response{}, "is not a test case"},
 		{"unknown command", request{Source: `1`, Command: "push"}, response{}, `bad request: unknown command "push"`},
+		{"drafts", request{
+			Source: `$"./inc.scrap" 1`,
+			Scraps: wasmhost.Scraps{Drafts: map[string]string{"inc.scrap": inc, "broken.scrap": `1 +`}},
+		}, response{Type: "int"}, ""},
+		{"drafts relative to drafts", request{
+			Source: `$"./lib/a.scrap"`,
+			Scraps: wasmhost.Scraps{Drafts: map[string]string{"lib/a.scrap": `$"./b.scrap"`, "lib/b.scrap": `1`}},
+		}, response{Type: "int"}, ""},
+		{"missing through drafts", request{
+			Source: `$"./use.scrap"`,
+			Scraps: wasmhost.Scraps{Drafts: map[string]string{"use.scrap": use}},
+		}, response{Missing: sorted(hash(inc), hash(twice))}, ""},
+		{"path without drafts", request{Source: `$"./inc.scrap" 1`}, response{}, "cannot refer to a path here"},
+		{"no such draft", request{Source: `$"./inc.scrap"`, Scraps: wasmhost.Scraps{Drafts: map[string]string{}}}, response{}, "inc.scrap: file does not exist"},
+		{"draft parse error", request{
+			Source: `$"./a.scrap"`,
+			Scraps: wasmhost.Scraps{Drafts: map[string]string{"a.scrap": `1 +`}},
+		}, response{}, "a.scrap: parse error"},
+		{"draft cycle", request{
+			Source: `$"./a.scrap"`,
+			Scraps: wasmhost.Scraps{Drafts: map[string]string{"a.scrap": `$"./b.scrap"`, "b.scrap": `$"./a.scrap"`}},
+		}, response{}, "refers back to this scrap"},
+		{"published scraps can't refer to drafts", request{
+			Source: `$source:` + hash(`$"./inc.scrap"`),
+			Scraps: wasmhost.Scraps{
+				Sources: map[string]string{hash(`$"./inc.scrap"`): `$"./inc.scrap"`},
+				Drafts:  map[string]string{"inc.scrap": inc},
+			},
+		}, response{}, "a published scrap cannot refer to a path"},
 		{"wrong hash", request{
-			Source:  `$source:` + hash(inc) + ` 1`,
-			Sources: map[string]string{hash(inc): twice},
+			Source: `$source:` + hash(inc) + ` 1`,
+			Scraps: wasmhost.Scraps{Sources: map[string]string{hash(inc): twice}},
 		}, response{}, "the source of $source:" + hash(inc) + " has a different hash"},
 	}
 	for _, ex := range examples {

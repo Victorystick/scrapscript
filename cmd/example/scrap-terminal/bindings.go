@@ -18,7 +18,7 @@ var Interface = host.Interface{
 
 // Load checks that the scrap app implements the interface, and returns its
 // value. The environment must find the scraps that the interface refers to,
-// as with Interface.Fetcher.
+// as yards.ByMap(Interface.Sources) does.
 func Load(env *eval.Environment, app *eval.Scrap) (Program, error) {
 	var zero Program
 	iface, err := env.Read([]byte(Interface.Source()))
