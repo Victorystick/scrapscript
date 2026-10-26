@@ -75,7 +75,8 @@ func TestCheck(t *testing.T) {
 			Source: `$"./use.scrap"`,
 			Drafts: map[string]string{"use.scrap": use},
 		}, response{Missing: sorted(hash(inc), hash(twice))}, ""},
-		{"no such draft", request{Source: `$"./inc.scrap"`}, response{}, "inc.scrap: file does not exist"},
+		{"path without drafts", request{Source: `$"./inc.scrap" 1`}, response{}, "cannot refer to a path here"},
+		{"no such draft", request{Source: `$"./inc.scrap"`, Drafts: map[string]string{}}, response{}, "inc.scrap: file does not exist"},
 		{"draft parse error", request{
 			Source: `$"./a.scrap"`,
 			Drafts: map[string]string{"a.scrap": `1 +`},

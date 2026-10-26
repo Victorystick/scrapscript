@@ -19,7 +19,8 @@
 // A request may also have drafts, by path, {"drafts": {"lib.scrap": "..."}},
 // as an editor has unsaved files. The scrap and the drafts refer to them by
 // path, $"./lib.scrap", as an unnamed draft at the root, as the scrap CLI
-// reads standard input.
+// reads standard input. Without drafts, a path is an error, as in a
+// published scrap.
 //
 // A request's "command" says what to do with a scrap that checks, as the
 // commands of the scrap CLI do:
@@ -154,9 +155,11 @@ func respond(req request) response {
 	}
 	env := eval.NewEnvironment()
 	env.UseFetcher(sources(req.Sources))
-	// missing reads the drafts that the scrap refers to; any other path is
-	// to a file that doesn't exist.
-	env.UseDrafts(noFiles{})
+	if req.Drafts != nil {
+		// missing reads the drafts that the scrap refers to; any other path
+		// is to a file that doesn't exist.
+		env.UseDrafts(noFiles{})
+	}
 	source := req.Source
 	if req.Command == "web" {
 		source = webProgram(env, req)
