@@ -220,6 +220,22 @@ first. 1 and 2 change what the language promises.
 - [ ] Later: record extension. Spreads only update, so `{ ..{ a = 1 }, b =
       2 }` is a type error; section 7.3 notes that lacks constraints make
       a separate extension construct possible.
+- [ ] Sketch how opaque types could fit into SPEC.md. Types are structural
+      and members transparent (section 7.7), so a library can't enforce an
+      invariant: anyone can build a `#node` that breaks avl's balance, and
+      smart constructors, validated values and newtypes are conventions
+      only. Section 7.7 leaves abstract members open because they need
+      nominal identity. Work out where that identity comes from (the
+      scrap's hash and the member's name?), how it stays erased at
+      runtime, how such values print (section 10, rule 6), and how hosts
+      see them (section 13).
+- [ ] Find out whether annotations on recursive types can go. An
+      unannotated function that recurses on a recursive value fails the
+      occurs check (section 7.5), so it must be annotated with the alias.
+      Could the checker infer equi-recursive types instead, by tying the
+      knot where a cycle would pass through an enum, as the unifier
+      already does for annotated ones? Weigh what it costs in error
+      messages and in printed types without an alias to name them.
 
 ## Accepted
 
