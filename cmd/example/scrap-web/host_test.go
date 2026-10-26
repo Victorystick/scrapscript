@@ -75,7 +75,7 @@ func TestHost(t *testing.T) {
 	})
 	t.Run("events", func(t *testing.T) {
 		check(t, run(t, loadReq(""),
-			`{"op":"send","generation":1,"events":[{"handler":1},{"handler":0,"input":"\"a\""},{"handler":1}]}`,
+			`{"op":"send","events":[{"generation":1,"handler":1},{"generation":1,"handler":0,"input":"\"a\""},{"generation":1,"handler":1}]}`,
 			`{"op":"state"}`,
 		),
 			`{"view":`+view("0", "")+`,"generation":1}`,
@@ -84,18 +84,28 @@ func TestHost(t *testing.T) {
 			`{"state":"{ count = 2, name = \"\\\"a\\\"\" }"}`)
 	})
 	t.Run("events of an earlier view", func(t *testing.T) {
+		// As the page sends an event before it shows the last view.
 		check(t, run(t, loadReq(""),
-			`{"op":"send","generation":1,"events":[{"handler":1}]}`,
-			`{"op":"send","generation":1,"events":[{"handler":1}]}`,
+			`{"op":"send","events":[{"generation":1,"handler":1}]}`,
+			`{"op":"send","events":[{"generation":1,"handler":1},{"generation":2,"handler":1}]}`,
 		)[1:],
 			`{"view":`+view("1", "")+`,"generation":2,"steps":[{"step":1,"message":"#inc"}]}`,
-			`{}`)
+			`{"view":`+view("3", "")+`,"generation":3,"steps":[{"step":2,"message":"#inc"},{"step":3,"message":"#inc"}]}`)
+	})
+	t.Run("events of views it no longer keeps", func(t *testing.T) {
+		reqs := []string{loadReq("")}
+		for g := 1; g <= maxViews; g++ {
+			reqs = append(reqs, fmt.Sprintf(`{"op":"send","events":[{"generation":%d,"handler":1}]}`, g))
+		}
+		reqs = append(reqs, `{"op":"send","events":[{"generation":1,"handler":1}]}`, `{"op":"send","events":[{"generation":2,"handler":1}]}`)
+		got := run(t, reqs...)
+		check(t, got[len(got)-2:], `{}`, `{"view":`+view(fmt.Sprint(maxViews+1), "")+`,"generation":18,"steps":[{"step":17,"message":"#inc"}]}`)
 	})
 	t.Run("goto", func(t *testing.T) {
 		check(t, run(t, loadReq(""),
-			`{"op":"send","generation":1,"events":[{"handler":1},{"handler":1}]}`,
+			`{"op":"send","events":[{"generation":1,"handler":1},{"generation":1,"handler":1}]}`,
 			`{"op":"goto","step":1}`,
-			`{"op":"send","generation":3,"events":[{"handler":1}]}`,
+			`{"op":"send","events":[{"generation":3,"handler":1}]}`,
 		)[2:],
 			`{"view":`+view("1", "")+`,"generation":3}`,
 			`{"view":`+view("2", "")+`,"generation":4,"steps":[{"step":3,"message":"#inc"}]}`)
@@ -123,8 +133,8 @@ func TestHostErrors(t *testing.T) {
 		{"state of another type", []string{loadReq(`$"./text-count.scrap"`)},
 			"the state is not a model of the app: cannot unify 'int' with 'text'"},
 		{"bad state", []string{loadReq(`1 + "a"`)}, "cannot unify 'text' with 'int'"},
-		{"no such handler", []string{loadReq(""), `{"op":"send","generation":1,"events":[{"handler":2}]}`}, "bad request: no handler 2"},
-		{"no input", []string{loadReq(""), `{"op":"send","generation":1,"events":[{"handler":0}]}`}, "bad request: handler 0 takes an input"},
+		{"no such handler", []string{loadReq(""), `{"op":"send","events":[{"generation":1,"handler":2}]}`}, "bad request: no handler 2"},
+		{"no input", []string{loadReq(""), `{"op":"send","events":[{"generation":1,"handler":0}]}`}, "bad request: handler 0 takes an input"},
 		{"no such step", []string{loadReq(""), `{"op":"goto","step":1}`}, "bad request: no step 1"},
 		{"unknown op", []string{loadReq(""), `{"op":"push"}`}, `bad request: unknown op "push"`},
 	}
@@ -149,7 +159,7 @@ func TestFailingUpdate(t *testing.T) {
 		`| #inc -> m -> { ..m, count = m.count + 1 }`,
 		`| #inc -> m -> (list/repeat (m.count - 1) 0 |> _ -> { ..m, count = m.count + 1 })`, 1)}
 	req, _ := json.Marshal(request{Op: "load", Source: `$"./main.scrap"`, State: `{ count = 0, name = "" }`, Scraps: wasmhost.Scraps{Drafts: drafts}})
-	got := run(t, string(req), `{"op":"send","generation":1,"events":[{"handler":0,"input":"x"},{"handler":1},{"handler":1}]}`)
+	got := run(t, string(req), `{"op":"send","events":[{"generation":1,"handler":0,"input":"x"},{"generation":1,"handler":1},{"generation":1,"handler":1}]}`)
 	var res response
 	if err := json.Unmarshal([]byte(got[1]), &res); err != nil {
 		t.Fatal(err)

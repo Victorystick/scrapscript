@@ -62,21 +62,23 @@ request and response is JSON. A page:
    value of the event's target. The response numbers the view, from the
    request's `"generation"`, 1 by default: `{"view": …, "generation": 1}`.
 
-2. sends the events that the view's handlers handle, with the generation of
-   that view, each event with the value of its target if its handler takes
-   one:
+2. sends the events that the views' handlers handle, each with the
+   generation of its view, and the value of its target if its handler
+   takes one:
 
    ```json
-   {"op": "send", "generation": 1, "events": [{"handler": 1}, {"handler": 0, "input": "milk"}]}
+   {"op": "send", "events": [{"generation": 1, "handler": 1}, {"generation": 1, "handler": 0, "input": "milk"}]}
    ```
 
-   The host updates the model with each in turn, and answers with the view
-   of the result, of the next generation, and the steps that the messages
-   took, each message as a scrap: `{"view": …, "generation": 2, "steps":
-   [{"step": 1, "message": "#inc"}, …]}`. A page that sends the events that
-   happen while the host is busy together gets one view for them, as Elm
-   draws once per frame. The host ignores events of an earlier view, which
-   the page sent before it showed the last, and answers them with `{}`.
+   The host updates the model with the message of each in turn, and
+   answers with the view of the result, of the next generation, and the
+   steps that the messages took, each message as a scrap: `{"view": …,
+   "generation": 2, "steps": [{"step": 1, "message": "#inc"}, …]}`. A page
+   that sends the events that happen while the host is busy together gets
+   one view for them, as Elm draws once per frame. Those events are of
+   views before the last, whose handlers the host keeps, as Elm uses the
+   handlers that were on the page when an event happened. It ignores events
+   of views older than the last 16, and answers with `{}` if all are.
 
 3. asks for the model as a scrap, `{"op": "state"}`, as it needs it: to
    keep it, or to load a new version of the app with it, which the host
@@ -87,8 +89,8 @@ request and response is JSON. A page:
 
 A module that is new, as after a trap, answers `{"unloaded": true}` until it
 loads an app. A page that loads apps anew passes a `"generation"` after the
-last that it showed, so that it can't mistake events of an earlier view for
-the last's.
+last that it showed, so that it can't mistake events of an earlier app's
+views for the new one's.
 
 The page runs the module where it likes. Elm runs on the page's thread,
 which an app that loops forever freezes; a page that runs apps as they are

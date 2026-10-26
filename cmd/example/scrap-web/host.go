@@ -35,21 +35,23 @@ type request struct {
 	// What "load" loads: the app, and a scrap of its model, if not init.
 	Source string `json:"source"`
 	State  string `json:"state"`
-	// The generation of a view: the first that "load" makes, 1 by default,
-	// or the one whose handlers "send" passes the events of. A page that
-	// loads apps anew passes a generation after the last it showed, so that
-	// it can't mistake events of an earlier view for the last's.
-	Generation int     `json:"generation"`
-	Events     []event `json:"events"`
+	// The generation of the first view that "load" makes, 1 by default. A
+	// page that loads apps anew passes one after the last it showed, so
+	// that it can't mistake events of an earlier view for the last's.
+	Generation int `json:"generation"`
+	// The events that "send" updates the model with.
+	Events []event `json:"events"`
 	// The step that "goto" goes back to.
 	Step int `json:"step"`
 }
 
-// An event is one that the handler of a view's element handled, with the
-// value of its target, if the handler is a function of it.
+// An event is one that the handler of an element of the view of a
+// generation handled, with the value of its target, if the handler is a
+// function of it.
 type event struct {
-	Handler int     `json:"handler"`
-	Input   *string `json:"input"`
+	Generation int     `json:"generation"`
+	Handler    int     `json:"handler"`
+	Input      *string `json:"input"`
 }
 
 type response struct {
@@ -102,7 +104,7 @@ func respond(req request) response {
 	}
 	switch req.Op {
 	case "send":
-		return current.send(req.Generation, req.Events)
+		return current.send(req.Events)
 	case "state":
 		return response{State: current.env.Print(current.model.v)}
 	case "goto":
@@ -111,8 +113,13 @@ func respond(req request) response {
 	return response{Error: "bad request: unknown op " + strconv.Quote(req.Op)}
 }
 
-// The most models that a session keeps, to go back to.
-const maxModels = 1000
+// The most models that a session keeps, to go back to, and views whose
+// handlers it keeps, for the events that a page sends before it shows the
+// last view.
+const (
+	maxModels = 1000
+	maxViews  = 16
+)
 
 // A session runs an app.
 type session struct {
@@ -122,9 +129,10 @@ type session struct {
 	// The models that steps led to, the first of which is step first.
 	models []Model
 	first  int
-	// The generation of the last view, and the handlers of its elements.
+	// The generation of the last view, and the handlers of the elements of
+	// the last views, the last last.
 	generation int
-	handlers   []Attr
+	handlers   [][]Attr
 }
 
 // load loads the app in req's source, with the model in its state or
@@ -193,20 +201,20 @@ func fits(env *eval.Environment, app, state string) error {
 	return err
 }
 
-// send updates the model with the message of each event, whose handlers
-// are those of the view of the generation, which must be the last, and
-// shows the view of the result. It ignores events of an earlier view, which
-// the page sent before it showed the last, and stops at the first update
-// that fails.
-func (s *session) send(generation int, events []event) response {
-	if generation != s.generation {
-		return response{}
-	}
+// send updates the model with the message of each event's handler, as of
+// the view of its generation, as Elm does with the handlers that were on
+// the page when the event happened, and shows the view of the result. It
+// ignores events of views that it no longer keeps, and stops at the first
+// update that fails.
+func (s *session) send(events []event) response {
 	var steps []step
 	var err error
 	for _, e := range events {
 		var msg Msg
-		if msg, err = s.message(e); err != nil {
+		var ok bool
+		if msg, ok, err = s.message(e); !ok {
+			continue
+		} else if err != nil {
 			break
 		}
 		model, uerr := s.app.Update(msg, s.model)
@@ -232,19 +240,26 @@ func (s *session) send(generation int, events []event) response {
 	return res
 }
 
-// message returns the message of the event.
-func (s *session) message(e event) (Msg, error) {
-	if e.Handler < 0 || e.Handler >= len(s.handlers) {
-		return Msg{}, fmt.Errorf("bad request: no handler %d", e.Handler)
+// message returns the message of the event, and whether its view is one
+// that the session keeps.
+func (s *session) message(e event) (Msg, bool, error) {
+	i := len(s.handlers) - 1 - (s.generation - e.Generation)
+	if i < 0 || i >= len(s.handlers) {
+		return Msg{}, false, nil
 	}
-	switch a := s.handlers[e.Handler]; a.Tag() {
+	handlers := s.handlers[i]
+	if e.Handler < 0 || e.Handler >= len(handlers) {
+		return Msg{}, true, fmt.Errorf("bad request: no handler %d", e.Handler)
+	}
+	switch a := handlers[e.Handler]; a.Tag() {
 	case AttrOn:
-		return a.On().Msg, nil
+		return a.On().Msg, true, nil
 	default:
 		if e.Input == nil {
-			return Msg{}, fmt.Errorf("bad request: handler %d takes an input", e.Handler)
+			return Msg{}, true, fmt.Errorf("bad request: handler %d takes an input", e.Handler)
 		}
-		return a.OnValue().Msg(*e.Input)
+		msg, err := a.OnValue().Msg(*e.Input)
+		return msg, true, err
 	}
 }
 
@@ -266,7 +281,10 @@ func (s *session) render() response {
 		return response{Error: token.Render(err, nil)}
 	}
 	s.generation++
-	s.handlers = s.handlers[:0]
+	if len(s.handlers) == maxViews {
+		s.handlers = s.handlers[1:]
+	}
+	s.handlers = append(s.handlers, nil)
 	return response{View: s.node(html), Generation: s.generation}
 }
 
@@ -310,8 +328,9 @@ func (s *session) node(h Html) any {
 		if e.On == nil {
 			e.On = make(map[string]handler)
 		}
-		e.On[event] = handler{len(s.handlers), a.Tag() == AttrOnValue}
-		s.handlers = append(s.handlers, a)
+		last := &s.handlers[len(s.handlers)-1]
+		e.On[event] = handler{len(*last), a.Tag() == AttrOnValue}
+		*last = append(*last, a)
 	}
 	for _, c := range el.Children {
 		e.Children = append(e.Children, s.node(c))
