@@ -811,6 +811,42 @@ func (r *Registry) rowTail(row TypeRef) TypeRef {
 	}
 }
 
+// OpenRow returns a record or enum in ref whose row ends in a variable, and
+// true, or false if ref has none. The payloads of absent labels don't count.
+func (r *Registry) OpenRow(ref TypeRef) (TypeRef, bool) {
+	ref = r.Resolve(ref)
+	n := r.at(ref)
+	switch n.kind {
+	case listKind:
+		return r.OpenRow(n.a)
+	case funcKind:
+		if open, ok := r.OpenRow(n.a); ok {
+			return open, true
+		}
+		return r.OpenRow(n.b)
+	case recordKind, enumKind:
+		if r.isVar(r.rowTail(n.a)) {
+			return ref, true
+		}
+		if n.kind == enumKind {
+			if !r.enterEnum(ref) {
+				return NoType, false
+			}
+			defer r.exitEnum()
+		}
+		for row := r.Resolve(n.a); r.at(row).kind == extendKind; row = r.Resolve(r.at(row).b) {
+			f := r.at(r.Resolve(r.at(row).a))
+			if r.Resolve(f.b) == absentRef {
+				continue
+			}
+			if open, ok := r.OpenRow(f.a); ok {
+				return open, true
+			}
+		}
+	}
+	return NoType, false
+}
+
 // closeEnum closes ref's row if it is an enum whose row ends in a variable.
 func (r *Registry) closeEnum(ref TypeRef) {
 	n := r.at(r.Resolve(ref))

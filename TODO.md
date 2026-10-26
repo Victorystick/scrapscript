@@ -240,10 +240,18 @@ first. 1 and 2 change what the language promises.
       a catch-all closes its argument, and an annotation rejects tags it
       doesn't list, but an unannotated `update = | #increment -> … | _ ->
       m -> m` accepts `#incremnt` from a view, and the click does nothing.
-      Elm rejects the typo. Options: platforms name the message type in
-      their interface (`program model msg`), so that scripts annotate it;
-      and a warning for a tag that is built but that only wildcard arms
-      match.
+      Elm rejects the typo.
+  - [x] Across a host: the types a script chooses for an interface's
+        parameters must be closed (SPEC.md section 13), which
+        `Environment.Check` enforces.
+  - [ ] Within a scrap. A recursive loop that passes its state back to
+        itself puts the misspelt tag in the match's own argument type,
+        `loop = | #running -> loop #runing | _ -> 0`, but a match
+        function's type is generalized, so a tag passed to it from
+        elsewhere only reaches a copy at that use. Option: a warning for
+        a tag that is built but that only wildcard arms match, which needs
+        diagnostics with a severity (7) and is noisy: `| #some _ -> #true
+        | _ -> #false` takes `#none` that way.
 
 ## Accepted
 

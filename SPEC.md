@@ -811,6 +811,14 @@ platform has three parts:
    host calls it without checking, so a script that type-checks cannot violate
    the contract.
 
+   The types that a script chooses for the interface's parameters must be
+   closed: once it is checked against the interface, no record or enum in
+   its type may still end in a row variable. The host passes back what the
+   script returns, so nothing else can add to these types, and a row left
+   open only means that a catch-all arm takes tags that no arm names, such
+   as `#runing` for `#running`. A script closes them by annotating the type,
+   or by matching it without a catch-all arm (7.1).
+
 **Effects as data.** A script returns what it wants done, and a function to
 continue with once it is done, which the host calls with the result:
 
