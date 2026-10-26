@@ -589,7 +589,7 @@ func (c *compiler) builtin(x ast.Node, name string) int32 {
 	if !ok {
 		v, ok := c.globals[name]
 		if !ok {
-			c.error(x, fmt.Sprintf("unknown variable %s", name))
+			c.error(x, fmt.Sprintf("unknown variable '%s'", name))
 		}
 		i = c.constant(v)
 		c.builtins[name] = i
@@ -1386,7 +1386,7 @@ func (c *compiler) param(x ast.Node, slot, arity, scope int) cnode {
 	}
 	name := c.name(c.src.Main(x))
 	if lookup(c.values, name) >= scope {
-		c.error(x, fmt.Sprintf("cannot bind %s twice", name))
+		c.error(x, fmt.Sprintf("cannot bind '%s' twice", name))
 	}
 	c.bind(binder{name: name, slot: slot, where: ast.None, types: -1, static: -1})
 	return c.node(patArg, int32(slot), 0, x)
@@ -1423,7 +1423,7 @@ func (c *compiler) pattern(x ast.Node, scope int) cnode {
 			return c.node(patWild, 0, 0, x)
 		}
 		if lookup(c.values, name) >= scope {
-			c.error(x, fmt.Sprintf("cannot bind %s twice", name))
+			c.error(x, fmt.Sprintf("cannot bind '%s' twice", name))
 		}
 		slot := c.alloc()
 		c.bind(binder{name: name, slot: slot, where: ast.None, types: -1, static: -1})

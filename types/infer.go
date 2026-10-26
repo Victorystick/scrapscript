@@ -165,7 +165,7 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 		bound := c.scope.Get(name)
 		if bound == nil {
 			if a := c.aliases.Lookup(name); a != nil && a.value == ast.None {
-				c.bail(x, fmt.Sprintf("cannot use type %s as a value", name))
+				c.bail(x, fmt.Sprintf("cannot use type '%s' as a value", name))
 			}
 			c.bail(x, "unbound variable: "+name)
 		}
@@ -185,7 +185,7 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 			at, text = x, c.src.TokenText(key)
 		}
 		if c.static(x).isType() {
-			c.bail(at, fmt.Sprintf("cannot use type %s as a value", text))
+			c.bail(at, fmt.Sprintf("cannot use type '%s' as a value", text))
 		}
 		field := c.reg.Var()
 		row := c.reg.extend(c.reg.labels.Of(c.src.TokenText(key)), field, c.reg.Var())
@@ -230,7 +230,7 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 	case ast.Import:
 		res := c.imported(x)
 		if res.Sort {
-			c.bail(x, fmt.Sprintf("cannot use type %s as a value", c.src.NodeText(x)))
+			c.bail(x, fmt.Sprintf("cannot use type '%s' as a value", c.src.NodeText(x)))
 		}
 		return c.reg.Instantiate(res.Type)
 	}
@@ -447,7 +447,7 @@ func (c *context) functions(comps []ast.Component) {
 				if c.src.Tokens.Kinds[id] == token.LBRACE {
 					c.bail(b, "a destructured record can't be recursive")
 				}
-				c.bail(b, fmt.Sprintf("%s is recursive, so it must be a function", c.src.TokenText(id)))
+				c.bail(b, fmt.Sprintf("'%s' is recursive, so it must be a function", c.src.TokenText(id)))
 			}
 		}
 	}
@@ -482,7 +482,7 @@ func (c *context) record(x ast.Node) TypeRef {
 	for i := range fields.Len() {
 		k, v := c.src.TokenText(fields.Key(i)), fields.Value(i)
 		if _, ok := ref[k]; ok || members[k] {
-			c.bail(v, fmt.Sprintf("cannot set %s twice", k))
+			c.bail(v, fmt.Sprintf("cannot set '%s' twice", k))
 		}
 		// A type is a member, and not part of the record's value.
 		if c.typeOnly(v) {
@@ -676,7 +676,7 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 			return
 		}
 		if m.bound[name] {
-			c.bail(x, fmt.Sprintf("cannot bind %s twice", name))
+			c.bail(x, fmt.Sprintf("cannot bind '%s' twice", name))
 		}
 		m.bound[name] = true
 		if tags := c.covered(m, at); len(tags) > 0 {

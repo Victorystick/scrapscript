@@ -7,7 +7,7 @@ import "testing"
 // TestRoundTrip checks that each still breaks, so a fix must remove it here.
 var brokenRoundTrips = map[string]string{
 	// The bindings print as one where-group, in which r is recursive.
-	`f ; f = (| 0 -> 0 | n -> r.k (n - 1) ; r = { k = m -> f m })`: "r is recursive, so it must be a function",
+	`f ; f = (| 0 -> 0 | n -> r.k (n - 1) ; r = { k = m -> f m })`: "'r' is recursive, so it must be a function",
 }
 
 // More sources to round-trip, beyond those of the other eval tests.
