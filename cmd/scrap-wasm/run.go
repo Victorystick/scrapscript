@@ -1,26 +1,20 @@
 // Command scrap-wasm is the scrap tool as a WebAssembly module, for hosts
 // such as a scrapyard that check scraps before storing them, or a web page
-// that runs them. Build it with:
+// that runs them. Its host runs requests with it as wasmhost describes, and
+// builds it with:
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o scrap-wasm.wasm ./cmd/scrap-wasm
 //
-// The host initializes the module once (_initialize) and then runs any
-// number of requests with it. Each is JSON,
+// Each request is JSON,
 //
-//	{"source": "...", "sources": {"<sha256>": "...", ...}}
+//	{"source": "...", "sources": {"<sha256>": "...", ...}, "drafts": {...}}
 //
-// with the sources of the scraps it refers to by hash, and has a JSON
+// with the scraps it refers to, as wasmhost.Scraps, and has a JSON
 // response: {"type": "..."} if it checks, {"error": "..."} if it doesn't, or
 // {"missing": ["<sha256>", ...]} if the sources lack scraps that it refers
 // to, directly or not. The host fetches those and asks again, so that the
 // module never waits on the host. A source whose sha256 isn't its hash is
 // an error.
-//
-// A request may also have drafts, by path, {"drafts": {"lib.scrap": "..."}},
-// as an editor has unsaved files. The scrap and the drafts refer to them by
-// path, $"./lib.scrap", as an unnamed draft at the root, as the scrap CLI
-// reads standard input. Without drafts, a path is an error, as in a
-// published scrap.
 //
 // A request's "command" says what to do with a scrap that checks, as the
 // commands of the scrap CLI do:
@@ -39,51 +33,30 @@
 // CSS Custom Highlight API: per class, named as the highlight package names
 // them, its ranges as start and end pairs, in UTF-16 code units as
 // JavaScript indexes strings.
-//
-// "web" runs an app of the web platform, which web.scrap is the interface
-// of, as a page does: the source is the app, which keeps a model and makes a
-// view of it, a page of elements and text, whose elements send messages to
-// update it with. The response has the "state", the model as a scrap, which
-// later requests pass back as theirs, and its "view": each text as a string,
-// and each element as {"tag": "...", "attrs": {...}, "on": {...},
-// "children": [...]}, its handlers by event, {"message": "..."}, a scrap of
-// the message to pass back, or of a function of the target's value to pass
-// back with it as the "input", where "value" is true.
-//
-// The model is the request's "state", a scrap, or else the app's init. If
-// the request has a "message", a scrap, of a message or, with an "input"
-// text, of a function to apply to it, it updates the model with it first,
-// and the response has the message as a scrap too.
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"io/fs"
-	"path"
-	"sort"
 	"strconv"
 	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/highlight"
+	"github.com/Victorystick/scrapscript/host/wasmhost"
 	"github.com/Victorystick/scrapscript/token"
 )
 
 func main() {}
 
+func init() {
+	wasmhost.Serve(handle)
+}
+
 type request struct {
-	Source  string            `json:"source"`
-	Sources map[string]string `json:"sources"`
-	Drafts  map[string]string `json:"drafts"`
-	Command string            `json:"command"`
-	// What "web" runs the app with.
-	State   string  `json:"state"`
-	Message string  `json:"message"`
-	Input   *string `json:"input"`
+	wasmhost.Scraps
+	Source  string `json:"source"`
+	Command string `json:"command"`
 }
 
 type response struct {
@@ -91,9 +64,6 @@ type response struct {
 	Type       string           `json:"type,omitempty"`
 	Value      string           `json:"value,omitempty"`
 	Results    []result         `json:"results,omitzero"`
-	State      string           `json:"state,omitempty"`
-	Message    string           `json:"message,omitempty"`
-	View       any              `json:"view,omitempty"`
 	Error      string           `json:"error,omitempty"`
 	Missing    []string         `json:"missing,omitempty"`
 }
@@ -120,63 +90,26 @@ func handle(input []byte) []byte {
 	return out
 }
 
-// noFiles has no files, as the drafts that scraps refer to are read first.
-type noFiles struct{}
-
-func (noFiles) Open(name string) (fs.File, error) {
-	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
-}
-
-// sources is a Fetcher of the scraps in a request, by hash.
-type sources map[string]string
-
-var errNotFound = errors.New("no scrap found")
-
-// FetchSha256 returns the source with the sha256 key, which it verifies, as
-// the scrap CLI does with what it fetches.
-func (s sources) FetchSha256(key string) ([]byte, error) {
-	src, ok := s[key]
-	if !ok {
-		return nil, errNotFound
-	}
-	if fmt.Sprintf("%x", sha256.Sum256([]byte(src))) != key {
-		return nil, fmt.Errorf("the source of $source:%s has a different hash", key)
-	}
-	return []byte(src), nil
-}
-
 func respond(req request) response {
 	switch req.Command {
-	case "", "type", "eval", "test", "web":
+	case "", "type", "eval", "test":
 	case "highlight":
 		return response{Highlights: highlights(req.Source)}
 	default:
 		return response{Error: "bad request: unknown command " + strconv.Quote(req.Command)}
 	}
 	env := eval.NewEnvironment()
-	env.UseFetcher(sources(req.Sources))
-	if req.Drafts != nil {
-		// missing reads the drafts that the scrap refers to; any other path
-		// is to a file that doesn't exist.
-		env.UseDrafts(noFiles{})
-	}
-	source := req.Source
-	if req.Command == "web" {
-		source = webProgram(env, req)
-	}
-	s, err := env.Read([]byte(source))
+	req.Use(env)
+	s, err := env.Read([]byte(req.Source))
 	if err != nil {
 		return response{Error: token.Render(err, nil)}
 	}
-	missing, err := missing(env, s, req)
+	missing, err := req.Missing(env, s)
 	if err != nil {
 		return response{Error: token.Render(err, nil)}
 	}
 	if len(missing) > 0 {
 		return response{Missing: missing}
-	}
-	if req.Command == "web" {
-		return web(env, s, req)
 	}
 	t, err := env.Infer(s)
 	if err != nil {
@@ -224,63 +157,4 @@ func highlights(src string) map[string][]int {
 		res[name] = append(res[name], start, unitsAt(int(s.Ends[i])))
 	}
 	return res
-}
-
-// missing returns the hashes of the scraps that s refers to, directly or
-// through the scraps in req's sources or the drafts, that aren't in its
-// sources, sorted. It reads the drafts that s refers to as it goes, and fails
-// if one doesn't parse. References that can't be resolved for other
-// reasons are left for inference to report.
-func missing(env *eval.Environment, s *eval.Scrap, req request) ([]string, error) {
-	seen := make(map[string]bool)
-	// The paths of the drafts read so far, by scrap; s is unnamed.
-	names := map[*eval.Scrap]string{s: ""}
-	var missing []string
-	var visit func(s *eval.Scrap) error
-	visit = func(s *eval.Scrap) error {
-		expr := s.Expr()
-		for _, n := range expr.Imports() {
-			if p, ok := expr.Path(n); ok {
-				from, ok := names[s]
-				if !ok {
-					continue // A published scrap can't refer to a path.
-				}
-				name := path.Join(path.Dir(from), p)
-				src, ok := req.Drafts[name]
-				if !ok || seen[name] || !fs.ValidPath(name) {
-					continue
-				}
-				seen[name] = true
-				draft, err := env.ReadDraft(name, []byte(src))
-				if err != nil {
-					return fmt.Errorf("%s: %w", name, err)
-				}
-				names[draft] = name
-				if err := visit(draft); err != nil {
-					return err
-				}
-				continue
-			}
-			scheme, digest := expr.Hash(n)
-			if scheme != "source" || seen[digest] {
-				continue
-			}
-			seen[digest] = true
-			if _, ok := req.Sources[digest]; !ok {
-				missing = append(missing, digest)
-				continue
-			}
-			if dep, err := env.Fetch(scheme, digest); err == nil {
-				if err := visit(dep); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	if err := visit(s); err != nil {
-		return nil, err
-	}
-	sort.Strings(missing)
-	return missing, nil
 }
