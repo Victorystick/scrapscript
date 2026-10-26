@@ -91,6 +91,8 @@ func TestParseRecord(t *testing.T) {
 		`{ a = 1, b = "x"}`,
 		`{ ..other, a = 1, b = "x"}`,
 		`{ ..{ a = 2, c = 1 }, a = 1, b = "x"}`,
+		`{ a, b = 1, c }`,
+		`{ ..other, a }`,
 	}
 
 	for _, src := range valid {
@@ -212,6 +214,8 @@ func TestParses(t *testing.T) {
 		`inc ; inc : int -> int = a -> a + 1`,
 		`$"./f.scrap" $"./x.scrap" $source:0`,
 		`#true #false`,
+		`max 3 4 ; { max, sort } = ord.on int/cmp`,
+		`a + c ; { a, b = c } = r ; r = { a = 1, b = 2 }`,
 	}
 
 	for _, src := range valid {
@@ -258,6 +262,11 @@ func TestParseError(t *testing.T) {
 		{`#a 1 2`, `Expected EOF got INT`},
 		{`| 1 -> 2 -> 3 | a -> a`, `this arm has 1 pattern, but the first arm has 2`},
 		{`| a -> a | 1 -> 2 -> 3`, `this arm has 2 patterns, but the first arm has 1`},
+		{`a ; {} = r`, `A destructuring binding must bind a name.`},
+		{`a ; { a, } = r`, `A record cannot end in a trailing comma.`},
+		{`a ; { a = { b } } = r`, `Expected IDENT got LBRACE`},
+		{`a ; { a = 1 } = r`, `Expected IDENT got INT`},
+		{`a ; { a } : { a : int } = r`, `Expected ASSIGN got DEFINE`},
 	}
 
 	for _, example := range examples {
@@ -282,4 +291,17 @@ func writeExpr(t *testing.T, se *ast.SourceExpr, expr ast.Node) {
 	var buf bytes.Buffer
 	printer.Fprint(&buf, se, expr)
 	t.Error(buf.String())
+}
+
+// FuzzParse checks that the parser never fails other than with a parse
+// error: Parse re-panics anything else, such as consuming past EOF.
+func FuzzParse(f *testing.F) {
+	f.Add(string(benchSource[:2000]))
+	for _, b := range benchBindings {
+		f.Add("x ; " + b)
+	}
+	f.Add("{ ..r, a = [1, 2], b = #t (x -> x) } ; t : { a : int, ..r } = ()")
+	f.Fuzz(func(t *testing.T, src string) {
+		ParseExpr(src)
+	})
 }

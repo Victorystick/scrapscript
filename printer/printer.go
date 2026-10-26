@@ -138,13 +138,50 @@ func Fprint(w io.Writer, se *ast.SourceExpr, expr ast.Node) error {
 func (p *Printer) Top(x ast.Node) {
 	body, binds := p.Src.Group(x)
 	p.Stmt(body)
-	for _, b := range binds {
+	for i := 0; i < len(binds); i++ {
+		b := binds[i]
 		_, id, typ, val := p.Src.Where(b)
 		p.newline()
 		p.WriteString("; ")
-		p.WriteString(p.Src.TokenText(id))
+		if n := p.destructure(binds[i:]); n > 0 {
+			i += n
+		} else {
+			p.WriteString(p.Src.TokenText(id))
+		}
 		p.Binding(typ, val, p.Src.Sort(b))
 	}
+}
+
+// destructure prints the pattern of a destructuring binding, `{ a, b = c }`,
+// if binds starts with one, and returns the number of bindings of its
+// fields that follow, which it prints as well. The parser puts them right
+// after the binding of the record.
+func (p *Printer) destructure(binds []ast.Node) int {
+	se := p.Src
+	brace := se.Main(binds[0])
+	if se.Tokens.Kinds[brace] != token.LBRACE {
+		return 0
+	}
+	n := 0
+	p.WriteString("{ ")
+	for _, b := range binds[1:] {
+		if t, ok := se.Destructured(b); !ok || t != brace || se.Main(b) == brace {
+			break
+		}
+		_, id, _, val := se.Where(b)
+		_, key := se.Access(val)
+		if n > 0 {
+			p.WriteString(", ")
+		}
+		p.token(key)
+		if se.TokenText(key) != se.TokenText(id) {
+			p.WriteString(" = ")
+			p.token(id)
+		}
+		n++
+	}
+	p.WriteString(" }")
+	return n
 }
 
 // Stmt prints a value that is on lines of its own, whose arms each go on
@@ -193,6 +230,19 @@ func (p *Printer) newline() {
 
 func (p *Printer) token(t ast.Tok) {
 	p.WriteString(p.Src.TokenText(t))
+}
+
+// punned returns true if the field key, whose value is x, was punned in
+// the source, `{ x }`, and x still prints as the key.
+func (p *Printer) punned(key ast.Tok, x ast.Node) bool {
+	if p.Src.Kind(x) != ast.Ident || p.Src.Main(x) != key {
+		return false
+	}
+	if p.Name == nil {
+		return true
+	}
+	name := p.Name(x)
+	return name == "" || name == p.Src.TokenText(key)
 }
 
 // Expr prints x on one line, in parentheses if ctx needs them.
@@ -286,8 +336,10 @@ func (p *Printer) expr(x ast.Node, ctx Context) {
 				p.WriteString(", ")
 			}
 			p.token(fields.Key(i))
-			p.WriteString(" = ")
-			p.Expr(fields.Value(i), Expr)
+			if v := fields.Value(i); !p.punned(fields.Key(i), v) {
+				p.WriteString(" = ")
+				p.Expr(v, Expr)
+			}
 		}
 		p.WriteString(" }")
 
@@ -315,10 +367,15 @@ func (p *Printer) expr(x ast.Node, ctx Context) {
 	case ast.Where:
 		body, binds := se.Group(x)
 		p.Expr(body, Body)
-		for _, b := range binds {
+		for i := 0; i < len(binds); i++ {
+			b := binds[i]
 			_, id, typ, val := se.Where(b)
 			p.WriteString(" ; ")
-			p.token(id)
+			if n := p.destructure(binds[i:]); n > 0 {
+				i += n
+			} else {
+				p.token(id)
+			}
 			if typ != ast.None {
 				p.WriteString(" : ")
 				p.Type(typ)

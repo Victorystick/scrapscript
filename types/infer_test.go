@@ -28,6 +28,8 @@ func TestInfer(t *testing.T) {
 		// Records
 		{`{ a = 1 }`, `{ a : int }`},
 		{`{ ..base, a = ~01 } ; base = { a = ~00 }`, `{ a : byte }`},
+		{`{ a = id 1, b = c } ; { id, b = c } = { id = x -> x, b = "" }`, `{ a : int, b : text }`},
+		{`r -> (a ; { a } = r)`, `{ a : a, ..b } -> a`},
 		// // Enums
 
 		{`#r`, `[ #r, ..a ]`},
@@ -237,6 +239,15 @@ func TestInfer(t *testing.T) {
 			"expr-f int -> int\n; expr-f = a => [ #lit int, #neg a ]"},
 		{`xs ; xs : ints = #cons { head = 1, tail = #cons { head = 2, tail = #nil } }
 ; ints : type = [#nil, #cons { head : int, tail : ints }]`, "ints\n; ints : type = [ #cons { head : int, tail : ints }, #nil ]"},
+		// A type may recur through a function's parameter, as in
+		// self-application, and a value of it need not be annotated.
+		{`f (#roll (_ -> 42)) ; f : roll -> int = _ -> 1 ; roll : type = [#roll (roll -> int)]`, `int`},
+		{`unroll (#roll (_ -> 42)) (#roll (_ -> 42))
+; unroll : a => roll a -> roll a -> a = | #roll g -> g
+; roll : type -> type = a => [#roll (roll a -> a)]`, `int`},
+		// An annotation informs the arms of a match function.
+		{`m ; m : b => roll b -> b = | #roll x -> x (#roll x)
+; roll : type -> type = b => [#roll (roll b -> b)]`, "roll a -> a\n; roll = a => [ #roll (roll a -> a) ]"},
 		// A recursive function may be under a where-clause.
 		{`f ; f = (n -> f (n - k) ; k = 1)`, `int -> a`},
 		// Aliases of primitives print as the primitive.
@@ -321,16 +332,16 @@ func TestInferFailure(t *testing.T) {
 		// Nor can an unannotated value have one.
 		{`f r ; f : { id : a => a -> a } -> int = r -> r.id 1 ; r = { id = x -> x }`, `which is polymorphic: give the value an annotation`},
 		{`r ; r : { id : a => b => a -> b } = { id = x -> x }`, `cannot unify 'a' with 'b'`},
-		{`r ; r : { f : x => { a : int, ..x } -> int } = { f = r -> r.a }`, `a polymorphic field's variables must be types, not row`},
-		{`r ; r : a => { f : a => a } -> int = _ -> 1`, `cannot bind type variable a twice`},
+		{`r ; r : { f : x => { a : int, ..x } -> int } = { f = r -> r.a }`, `a polymorphic field's variables must be types, not 'row'`},
+		{`r ; r : a => { f : a => a } -> int = _ -> 1`, `cannot bind type variable 'a' twice`},
 		{`r ; r : (a => a) -> int = _ -> 1`, `type variables must be bound at the start of an annotation`},
 		// Constructors.
-		{`f ; f : m => m int -> m = x -> x`, `m takes 1 type argument, not 0`},
-		{`f ; f : m => m int -> m int text = x -> x`, `m takes 1 type argument, not 2`},
-		{`x ; x : t int = 1 ; t : (type -> type) -> type = f => f int`, `int is not a type constructor`},
+		{`f ; f : m => m int -> m = x -> x`, `'m' takes 1 type argument, not 0`},
+		{`f ; f : m => m int -> m int text = x -> x`, `'m' takes 1 type argument, not 2`},
+		{`x ; x : t int = 1 ; t : (type -> type) -> type = f => f int`, `'int' is not a type constructor`},
 		// Structural types have no constructor to infer.
 		{`g [1] ; g : m => m int -> int = _ -> 1`, `cannot infer the type constructor of 'a int' from 'list int'`},
-		{`x ; x : t r = 1 ; t = f => f int ; r = x => { ..x }`, `type argument 1 of r must be given, as it is a row`},
+		{`x ; x : t r = 1 ; t = f => f int ; r = x => { ..x }`, `type argument 1 of 'r' must be given, as its kind is 'row'`},
 		{`m ; m : monad option = { pure = x -> [x] }` + monad, `cannot unify 'list a' with 'option a'`},
 		{`f ; f : m => monad m -> m int = m -> #some 1` + monad, `cannot unify 'm int' with '[ #some int, ..a ]'`},
 		// Unbound
@@ -375,69 +386,69 @@ func TestInferFailure(t *testing.T) {
 		// Function arguments aren't generalized.
 		{`f -> ({ a = g 1, b = g "" } ; g = x -> f x)`, `cannot unify 'int' with 'text'`},
 		{`x -> z -> { a = [z, [x]], b = [x, [z]] }`, `cannot construct infinite type`},
-		{`x ; x = 1 ; x = 2`, `cannot bind x twice`},
-		{`| a -> a -> 1`, `cannot bind a twice`},
+		{`x ; x = 1 ; x = 2`, `cannot bind 'x' twice`},
+		{`| a -> a -> 1`, `cannot bind 'a' twice`},
 		{`| 1 -> "a" -> 1 | a -> 1 -> a`, `cannot unify 'text' with 'int'`},
-		{`ignore ; ignore : c -> int = _ -> 1 ; c : type = [#a, #a]`, `cannot define tag #a more than once`},
-		{`ignore ; ignore : { a : int, a : text } -> int = _ -> 1`, `cannot define field a more than once`},
+		{`ignore ; ignore : c -> int = _ -> 1 ; c : type = [#a, #a]`, `cannot define tag '#a' more than once`},
+		{`ignore ; ignore : { a : int, a : text } -> int = _ -> 1`, `cannot define field 'a' more than once`},
 		// A recursive type recurs within a tag's payload, with the same arguments.
-		{`1 ; t : type = t`, `recursive type t must recur within a tag's payload`},
-		{`1 ; t : type = list t`, `recursive type t must recur within a tag's payload`},
-		{`1 ; t : type = { a : t }`, `recursive type t must recur within a tag's payload`},
-		{`1 ; t : type = u ; u : type = list t`, `recursive type t must recur within a tag's payload`},
-		{`1 ; f = a => { x : a } ; t : type = f t`, `recursive type t must recur within a tag's payload`},
-		{`1 ; id = a => a ; t : type = id t`, `recursive type t must recur within a tag's payload`},
-		{`1 ; t = a => [#a (t (list a))]`, `recursive type t must recur with the same type arguments`},
+		{`1 ; t : type = t`, `recursive type 't' must recur within a tag's payload`},
+		{`1 ; t : type = list t`, `recursive type 't' must recur within a tag's payload`},
+		{`1 ; t : type = { a : t }`, `recursive type 't' must recur within a tag's payload`},
+		{`1 ; t : type = u ; u : type = list t`, `recursive type 't' must recur within a tag's payload`},
+		{`1 ; f = a => { x : a } ; t : type = f t`, `recursive type 't' must recur within a tag's payload`},
+		{`1 ; id = a => a ; t : type = id t`, `recursive type 't' must recur within a tag's payload`},
+		{`1 ; t = a => [#a (t (list a))]`, `recursive type 't' must recur with the same type arguments`},
 		{`f #b ; f : t -> int = _ -> 1 ; t : type = [#a t]`, "cannot unify 't' with '[ #b, ..a ]'\n; t : type = [ #a t ]"},
 		// Paths reach type members statically.
-		{`x ; x : lib.u = 1 ; lib = { t = t } ; t : type = int`, `lib has no type member u`},
-		{`x ; x : lib = 1 ; lib = { t = t } ; t : type = int`, `lib is a value, not a type`},
-		{`x ; x : int = 1 ; int = { t = t } ; t : type = text`, `int is a value, not a type`},
-		{`f ; f = lib -> (x ; x : lib.t = 1)`, `lib has no type member t`},
-		{`x ; x : lib.t = 1 ; lib = lib`, `lib has no type member t`},
-		{`lib.t ; lib = { t = t } ; t : type = int`, `cannot use type lib.t as a value`},
-		{`{ t = t, t = 1 } ; t : type = int`, `cannot set t twice`},
-		{`x ; x : o.option = #none ; o = { option = option } ; option = a => [#some a, #none]`, `option takes 1 type argument, not 0`},
+		{`x ; x : lib.u = 1 ; lib = { t = t } ; t : type = int`, `'lib' has no type member 'u'`},
+		{`x ; x : lib = 1 ; lib = { t = t } ; t : type = int`, `'lib' is a value, not a type`},
+		{`x ; x : int = 1 ; int = { t = t } ; t : type = text`, `'int' is a value, not a type`},
+		{`f ; f = lib -> (x ; x : lib.t = 1)`, `'lib' has no type member 't'`},
+		{`x ; x : lib.t = 1 ; lib = lib`, `'lib' has no type member 't'`},
+		{`lib.t ; lib = { t = t } ; t : type = int`, `cannot use type 'lib.t' as a value`},
+		{`{ t = t, t = 1 } ; t : type = int`, `cannot set 't' twice`},
+		{`x ; x : o.option = #none ; o = { option = option } ; option = a => [#some a, #none]`, `'option' takes 1 type argument, not 0`},
 		// Only functions may be recursive.
-		{`x ; x : t = #next x ; t : type = [#next t]`, `x is recursive, so it must be a function`},
-		{`x ; x = y ; y = f 1 ; f = _ -> x`, `x is recursive, so it must be a function`},
-		{`s ; s : t = #more (_ -> s) ; t : type = [#more (() -> t)]`, `s is recursive, so it must be a function`},
-		{`r ; r = { f = x -> r }`, `r is recursive, so it must be a function`},
-		{`t + 1 ; t : type = int`, `cannot use type t as a value`},
-		{`ignore ; ignore : [#a, ..r] -> int = _ -> 1`, `unknown row variable r`},
+		{`x ; x : t = #next x ; t : type = [#next t]`, `'x' is recursive, so it must be a function`},
+		{`x ; x = y ; y = f 1 ; f = _ -> x`, `'x' is recursive, so it must be a function`},
+		{`s ; s : t = #more (_ -> s) ; t : type = [#more (() -> t)]`, `'s' is recursive, so it must be a function`},
+		{`r ; r = { f = x -> r }`, `'r' is recursive, so it must be a function`},
+		{`t + 1 ; t : type = int`, `cannot use type 't' as a value`},
+		{`ignore ; ignore : [#a, ..r] -> int = _ -> 1`, `unknown row variable 'r'`},
 		// Annotations with type variables are checked with them rigid.
 		{`inc ; inc : a => a -> a = x -> x + 1`, `cannot unify 'a' with 'int'`},
 		{`coerce ; coerce : a => b => a -> b = x -> x`, `cannot unify 'a' with 'b'`},
 		{`to-int ; to-int : a => a -> int = x -> x`, `cannot unify 'a' with 'int'`},
 		{`drop-rest ; drop-rest : r => { a : int, ..r } -> { a : int } = x -> x`, `cannot unify '{ a : int, ..r }' with '{ a : int }'`},
 		{`get-a ; get-a : r => { ..r } -> int = x -> x.a`, `cannot unify '{ ..r }' with '{ a : a, ..b }'`},
-		{`ignore ; ignore : a => [#x, ..a] -> a = _ -> 1`, `a is a row, not a type`},
+		{`ignore ; ignore : a => [#x, ..a] -> a = _ -> 1`, `'a' is a row, not a type`},
 		{`id ; id : int -> (a => a) = x -> x`, `type variables must be bound at the start of an annotation`},
 		// A rigid variable can't escape into a type from outside its annotation.
 		{`y -> (always-y ; always-y : a => a -> a = x -> y)`, `type variable 'a' would escape its annotation through 'b'`},
-		{`one ; one : a => a => a = 1`, `cannot bind type variable a twice`},
+		{`one ; one : a => a => a = 1`, `cannot bind type variable 'a' twice`},
 		// Kinds.
-		{`1 ; t : type = a => [#a a]`, `t has kind type -> type, not type`},
-		{`1 ; t : type -> type = int`, `t has kind type, not type -> type`},
-		{`1 ; t : row -> type = a => [#a a]`, `t has kind type -> type, not row -> type`},
+		{`1 ; t : type = a => [#a a]`, `'t' has kind 'type -> type', not 'type'`},
+		{`1 ; t : type -> type = int`, `'t' has kind 'type', not 'type -> type'`},
+		{`1 ; t : row -> type = a => [#a a]`, `'t' has kind 'type -> type', not 'row -> type'`},
 		{`1 ; t : ((type -> type) -> type) -> type = f => f list`, `a constructor's parameters must be types`},
-		{`1 ; t : int -> type = a => a`, `int is not a kind`},
-		{`1 ; t : type -> int = a => a`, `int is not a kind of types`},
-		{`1 ; t = a => a => [#a a]`, `cannot bind type variable a twice`},
+		{`1 ; t : int -> type = a => a`, `'int' is not a kind`},
+		{`1 ; t : type -> int = a => a`, `'int' is not a kind of types`},
+		{`1 ; t = a => a => [#a a]`, `cannot bind type variable 'a' twice`},
 		// Type constructors.
-		{`ignore ; ignore : option -> int = _ -> 1 ; option = a => [#some a, #none]`, `option takes 1 type argument, not 0`},
-		{`ignore ; ignore : option int text -> int = _ -> 1 ; option = a => [#some a, #none]`, `option takes 1 type argument, not 2`},
-		{`ignore ; ignore : either int -> int = _ -> 1 ; either = a => b => [#left a, #right b]`, `either takes 2 type arguments, not 1`},
-		{`ignore ; ignore : int text -> int = _ -> 1`, `int is not a type constructor`},
-		{`ignore ; ignore : t int -> int = _ -> 1 ; t : type = int`, `t is not a type constructor`},
-		{`ignore ; ignore : list -> int = _ -> 1`, `list takes 1 type argument, not 0`},
-		{`ignore ; ignore : list int int -> int = _ -> 1`, `list takes 1 type argument, not 2`},
-		{`1 ; t : type -> type = f => f int`, `t has kind (type -> type) -> type, not type -> type`},
-		{`1 ; t = a => [#a b]`, `unknown type b`},
-		{`1 ; t = a => { a : a, ..a }`, `a is a row, not a type`},
-		{`ignore ; ignore : t int -> int = _ -> 1 ; t = r => { ..r }`, `type argument 1 of t must be a row variable, not int`},
+		{`ignore ; ignore : option -> int = _ -> 1 ; option = a => [#some a, #none]`, `'option' takes 1 type argument, not 0`},
+		{`ignore ; ignore : option int text -> int = _ -> 1 ; option = a => [#some a, #none]`, `'option' takes 1 type argument, not 2`},
+		{`ignore ; ignore : either int -> int = _ -> 1 ; either = a => b => [#left a, #right b]`, `'either' takes 2 type arguments, not 1`},
+		{`ignore ; ignore : int text -> int = _ -> 1`, `'int' is not a type constructor`},
+		{`ignore ; ignore : t int -> int = _ -> 1 ; t : type = int`, `'t' is not a type constructor`},
+		{`ignore ; ignore : list -> int = _ -> 1`, `'list' takes 1 type argument, not 0`},
+		{`ignore ; ignore : list int int -> int = _ -> 1`, `'list' takes 1 type argument, not 2`},
+		{`1 ; t : type -> type = f => f int`, `'t' has kind '(type -> type) -> type', not 'type -> type'`},
+		{`1 ; t = a => [#a b]`, `unknown type 'b'`},
+		{`1 ; t = a => { a : a, ..a }`, `'a' is a row, not a type`},
+		{`ignore ; ignore : t int -> int = _ -> 1 ; t = r => { ..r }`, `type argument 1 of 't' must be a row variable, not 'int'`},
 		// Sort bindings are checked even when unused.
-		{`1 ; t : type = [#a, #a]`, `cannot define tag #a more than once`},
+		{`1 ; t : type = [#a, #a]`, `cannot define tag '#a' more than once`},
 	}
 
 	for _, ex := range examples {
@@ -535,7 +546,7 @@ func TestInferImport(t *testing.T) {
 		// A scrap that denotes a type can only be used in type position.
 		{in: `$source:0`, imp: IntRef, sort: true, result: `type = int`},
 		{in: `ignore ; ignore : $source:0 -> int = _ -> 1`, imp: TextRef, sort: true, result: `text -> int`},
-		{in: `1 + $source:0`, imp: IntRef, sort: true, err: `cannot use type $source:0 as a value`},
+		{in: `1 + $source:0`, imp: IntRef, sort: true, err: `cannot use type '$source:0' as a value`},
 		{in: `ignore ; ignore : $"./t.scrap" -> int = _ -> 1`, imp: TextRef, sort: true, result: `text -> int`},
 		// An imported type constructor is applied by substitution.
 		{in: `$source:0`, imp: option, sort: true, params: optionParams, result: `type -> type = a => [ #none, #some a ]`},
@@ -546,14 +557,14 @@ func TestInferImport(t *testing.T) {
 		{in: `get-a ; get-a : r => $source:0 int r -> int = x -> x.a`,
 			imp: hasA, sort: true, params: hasAParams, result: `$source:0 int a -> int`},
 		{in: `ignore ; ignore : $source:0 -> int = _ -> 1`, imp: option, sort: true, params: optionParams,
-			err: `$source:0 takes 1 type argument, not 0`},
+			err: `'$source:0' takes 1 type argument, not 0`},
 		{in: `ignore ; ignore : $source:0 int text -> int = _ -> 1`, imp: option, sort: true, params: optionParams,
-			err: `$source:0 takes 1 type argument, not 2`},
+			err: `'$source:0' takes 1 type argument, not 2`},
 		{in: `ignore ; ignore : $source:0 int -> int = _ -> 1`, imp: IntRef, sort: true,
-			err: `$source:0 is not a type constructor`},
+			err: `'$source:0' is not a type constructor`},
 		{in: `ignore ; ignore : $source:0 int int -> int = _ -> 1`, imp: hasA, sort: true, params: hasAParams,
-			err: `type argument 2 of $source:0 must be a row variable, not int`},
-		{in: `one ; one : $source:0 = 1`, imp: IntRef, err: `$source:0 is a value, not a type`},
+			err: `type argument 2 of '$source:0' must be a row variable, not 'int'`},
+		{in: `one ; one : $source:0 = 1`, imp: IntRef, err: `'$source:0' is a value, not a type`},
 	}
 
 	for _, ex := range examples {

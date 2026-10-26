@@ -171,12 +171,12 @@ func TestErrorsInScrapsReferredTo(t *testing.T) {
 
 func TestPathImportFailures(t *testing.T) {
 	examples := []struct{ source, error string }{
-		{`$"./a.scrap"`, `$"./a.scrap" refers back to this scrap`},
+		{`$"./a.scrap"`, `'$"./a.scrap"' refers back to this scrap`},
 		{`$"../inc.scrap"`, `cannot refer to a path outside the current directory`},
 		{`$"/inc.scrap"`, `cannot refer to an absolute path`},
 		{`$"./missing.scrap"`, `file does not exist`},
 		{`$"sub/../../inc.scrap"`, `cannot refer to a path outside the current directory`},
-		{`$"./choice.scrap" + 1`, `cannot use type $"./choice.scrap" as a value`},
+		{`$"./choice.scrap" + 1`, `cannot use type '$"./choice.scrap"' as a value`},
 	}
 
 	for _, ex := range examples {
@@ -272,6 +272,18 @@ func TestDraftsWithPathsCannotBePushed(t *testing.T) {
 	}
 	if _, err := env.Push(scrap); err == nil || !strings.Contains(err.Error(), "cannot push a draft that refers to a path") {
 		t.Errorf("Expected 'cannot push a draft that refers to a path', got %v", err)
+	}
+}
+
+func TestIllTypedScrapsCannotBePushed(t *testing.T) {
+	env := NewEnvironment()
+	env.UsePusher(nopPusher{})
+	scrap, err := env.Read([]byte(`1 + "a"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Push(scrap); err == nil || !strings.Contains(err.Error(), "cannot unify 'text' with 'int'") {
+		t.Errorf("Expected 'cannot unify 'text' with 'int'', got %v", err)
 	}
 }
 

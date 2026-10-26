@@ -63,7 +63,7 @@
 ; height : tree -> int = | #leaf -> 0 | #node n -> n.height
 
 ; node : text -> stat -> tree -> tree -> tree = key -> value -> left -> right ->
-    #node { key = key, value = value, left = left, right = right, height = 1 + larger (height left) (height right) }
+    #node { key, value, left, right, height = 1 + larger (height left) (height right) }
 
 ; balance = key -> value -> left -> right -> lean key value left right (height left - height right)
 

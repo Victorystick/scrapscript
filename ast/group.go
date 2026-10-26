@@ -32,7 +32,7 @@ func (se *SourceExpr) Components(binds []Node, cut func(Node) bool) []Component 
 	index := make(map[string]int, len(binds))
 	for i, b := range binds {
 		if !se.Sort(b) && (cut == nil || !cut(b)) {
-			index[se.TokenText(se.Mains[b])] = i
+			index[se.Name(se.Mains[b])] = i
 		}
 	}
 
@@ -64,7 +64,7 @@ func (se *SourceExpr) References(body Node, binds []Node) []int {
 	index := make(map[string]int, len(binds))
 	for i, b := range binds {
 		if !se.Sort(b) {
-			index[se.TokenText(se.Mains[b])] = i
+			index[se.Name(se.Mains[b])] = i
 		}
 	}
 	counts := make([]int, len(binds))
@@ -176,7 +176,7 @@ func (f *freeNames) expr(n Node) {
 	se := f.se
 	switch se.Kinds[n] {
 	case Ident:
-		if name := se.TokenText(se.Mains[n]); f.bound[name] == 0 {
+		if name := se.Name(se.Mains[n]); f.bound[name] == 0 {
 			f.visit(name)
 		}
 	case Binary, Call:
@@ -222,7 +222,7 @@ func (f *freeNames) expr(n Node) {
 		start := len(f.names)
 		for _, b := range binds {
 			if !se.Sort(b) {
-				f.names = append(f.names, se.TokenText(se.Mains[b]))
+				f.names = append(f.names, se.Name(se.Mains[b]))
 			}
 		}
 		f.bind(start)

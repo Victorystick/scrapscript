@@ -1,7 +1,7 @@
 -- parser: combinators over the characters of a text, after Elm's Parser but
 -- built with pipes, one step per line:
 --
---   p.succeed (x -> y -> { x = x, y = y })
+--   p.succeed (x -> y -> { x, y })
 --     |> p.skip (p.symbol "(")
 --     |> p.keep p.int
 --     |> p.skip (p.symbol ",")
@@ -12,25 +12,25 @@
 -- Exports its types next to its functions: `parser a` and `outcome a` are
 -- type members, used as `p.parser int` in type position.
 
-{ parser = parser
-, outcome = outcome
-, run = run
-, succeed = succeed
-, problem = problem
-, keep = keep
-, skip = skip
-, map = map
-, and-then = and-then
-, one-of = one-of
-, many = many
-, many1 = many1
-, char-if = char-if
-, symbol = symbol
-, digit = digit
-, int = int
-, word = word
-, spaces = spaces
-, end = end
+{ parser
+, outcome
+, run
+, succeed
+, problem
+, keep
+, skip
+, map
+, and-then
+, one-of
+, many
+, many1
+, char-if
+, symbol
+, digit
+, int
+, word
+, spaces
+, end
 }
 
 -- A parser takes the characters left and gives a value with the characters
@@ -48,9 +48,9 @@
       | #err e -> #err { expected = e.expected, at = list/length chars - list/length e.rest }
     ; chars = text/split "" input)
 
-; succeed : a => a -> parser a = value -> rest -> #ok { value = value, rest = rest }
+; succeed : a => a -> parser a = value -> rest -> #ok { value, rest }
 
-; problem : a => text -> parser a = expected -> rest -> #err { expected = expected, rest = rest }
+; problem : a => text -> parser a = expected -> rest -> #err { expected, rest }
 
 ; map : a => b => (a -> b) -> parser a -> parser b = f -> p -> input -> p input |>
     | #ok r  -> #ok { value = f r.value, rest = r.rest }
@@ -88,13 +88,13 @@
 
 -- One character that ok accepts; expected names the class.
 ; char-if : (text -> [#true, #false]) -> text -> parser text = ok -> expected ->
-    | []        -> #err { expected = expected, rest = [] }
+    | []        -> #err { expected, rest = [] }
     | c >+ rest -> (ok c |>
-        | #true  -> #ok { value = c, rest = rest }
-        | #false -> #err { expected = expected, rest = c >+ rest })
+        | #true  -> #ok { value = c, rest }
+        | #false -> #err { expected, rest = c >+ rest })
 
 ; symbol : text -> parser () = s -> input -> strip (text/split "" s) input |>
-    | #some rest -> #ok { value = (), rest = rest }
+    | #some rest -> #ok { value = (), rest }
     | #none      -> #err { expected = "\"" ++ s ++ "\"", rest = input }
 
 ; digit : parser text = char-if (c -> text/to-int c |> | #some _ -> #true | #none -> #false) "a digit"
@@ -110,7 +110,7 @@
 
 ; end : parser () =
     | []   -> #ok { value = (), rest = [] }
-    | rest -> #err { expected = "the end", rest = rest }
+    | rest -> #err { expected = "the end", rest }
 
 -- Internals.
 

@@ -62,19 +62,19 @@ func (e *Errors) Add(err token.Error) {
 }
 
 func (e Errors) Error() string {
-	return e.Render(false)
+	return e.Render(nil)
 }
 
 // Render returns the first error, as token.Error's Render, and how many more
 // there are.
-func (e Errors) Render(color bool) string {
+func (e Errors) Render(hl token.Highlighter) string {
 	switch len(e) {
 	case 0:
 		return "no errors"
 	case 1:
-		return e[0].Render(color)
+		return e[0].Render(hl)
 	}
-	return fmt.Sprintf("%s (and %d more errors)", e[0].Render(color), len(e)-1)
+	return fmt.Sprintf("%s (and %d more errors)", e[0].Render(hl), len(e)-1)
 }
 
 func (e Errors) Err() error {

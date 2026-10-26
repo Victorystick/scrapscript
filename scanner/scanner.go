@@ -21,9 +21,9 @@ type Tokens struct {
 
 // End returns the offset just past token i.
 func (t *Tokens) End(src []byte, i int) int {
-	s := scanner{src: src, pos: int(t.Starts[i])}
-	s.token()
-	return s.pos
+	s := scanner{src: src}
+	_, end := s.token(int(t.Starts[i]))
+	return end
 }
 
 // Span returns the span of token i.
@@ -43,25 +43,45 @@ func Scan(src []byte) (toks Tokens, errs []Error) {
 	}
 
 	n := len(src)/bytesPerToken + 1
-	toks.Kinds = make([]token.Token, 0, n)
-	toks.Starts = make([]uint32, 0, n)
+	kinds := make([]token.Token, 0, n)
+	starts := make([]uint32, 0, n)
 
+	// The arrays and the position are locals, so that the loop keeps them in
+	// registers. Identifiers and one-byte operators, the most common tokens,
+	// are scanned inline, as token would scan them.
 	s := scanner{src: src}
+	pos := 0
 	for {
-		s.skipWhitespace()
-		start := s.pos
-		tok := s.token()
-		toks.Kinds = append(toks.Kinds, tok)
-		toks.Starts = append(toks.Starts, uint32(start))
-		if tok == token.EOF {
-			return toks, s.errs
+		for pos < len(src) && class[src[pos]]&cSpace != 0 {
+			pos++
 		}
+		if pos == len(src) {
+			kinds = append(kinds, token.EOF)
+			starts = append(starts, uint32(pos))
+			return Tokens{Kinds: kinds, Starts: starts}, s.errs
+		}
+		start := pos
+		c := src[pos]
+		tok := lead[c]
+		switch tok {
+		case token.IDENT:
+			pos = identEnd(src, pos+1)
+		case token.BAD:
+			if c == '-' && at(src, pos+1) == '-' {
+				pos = s.skipTrivia(pos)
+				continue
+			}
+			tok, pos = s.token(pos)
+		default:
+			pos++
+		}
+		kinds = append(kinds, tok)
+		starts = append(starts, uint32(start))
 	}
 }
 
 type scanner struct {
 	src  []byte
-	pos  int
 	errs []Error
 }
 
@@ -69,153 +89,135 @@ func (s *scanner) fail(code ErrCode, start, end int) {
 	s.errs = append(s.errs, Error{Code: code, Start: uint32(start), End: uint32(end)})
 }
 
-// at returns the byte at i, or 0 past the end of the source.
-func (s *scanner) at(i int) byte {
-	if i < len(s.src) {
-		return s.src[i]
+// at returns the byte at i, or 0 past the end of src.
+func at(src []byte, i int) byte {
+	if i < len(src) {
+		return src[i]
 	}
 	return 0
 }
 
-// skipWhitespace skips whitespace and comments, which are trivia.
-func (s *scanner) skipWhitespace() {
-	for s.pos < len(s.src) {
-		switch {
-		case class[s.src[s.pos]]&cSpace != 0:
-			s.pos++
-		case s.src[s.pos] == '-' && s.at(s.pos+1) == '-':
-			s.comment()
-		default:
-			return
+// skipTrivia skips the whitespace and comments from i, and returns the
+// offset after them.
+func (s *scanner) skipTrivia(i int) int {
+	src := s.src
+	for i < len(src) {
+		c := src[i]
+		if class[c]&cSpace != 0 {
+			i++
+		} else if c == '-' && at(src, i+1) == '-' {
+			i = s.comment(i)
+		} else {
+			break
 		}
 	}
+	return i
 }
 
 // comment skips a line comment, up to the end of its line. `--` must be
 // followed by a space, another `-` or the end of the line; anything else is
 // almost always a typo, so it is an error, though still skipped as a comment.
-func (s *scanner) comment() {
-	start := s.pos
-	switch s.at(start + 2) {
+func (s *scanner) comment(start int) int {
+	switch at(s.src, start+2) {
 	case ' ', '-', '\n', '\r', 0:
 	default:
 		s.fail(ErrBadComment, start, start+2)
 	}
 	end := bytes.IndexByte(s.src[start:], '\n')
 	if end == -1 {
-		s.pos = len(s.src)
-	} else {
-		s.pos = start + end
+		return len(s.src)
 	}
+	return start + end
 }
 
-// token scans the token starting at s.pos and advances past it. It depends
-// only on the source and the start offset, which is what lets Tokens.End
-// re-scan a single token.
-func (s *scanner) token() token.Token {
-	start := s.pos
-	if start >= len(s.src) {
-		return token.EOF
+// token scans the token starting at start, and returns its kind and the
+// offset just past it. It depends only on the source and the start offset,
+// which is what lets Tokens.End re-scan a single token.
+func (s *scanner) token(start int) (token.Token, int) {
+	src := s.src
+	if start >= len(src) {
+		return token.EOF, start
 	}
 
-	c := s.src[start]
-	switch {
-	case class[c]&cLetter != 0:
-		s.pos = s.identEnd(start + 1)
-		return token.IDENT
-	case s.isStartOfNumber(start):
-		return s.number(start)
+	c := src[start]
+	switch tok := lead[c]; tok {
+	case token.IDENT:
+		return tok, identEnd(src, start+1)
+	case token.BAD:
+		// Needs a closer look.
+	default:
+		return tok, start + 1
 	}
 
-	s.pos = start + 1
+	next := at(src, start+1)
 	switch c {
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return number(src, start)
+	case '.':
+		if class[next]&cDigit != 0 {
+			return number(src, start)
+		}
+		return pair(start, next, token.ACCESS, '.', token.SPREAD)
 	case '$':
 		switch {
-		case class[s.at(start+1)]&cLetter != 0:
+		case class[next]&cLetter != 0:
 			return s.hash(start)
-		case s.at(start+1) == '"':
-			s.text(start + 1)
-			return token.PATH
+		case next == '"':
+			return token.PATH, s.text(start + 1)
 		}
 		s.fail(ErrBadReference, start, start+1)
-		return token.BAD
+		return token.BAD, start + 1
 	case '(':
-		return s.switch2(token.LPAREN, ')', token.HOLE)
-	case ')':
-		return token.RPAREN
-	case '{':
-		return token.LBRACE
-	case '}':
-		return token.RBRACE
-	case '[':
-		return token.LBRACK
-	case ']':
-		return token.RBRACK
+		return pair(start, next, token.LPAREN, ')', token.HOLE)
 	case '~':
-		if s.at(start+1) == '~' {
+		if next == '~' {
 			return s.bytes(start)
 		}
 		return s.byte(start)
-	case ';':
-		return token.WHERE
-	case ',':
-		return token.COMMA
 	case '"':
-		return s.text(start)
+		return token.TEXT, s.text(start)
 	case '=':
-		return s.switch2(token.ASSIGN, '>', token.FORALL)
+		return pair(start, next, token.ASSIGN, '>', token.FORALL)
 	case '+':
-		if s.at(start+1) == '<' {
-			s.pos++
-			return token.APPEND
+		if next == '<' {
+			return token.APPEND, start + 2
 		}
-		return s.switch2(token.ADD, '+', token.CONCAT)
+		return pair(start, next, token.ADD, '+', token.CONCAT)
 	case '-':
-		if s.isStartOfNumber(start + 1) {
-			return s.number(start)
+		if class[next]&cDigit != 0 || next == '.' && class[at(src, start+2)]&cDigit != 0 {
+			return number(src, start)
 		}
-		return s.switch2(token.SUB, '>', token.ARROW)
+		return pair(start, next, token.SUB, '>', token.ARROW)
 	case '|':
-		return s.switch2(token.PIPE, '>', token.RPIPE)
+		return pair(start, next, token.PIPE, '>', token.RPIPE)
 	case '<':
-		if s.at(start+1) == '<' {
-			s.pos++
-			return token.LCOMP
+		if next == '<' {
+			return token.LCOMP, start + 2
 		}
-		return s.switch2(token.LT, '|', token.LPIPE)
+		return pair(start, next, token.LT, '|', token.LPIPE)
 	case '>':
-		if s.at(start+1) == '>' {
-			s.pos++
-			return token.RCOMP
+		if next == '>' {
+			return token.RCOMP, start + 2
 		}
-		return s.switch2(token.GT, '+', token.PREPEND)
-	case ':':
-		return token.DEFINE
-	case '#':
-		return token.OPTION
-	case '.':
-		return s.switch2(token.ACCESS, '.', token.SPREAD)
-	case '*':
-		return token.MUL
+		return pair(start, next, token.GT, '+', token.PREPEND)
 	}
 
 	return s.illegal(start)
 }
 
-// switch2 consumes the next byte and returns double if that byte is and;
-// otherwise it returns single.
-func (s *scanner) switch2(single token.Token, and byte, double token.Token) token.Token {
-	if s.at(s.pos) == and {
-		s.pos++
-		return double
+// pair returns double and the offset past two bytes if next is and;
+// otherwise it returns single and the offset past one.
+func pair(start int, next byte, single token.Token, and byte, double token.Token) (token.Token, int) {
+	if next == and {
+		return double, start + 2
 	}
-	return single
+	return single, start + 1
 }
 
-func (s *scanner) illegal(start int) token.Token {
+func (s *scanner) illegal(start int) (token.Token, int) {
 	if s.src[start] < utf8.RuneSelf {
 		s.fail(ErrIllegalChar, start, start+1)
-		return token.BAD
+		return token.BAD, start + 1
 	}
 	r, w := utf8.DecodeRune(s.src[start:])
 	if r == utf8.RuneError && w == 1 {
@@ -223,70 +225,66 @@ func (s *scanner) illegal(start int) token.Token {
 	} else {
 		s.fail(ErrNonASCII, start, start+w)
 	}
-	s.pos = start + w
-	return token.BAD
+	return token.BAD, start + w
 }
 
-func (s *scanner) identEnd(i int) int {
-	for i < len(s.src) && class[s.src[i]]&cIdent != 0 {
+func identEnd(src []byte, i int) int {
+	for i < len(src) && class[src[i]]&cIdent != 0 {
 		i++
 	}
 	return i
 }
 
-func (s *scanner) isStartOfNumber(i int) bool {
-	c := s.at(i)
-	return class[c]&cDigit != 0 || c == '.' && class[s.at(i+1)]&cDigit != 0
-}
-
-func (s *scanner) digits(i int) int {
-	for i < len(s.src) && class[s.src[i]]&cDigit != 0 {
+func digits(src []byte, i int) int {
+	for i < len(src) && class[src[i]]&cDigit != 0 {
 		i++
 	}
 	return i
 }
 
 // number scans an INT or FLOAT, with an optional leading '-'.
-func (s *scanner) number(start int) token.Token {
+func number(src []byte, start int) (token.Token, int) {
 	i := start
-	if s.src[i] == '-' {
+	if src[i] == '-' {
 		i++
 	}
-	tok := token.INT
-	i = s.digits(i)
-	if s.at(i) == '.' {
-		tok = token.FLOAT
-		i = s.digits(i + 1)
+	i = digits(src, i)
+	if at(src, i) != '.' {
+		return token.INT, i
 	}
-	s.pos = i
-	return tok
+	return token.FLOAT, digits(src, i+1)
 }
 
-func (s *scanner) text(start int) token.Token {
+// text scans the text literal whose opening quote is at start, and returns
+// the offset past its closing quote.
+func (s *scanner) text(start int) int {
+	src := s.src
 	i := start + 1
-	for i < len(s.src) && s.src[i] != '"' && s.src[i] != '\n' {
-		if s.src[i] == '\\' {
-			n := escapeLen(s.src[i:])
-			if n == 0 {
-				n = 1
-				if i+1 < len(s.src) && s.src[i+1] != '\n' {
-					n = 2
-				}
-				s.fail(ErrBadEscape, i, i+n)
-			}
-			i += n
+	for i < len(src) {
+		c := src[i]
+		if class[c]&cTextEnd == 0 {
+			i++
 			continue
 		}
-		i++
+		if c != '\\' {
+			break
+		}
+		n := escapeLen(src[i:])
+		if n == 0 {
+			n = 1
+			if i+1 < len(src) && src[i+1] != '\n' {
+				n = 2
+			}
+			s.fail(ErrBadEscape, i, i+n)
+		}
+		i += n
 	}
 	s.checkText(start+1, i)
-	if i < len(s.src) && s.src[i] == '"' {
-		s.pos = i + 1
-	} else {
-		s.fail(ErrUnterminatedText, start, i)
-		s.pos = i
+	if i < len(src) && src[i] == '"' {
+		return i + 1
 	}
-	return token.TEXT
+	s.fail(ErrUnterminatedText, start, i)
+	return i
 }
 
 // checkText reports invalid UTF-8 and NUL bytes in text contents, the only
@@ -309,71 +307,64 @@ func (s *scanner) checkText(start, end int) {
 }
 
 // byte scans a single byte literal: '~' and two hex digits.
-func (s *scanner) byte(start int) token.Token {
+func (s *scanner) byte(start int) (token.Token, int) {
 	for i := start + 1; i < start+3; i++ {
-		if class[s.at(i)]&cHex == 0 {
+		if class[at(s.src, i)]&cHex == 0 {
 			s.fail(ErrExpectedHex, i, i+1)
-			s.pos = i
-			return token.BAD
+			return token.BAD, i
 		}
 	}
-	s.pos = start + 3
-	return token.BYTE
+	return token.BYTE, start + 3
 }
 
 // hash scans a hash: '$', a scheme name, ':' and lowercase hex digits. The
 // scheme decides how many, so the digits run to the end of the word.
-func (s *scanner) hash(start int) token.Token {
-	i := s.identEnd(start + 2)
-	if s.at(i) != ':' {
+func (s *scanner) hash(start int) (token.Token, int) {
+	i := identEnd(s.src, start+2)
+	if at(s.src, i) != ':' {
 		s.fail(ErrBadHash, start, i)
-		s.pos = i
-		return token.BAD
+		return token.BAD, i
 	}
 	b := i + 1
-	i = s.identEnd(b)
+	i = identEnd(s.src, b)
 	if i == b {
 		s.fail(ErrBadHash, start, i)
-		s.pos = i
-		return token.BAD
+		return token.BAD, i
 	}
 	for j := b; j < i; j++ {
 		if c := s.src[j]; class[c]&cHex == 0 || 'A' <= c && c <= 'F' {
 			s.fail(ErrBadHash, j, j+1)
-			s.pos = i
-			return token.BAD
+			return token.BAD, i
 		}
 	}
-	s.pos = i
-	return token.HASH
+	return token.HASH, i
 }
 
 // bytes scans a bytes literal: '~~' and padded base64. A bare '~~' is empty.
-func (s *scanner) bytes(start int) token.Token {
+func (s *scanner) bytes(start int) (token.Token, int) {
 	b := start + 2
 	i := b
 	for i < len(s.src) && class[s.src[i]]&cBase64 != 0 {
 		i++
 	}
 	for (i-b)%4 != 0 {
-		if s.at(i) != '=' {
+		if at(s.src, i) != '=' {
 			s.fail(ErrBase64Padding, i, i+1)
-			s.pos = i
-			return token.BAD
+			return token.BAD, i
 		}
 		i++
 	}
-	s.pos = i
-	return token.BYTES
+	return token.BYTES, i
 }
 
 const (
-	cSpace  uint8 = 1 << iota // ' ' '\t' '\n' '\r'
-	cLetter                   // starts an identifier: A-Z a-z _
-	cIdent                    // continues an identifier: A-Z a-z 0-9 _ ' - /
-	cDigit                    // 0-9
-	cHex                      // 0-9 A-F a-f
-	cBase64                   // A-Z a-z 0-9 + /
+	cSpace   uint8 = 1 << iota // ' ' '\t' '\n' '\r'
+	cLetter                    // starts an identifier: A-Z a-z _
+	cIdent                     // continues an identifier: A-Z a-z 0-9 _ ' - /
+	cDigit                     // 0-9
+	cHex                       // 0-9 A-F a-f
+	cBase64                    // A-Z a-z 0-9 + /
+	cTextEnd                   // ends a run of plain text: '"' '\n' '\\'
 )
 
 var class = func() (t [256]uint8) {
@@ -395,5 +386,26 @@ var class = func() (t [256]uint8) {
 	t['-'] |= cIdent
 	t['/'] |= cIdent | cBase64
 	t['+'] |= cBase64
+	for _, c := range []byte("\"\n\\") {
+		t[c] |= cTextEnd
+	}
+	return
+}()
+
+// lead maps the first byte of a token to its kind, when that byte alone
+// decides it: IDENT for a letter, which starts an identifier, or a one-byte
+// operator. Other bytes map to BAD and need a closer look.
+var lead = func() (t [256]token.Token) {
+	for c := range t {
+		if class[c]&cLetter != 0 {
+			t[c] = token.IDENT
+		}
+	}
+	for _, tok := range []token.Token{
+		token.RPAREN, token.LBRACE, token.RBRACE, token.LBRACK, token.RBRACK,
+		token.WHERE, token.COMMA, token.DEFINE, token.OPTION, token.MUL,
+	} {
+		t[tok.Op()[0]] = tok
+	}
 	return
 }()

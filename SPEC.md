@@ -124,6 +124,8 @@ program  = expr EOF
 
 expr     = body { ";" binding }                  # where-clause: loosest form
 binding  = NAME [ ":" type ] "=" rhs             # one binding form
+         | "{" bfield { "," bfield } "}" "=" body  # destructuring binding
+bfield   = NAME [ "=" NAME ]                     # `{ x }` is `{ x = x }`, binding x
 rhs      = type                                  # sort binding (section 7.2)
          | body                                  # value binding
 
@@ -196,6 +198,12 @@ Notes:
   grammar when the annotation's final result is `type`, or when it starts with
   `NAME "=>"`; otherwise as a `body`. Both decisions look at tokens of the
   binding itself, never at other bindings.
+- **Destructuring bindings.** `{ a, b = c } = r` binds `a` to `r.a` and `c` to
+  `r.b` in the group, as if written `a = r.a ; c = r.b` with `r` evaluated
+  once: `max 3 4 ; { max, sort } = ord.on int/cmp`. The record may have more
+  fields. It is a value binding, so it has no annotation and can't bind a
+  type member, and it can't be recursive, since a record isn't a function
+  (section 8). Fields are names only; nested patterns are not supported yet.
 
 ## 4. Patterns
 

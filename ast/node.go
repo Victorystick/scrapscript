@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/Victorystick/scrapscript/scanner"
@@ -34,7 +35,7 @@ const (
 	Record                // Main: '{'. Lhs: the spread record, or None. Rhs: see Record.
 	Access                // Main: the key. Lhs: the record.
 	List                  // Main: '['. Lhs..Rhs: the elements, then the ']' token.
-	Where                 // Main: the bound name. Lhs: the body. Rhs: see Where.
+	Where                 // Main: the bound name, or a destructuring binding's '{'. Lhs: the body. Rhs: see Where.
 	Import                // Main: '$', followed by the algorithm and hash tokens, or a path's TEXT token.
 
 	// Types. A type also uses Ident and Import for names, Literal for (),
@@ -198,6 +199,48 @@ func (se *SourceExpr) Where(n Node) (body Node, id Tok, typ, val Node) {
 // Sort returns true if a Where node is a sort binding, which binds a type.
 func (se *SourceExpr) Sort(n Node) bool {
 	return se.Extra[se.Data[n].Rhs+2] != 0
+}
+
+// Destructured returns the token of the '{' whose destructuring binding the
+// Where node n is part of, and whether it is. The binding of the record
+// itself has it as its main token; a binding of one of the record's fields,
+// whose value is the field's Access, has it as the Ident it accesses.
+func (se *SourceExpr) Destructured(n Node) (brace Tok, ok bool) {
+	if se.Sort(n) {
+		return 0, false
+	}
+	if t := se.Mains[n]; se.Tokens.Kinds[t] == token.LBRACE {
+		return t, true
+	}
+	_, _, _, val := se.Where(n)
+	if se.Kinds[val] != Access {
+		return 0, false
+	}
+	rec, _ := se.Access(val)
+	if t := se.Mains[rec]; se.Kinds[rec] == Ident && se.Tokens.Kinds[t] == token.LBRACE {
+		return t, true
+	}
+	return 0, false
+}
+
+// Name returns the name that the token t of a Where or Ident node binds or
+// refers to: its text, or for the '{' of a destructuring binding, which
+// binds the record that it destructures, a name unique to the binding that
+// no identifier can have.
+func (se *SourceExpr) Name(t Tok) string {
+	if se.Tokens.Kinds[t] == token.LBRACE {
+		return "{" + strconv.Itoa(int(t))
+	}
+	return se.TokenText(t)
+}
+
+// NameBytes returns Name(t) as bytes. Comparing them with a string, as in
+// string(b) == name, doesn't allocate.
+func (se *SourceExpr) NameBytes(t Tok) []byte {
+	if se.Tokens.Kinds[t] == token.LBRACE {
+		return []byte(se.Name(t))
+	}
+	return se.TokenBytes(t)
 }
 
 // Hash returns the scheme and hex digest of an Import node that refers to a

@@ -57,3 +57,36 @@ func TestByHttp(t *testing.T) {
 		t.Error("unexpected read bytes")
 	}
 }
+
+func TestPushByHttp(t *testing.T) {
+	trans := transport{}
+	client := http.Client{Transport: &trans}
+	f := ByHttpWithClient("https://scraps.oseg.dev/", &client)
+
+	// Happy case.
+	trans.resp = &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(bytes.NewReader([]byte("abc"))),
+	}
+	key, err := f.PushScrap([]byte("1"))
+	if err != nil || key != "abc" {
+		t.Errorf("expected key abc, got %q, %v", key, err)
+	}
+	if trans.req.Method != "POST" || trans.req.Header.Get("Content-Type") != "application/scrap" {
+		t.Errorf("unexpected request %s %s", trans.req.Method, trans.req.Header)
+	}
+
+	// Error case: the body is the server's message, not a key.
+	trans.resp = &http.Response{
+		Status:     "422 Unprocessable Entity",
+		StatusCode: 422,
+		Body:       io.NopCloser(bytes.NewReader([]byte("type error\n"))),
+	}
+	key, err = f.PushScrap([]byte("1"))
+	if err == nil || err.Error() != "http post failed with 422 Unprocessable Entity: type error" {
+		t.Errorf("expected HTTP 422 error, got %v", err)
+	}
+	if key != "" {
+		t.Errorf("unexpected key %q", key)
+	}
+}

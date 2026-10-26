@@ -2,7 +2,6 @@ package parser
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/scanner"
@@ -30,15 +29,10 @@ type parser struct {
 	errors scanner.Errors
 }
 
-// debug receives a parse failure's stack of parse functions, if set.
-var debug io.Writer
-var stack []string
-
+// next advances to the next token. The parser only consumes tokens it has
+// checked, and never EOF, which is last, so next stays within the tokens.
 func (p *parser) next() {
-	// The last token is EOF; stay there.
-	if p.i < len(p.tokens.Kinds)-1 {
-		p.i++
-	}
+	p.i++
 	p.tok = p.tokens.Kinds[p.i]
 }
 
@@ -88,10 +82,16 @@ func (p *parser) flush(start int) (lhs, rhs uint32) {
 	return lhs, uint32(len(p.extra))
 }
 
+// expect fails unless the current token is tok. Its failure is a separate
+// call, so that the check itself is cheap enough to inline.
 func (p *parser) expect(tok token.Token) {
 	if p.tok != tok {
-		p.bail(fmt.Sprint("Expected ", tok, " got ", p.tok))
+		p.expected(tok)
 	}
+}
+
+func (p *parser) expected(tok token.Token) {
+	p.bail(fmt.Sprint("Expected ", tok, " got ", p.tok))
 }
 
 func (p *parser) unexpected() {
@@ -99,9 +99,6 @@ func (p *parser) unexpected() {
 }
 
 func (p *parser) bail(msg string) {
-	if debug != nil {
-		fmt.Fprintln(debug, stack)
-	}
 	panic(p.source.Error(p.span(), msg))
 }
 
@@ -145,9 +142,6 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	p.add(ast.Invalid, 0, 0, 0) // ast.None
 
 	expr := p.parseExpr()
-	if debug != nil && p.tok != token.EOF {
-		fmt.Fprintf(debug, "%#v\n", expr)
-	}
 	p.expect(token.EOF)
 
 	se = ast.SourceExpr{
@@ -162,20 +156,10 @@ func Parse(source *token.Source) (se ast.SourceExpr, err error) {
 	return
 }
 
-// trace records a parse function on the debug stack, and returns a function
-// that removes it.
-func trace(name string) func() {
-	stack = append(stack, name)
-	return func() { stack = stack[:len(stack)-1] }
-}
-
 // parseExpr parses an expression, the loosest form:
 //
 //	expr = body { ";" binding }
 func (p *parser) parseExpr() ast.Node {
-	if debug != nil {
-		defer trace("parseExpr")()
-	}
 	expr := p.parseBody()
 
 	for p.tok == token.WHERE {
@@ -199,9 +183,6 @@ func (p *parser) parseBody() ast.Node {
 // appear when arm is set: the patterns and bodies of match arms are binary
 // expressions only, and stop before pipes and composition.
 func (p *parser) parseBinary(min int, arm bool) ast.Node {
-	if debug != nil {
-		defer trace("parseBinary")()
-	}
 	left := p.parseOperand(!arm && min <= token.RCOMP.Precedence())
 	for {
 		op, at := p.tok, p.at()
@@ -246,9 +227,6 @@ func (p *parser) parseOperand(open bool) ast.Node {
 //
 // A tag in argument position takes no payload.
 func (p *parser) parseApp() ast.Node {
-	if debug != nil {
-		defer trace("parseApp")()
-	}
 	if p.tok == token.OPTION {
 		return p.parseVariantExpr()
 	}
@@ -289,9 +267,6 @@ func startsAtom(tok token.Token) bool {
 }
 
 func (p *parser) parseAtom() ast.Node {
-	if debug != nil {
-		defer trace("parseAtom")()
-	}
 	switch p.tok {
 	case token.IDENT:
 		return p.ident()
@@ -339,11 +314,9 @@ func (p *parser) ident() ast.Node {
 }
 
 func (p *parser) parseWhereExpr(x ast.Node) ast.Node {
-	if debug != nil {
-		stack = append(stack, "parseWhereExpr")
-		defer func() { stack = stack[:len(stack)-1] }()
+	if p.tok == token.LBRACE {
+		return p.parseDestructure(x)
 	}
-
 	id := p.identTok()
 	typ := ast.None
 	if p.tok == token.DEFINE {
@@ -364,6 +337,56 @@ func (p *parser) parseWhereExpr(x ast.Node) ast.Node {
 	return p.add(ast.Where, id, uint32(x), p.addExtra(typ, val, 0))
 }
 
+// parseDestructure parses a binding that destructures a record into names,
+// whose fields may be punned:
+//
+//	binding = "{" field { "," field } "}" "=" body
+//	field   = NAME [ "=" NAME ]
+//
+// It is sugar: a binding of the record to the name of the '{' token, which
+// no identifier can have (see ast.SourceExpr.Name), followed by a binding of
+// each name to its field of that record. So `{ a, b = c } = r` is
+// `{ = r ; a = {.a ; c = {.b`, which binds a and c in the group.
+func (p *parser) parseDestructure(x ast.Node) ast.Node {
+	brace := p.at()
+	p.next()
+
+	// Fields are collected as key token, name token pairs.
+	top := len(p.scratch)
+	for p.tok != token.RBRACE {
+		key := p.identTok()
+		name := key
+		if p.tok == token.ASSIGN {
+			p.next()
+			name = p.identTok()
+		}
+		p.scratch = append(p.scratch, ast.Node(key), ast.Node(name))
+
+		if p.tok != token.COMMA {
+			break
+		}
+		p.next()
+		p.noTrailingComma(token.RBRACE, "record")
+	}
+	p.expect(token.RBRACE)
+	if len(p.scratch) == top {
+		p.bail("A destructuring binding must bind a name.")
+	}
+	p.next()
+	p.expect(token.ASSIGN)
+	p.next()
+
+	val := p.parseBody()
+	x = p.add(ast.Where, brace, uint32(x), p.addExtra(ast.None, val, 0))
+	for i := top; i < len(p.scratch); i += 2 {
+		rec := p.add(ast.Ident, brace, 0, 0)
+		field := p.add(ast.Access, ast.Tok(p.scratch[i]), uint32(rec), 0)
+		x = p.add(ast.Where, ast.Tok(p.scratch[i+1]), uint32(x), p.addExtra(ast.None, field, 0))
+	}
+	p.scratch = p.scratch[:top]
+	return x
+}
+
 // isKind returns true if the annotation t is a kind: a type whose final
 // result is `type`, such as `type` or `type -> type`.
 func (p *parser) isKind(t ast.Node) bool {
@@ -378,10 +401,6 @@ func (p *parser) isKind(t ast.Node) bool {
 //	type  = NAME "=>" type | arrow
 //	arrow = tapp [ "->" arrow ]
 func (p *parser) parseType() ast.Node {
-	if debug != nil {
-		stack = append(stack, "parseType")
-		defer func() { stack = stack[:len(stack)-1] }()
-	}
 	if p.tok == token.IDENT && p.peek() == token.FORALL {
 		param := p.identTok()
 		p.next()
@@ -507,6 +526,10 @@ func (p *parser) parseRow(close token.Token, width int, label func()) (tail ast.
 	return tail, info
 }
 
+// parseRecord parses a record, whose fields may be punned:
+//
+//	record = "{" [ ".." expr "," ] [ field { "," field } ] "}"
+//	field  = NAME [ "=" expr ]
 func (p *parser) parseRecord() ast.Node {
 	p.expect(token.LBRACE)
 	start := p.at()
@@ -532,10 +555,15 @@ func (p *parser) parseRecord() ast.Node {
 
 		key := p.identTok()
 
-		p.expect(token.ASSIGN)
-		p.next()
-
-		x := p.parseExpr()
+		// A field without a value is punned: `{ x }` is `{ x = x }`, and its
+		// value is the key as an identifier.
+		var x ast.Node
+		if p.tok == token.ASSIGN {
+			p.next()
+			x = p.parseExpr()
+		} else {
+			x = p.add(ast.Ident, key, 0, 0)
+		}
 
 		p.scratch = append(p.scratch, ast.Node(key), x)
 
@@ -564,10 +592,6 @@ func (p *parser) noTrailingComma(close token.Token, what string) {
 }
 
 func (p *parser) parseList() ast.Node {
-	if debug != nil {
-		stack = append(stack, "parseList")
-		defer func() { stack = stack[:len(stack)-1] }()
-	}
 	p.expect(token.LBRACK)
 	start := p.at()
 	p.next()
@@ -600,9 +624,6 @@ var armPrec = token.LT.Precedence()
 //
 //	arm = "|" pattern { "->" pattern } "->" arm-body
 func (p *parser) parseMatchFuncExpr() ast.Node {
-	if debug != nil {
-		defer trace("parseMatchFuncExpr")()
-	}
 	top := len(p.scratch)
 
 	arity := 0
@@ -674,10 +695,6 @@ func (p *parser) parseTag() ast.Node {
 // parseVariantExpr parses a tag value, which takes the next atom as its
 // payload, if there is one. A tag payload is itself nullary.
 func (p *parser) parseVariantExpr() ast.Node {
-	if debug != nil {
-		stack = append(stack, "parseVariantExpr")
-		defer func() { stack = stack[:len(stack)-1] }()
-	}
 	tag := p.tagTok()
 	payload := ast.None
 

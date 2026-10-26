@@ -136,12 +136,16 @@ and `get`, `put` and `modify` for state.
 ```scrap
 number ["a", "b"] 10       -- { value = [{ n = 10, x = "a" }, { n = 11, x = "b" }], state = 12 }
 ; number : list text -> m.state int (list { n : int, x : text }) =
-    m.traverse s (x ->
-      s.bind m.get <| n ->
-      (m.ops s).then (m.put (n + 1)) (s.pure { n = n, x = x }))
-; s = m.state-monad
+    m.traverse m.state-monad (x ->
+      bind m.get <| n ->
+      then (m.put (n + 1)) (pure { n = n, x = x }))
+; { bind, pure } = m.state-monad
+; { then } = m.ops m.state-monad
 ; m = $"./monad.scrap"
 ```
+
+Destructuring a monad in a where-clause names its operations, and keeps them
+polymorphic: each field becomes a binding of its own, which is generalized.
 
 ## Prototype
 
@@ -174,9 +178,10 @@ unchanged.
 
 ## Open
 
-- **Patterns.** Destructuring a polymorphic field, `| { pure = p } -> …`,
-  binds `p` at one type, since a match function's patterns are inferred
-  before its argument. Field access keeps the polymorphism.
+- **Patterns.** Destructuring a polymorphic field in a match function,
+  `| { pure = p } -> …`, binds `p` at one type, since its patterns are
+  inferred before its argument. Field access, and destructuring in a
+  where-clause, keep the polymorphism.
 - **Kinds of polymorphic fields' variables.** Rows (`r => { a : int, ..r }
   -> int`) and constructors are rejected; rows would need presence flags
   under a quantifier.

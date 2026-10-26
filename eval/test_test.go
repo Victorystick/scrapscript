@@ -93,10 +93,11 @@ func TestMonadLibrary(t *testing.T) {
 , state = t.eq (number ["a", "b"] 10) { value = [{ n = 10, x = "a" }, { n = 11, x = "b" }], state = 12 }
 }
 ; number : list text -> m.state int (list { n : int, x : text }) =
-    m.traverse s (x ->
-      s.bind m.get   <| n ->
-      (m.ops s).then (m.put (n + 1)) (s.pure { n = n, x = x }))
-; s = m.state-monad
+    m.traverse m.state-monad (x ->
+      bind m.get <| n ->
+      then (m.put (n + 1)) (pure { n = n, x = x }))
+; { bind, pure } = m.state-monad
+; { then } = m.ops m.state-monad
 ; o = m.ops m.option-monad
 ; m = $"./monad.scrap"
 ; t = $"./test.scrap"`)
