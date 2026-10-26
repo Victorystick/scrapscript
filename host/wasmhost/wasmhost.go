@@ -1,6 +1,7 @@
 // Package wasmhost is what hosts that are WebAssembly modules share, for
-// WASI preview 1 (GOOS=wasip1), as cmd/scrap-wasm is. Such a host has no
-// files or network of its own: its host, such as a web page, gives it the scraps to run with
+// WASI preview 1 (GOOS=wasip1), as cmd/scrap-wasm and the web platform's
+// host cmd/example/scrap-web are. Such a host has no files or network of
+// its own: its host, such as a web page, gives it the scraps to run with
 // each request, and it answers requests through its exports. Build one
 // with:
 //
