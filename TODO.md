@@ -236,6 +236,14 @@ first. 1 and 2 change what the language promises.
       knot where a cycle would pass through an enum, as the unifier
       already does for annotated ones? Weigh what it costs in error
       messages and in printed types without an alias to name them.
+- [ ] A typo in a tag can reach a wildcard arm unnoticed. A match without
+      a catch-all closes its argument, and an annotation rejects tags it
+      doesn't list, but an unannotated `update = | #increment -> … | _ ->
+      m -> m` accepts `#incremnt` from a view, and the click does nothing.
+      Elm rejects the typo. Options: platforms name the message type in
+      their interface (`program model msg`), so that scripts annotate it;
+      and a warning for a tag that is built but that only wildcard arms
+      match.
 
 ## Accepted
 
