@@ -1,0 +1,12 @@
+-- The web platform's contract: an app in the Elm architecture.
+--
+-- An app keeps its own model, of type model, which the host never inspects.
+-- The host shows the page that `view` makes of the model, starting with
+-- `init`, and passes `update` each message that the page sends, with the
+-- model, for the next one.
+
+app
+
+; app   : type -> type -> type = model => msg => { init : model, update : msg -> model -> model, view : model -> html msg }
+; html  : type -> type = msg => [#text text, #el { tag : text, attrs : list (attr msg), children : list (html msg) }]
+; attr  : type -> type = msg => [#attr { name : text, value : text }, #on { event : text, msg : msg }, #on-value { event : text, msg : text -> msg }]
