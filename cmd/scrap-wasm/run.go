@@ -16,6 +16,11 @@
 // module never waits on the host. A source whose sha256 isn't its hash is
 // an error.
 //
+// A request may also have drafts, by path, {"drafts": {"lib.scrap": "..."}},
+// as an editor has unsaved files. The scrap and the drafts refer to them by
+// path, $"./lib.scrap", as an unnamed draft at the root, as the scrap CLI
+// reads standard input.
+//
 // A request's "command" says what to do with a scrap that checks, as the
 // commands of the scrap CLI do:
 //
@@ -40,6 +45,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"path"
 	"sort"
 	"strconv"
 	"unicode/utf16"
@@ -55,6 +62,7 @@ func main() {}
 type request struct {
 	Source  string            `json:"source"`
 	Sources map[string]string `json:"sources"`
+	Drafts  map[string]string `json:"drafts"`
 	Command string            `json:"command"`
 }
 
@@ -89,6 +97,13 @@ func handle(input []byte) []byte {
 	return out
 }
 
+// noFiles has no files, as the drafts that scraps refer to are read first.
+type noFiles struct{}
+
+func (noFiles) Open(name string) (fs.File, error) {
+	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+}
+
 // sources is a Fetcher of the scraps in a request, by hash.
 type sources map[string]string
 
@@ -117,11 +132,18 @@ func respond(req request) response {
 	}
 	env := eval.NewEnvironment()
 	env.UseFetcher(sources(req.Sources))
+	// missing reads the drafts that the scrap refers to; any other path is
+	// to a file that doesn't exist.
+	env.UseDrafts(noFiles{})
 	s, err := env.Read([]byte(req.Source))
 	if err != nil {
 		return response{Error: token.Render(err, nil)}
 	}
-	if missing := missing(env, s, req.Sources); len(missing) > 0 {
+	missing, err := missing(env, s, req)
+	if err != nil {
+		return response{Error: token.Render(err, nil)}
+	}
+	if len(missing) > 0 {
 		return response{Missing: missing}
 	}
 	t, err := env.Infer(s)
@@ -173,16 +195,38 @@ func highlights(src string) map[string][]int {
 }
 
 // missing returns the hashes of the scraps that s refers to, directly or
-// through the scraps in srcs, that aren't in srcs, sorted. References that
-// can't be fetched for other reasons are left for inference to report.
-func missing(env *eval.Environment, s *eval.Scrap, srcs map[string]string) []string {
+// through the scraps in req's sources or the drafts, that aren't in its
+// sources, sorted. It reads the drafts that s refers to as it goes, and fails
+// if one doesn't parse. References that can't be resolved for other
+// reasons are left for inference to report.
+func missing(env *eval.Environment, s *eval.Scrap, req request) ([]string, error) {
 	seen := make(map[string]bool)
+	// The paths of the drafts read so far, by scrap; s is unnamed.
+	names := map[*eval.Scrap]string{s: ""}
 	var missing []string
-	var visit func(s *eval.Scrap)
-	visit = func(s *eval.Scrap) {
+	var visit func(s *eval.Scrap) error
+	visit = func(s *eval.Scrap) error {
 		expr := s.Expr()
 		for _, n := range expr.Imports() {
-			if _, ok := expr.Path(n); ok {
+			if p, ok := expr.Path(n); ok {
+				from, ok := names[s]
+				if !ok {
+					continue // A published scrap can't refer to a path.
+				}
+				name := path.Join(path.Dir(from), p)
+				src, ok := req.Drafts[name]
+				if !ok || seen[name] || !fs.ValidPath(name) {
+					continue
+				}
+				seen[name] = true
+				draft, err := env.ReadDraft(name, []byte(src))
+				if err != nil {
+					return fmt.Errorf("%s: %w", name, err)
+				}
+				names[draft] = name
+				if err := visit(draft); err != nil {
+					return err
+				}
 				continue
 			}
 			scheme, digest := expr.Hash(n)
@@ -190,16 +234,21 @@ func missing(env *eval.Environment, s *eval.Scrap, srcs map[string]string) []str
 				continue
 			}
 			seen[digest] = true
-			if _, ok := srcs[digest]; !ok {
+			if _, ok := req.Sources[digest]; !ok {
 				missing = append(missing, digest)
 				continue
 			}
 			if dep, err := env.Fetch(scheme, digest); err == nil {
-				visit(dep)
+				if err := visit(dep); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
 	}
-	visit(s)
+	if err := visit(s); err != nil {
+		return nil, err
+	}
 	sort.Strings(missing)
-	return missing
+	return missing, nil
 }

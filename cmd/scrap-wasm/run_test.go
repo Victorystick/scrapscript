@@ -29,7 +29,6 @@ func TestCheck(t *testing.T) {
 		{"checks", request{Source: `1 + 2`}, response{Type: "int"}, ""},
 		{"type error", request{Source: `1 + "a"`}, response{}, "cannot unify 'text' with 'int'"},
 		{"parse error", request{Source: `1 +`}, response{}, "parse error"},
-		{"path", request{Source: `$"./inc.scrap" 1`}, response{}, "cannot refer to a path here"},
 		{"missing", request{Source: use}, response{Missing: sorted(hash(inc), hash(twice))}, ""},
 		{"missing transitively", request{
 			Source:  `$source:` + hash(use) + ` 1`,
@@ -64,6 +63,32 @@ func TestCheck(t *testing.T) {
 		{"no tests", request{Source: `{}`, Command: "test"}, response{Type: "{}", Results: []result{}}, ""},
 		{"not a test scrap", request{Source: `1`, Command: "test"}, response{}, "is not a test case"},
 		{"unknown command", request{Source: `1`, Command: "push"}, response{}, `bad request: unknown command "push"`},
+		{"drafts", request{
+			Source: `$"./inc.scrap" 1`,
+			Drafts: map[string]string{"inc.scrap": inc, "broken.scrap": `1 +`},
+		}, response{Type: "int"}, ""},
+		{"drafts relative to drafts", request{
+			Source: `$"./lib/a.scrap"`,
+			Drafts: map[string]string{"lib/a.scrap": `$"./b.scrap"`, "lib/b.scrap": `1`},
+		}, response{Type: "int"}, ""},
+		{"missing through drafts", request{
+			Source: `$"./use.scrap"`,
+			Drafts: map[string]string{"use.scrap": use},
+		}, response{Missing: sorted(hash(inc), hash(twice))}, ""},
+		{"no such draft", request{Source: `$"./inc.scrap"`}, response{}, "inc.scrap: file does not exist"},
+		{"draft parse error", request{
+			Source: `$"./a.scrap"`,
+			Drafts: map[string]string{"a.scrap": `1 +`},
+		}, response{}, "a.scrap: parse error"},
+		{"draft cycle", request{
+			Source: `$"./a.scrap"`,
+			Drafts: map[string]string{"a.scrap": `$"./b.scrap"`, "b.scrap": `$"./a.scrap"`},
+		}, response{}, "refers back to this scrap"},
+		{"published scraps can't refer to drafts", request{
+			Source:  `$source:` + hash(`$"./inc.scrap"`),
+			Sources: map[string]string{hash(`$"./inc.scrap"`): `$"./inc.scrap"`},
+			Drafts:  map[string]string{"inc.scrap": inc},
+		}, response{}, "a published scrap cannot refer to a path"},
 		{"wrong hash", request{
 			Source:  `$source:` + hash(inc) + ` 1`,
 			Sources: map[string]string{hash(inc): twice},
