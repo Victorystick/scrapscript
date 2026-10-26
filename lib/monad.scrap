@@ -1,0 +1,88 @@
+-- monad: monads as explicit dictionaries. A monad is a record of `pure` and
+-- `bind`, whose fields are polymorphic, so each use of one chooses its types.
+-- Generic code takes the monad as its first argument, as a value:
+--
+--   m.traverse m.option-monad text/to-int ["1", "2"] ; m = $"./monad.scrap"
+--
+-- `ops d` derives the other operations from a monad d once, so that a scrap
+-- can name them: `o.map f x ; o = m.ops m.option-monad`.
+--
+-- Exports `monad m` and the types of its instances as type members:
+-- `m.monad m.option`, `m.result text int`, `m.state int`.
+
+{ monad        = monad
+, option       = option
+, result       = result
+, state        = state
+, option-monad = option-monad
+, result-monad = result-monad
+, list-monad   = list-monad
+, state-monad  = state-monad
+, ops          = ops
+, traverse     = traverse
+, sequence     = sequence
+, get          = get
+, put          = put
+, modify       = modify
+}
+
+; monad : (type -> type) -> type = m =>
+    { pure : a => a -> m a
+    , bind : a => b => m a -> (a -> m b) -> m b
+    }
+
+; option : type -> type = a => [#some a, #none]
+
+; result : type -> type -> type = e => a => [#ok a, #err e]
+
+-- A computation that threads a state through.
+; state : type -> type -> type = s => a => s -> { value : a, state : s }
+
+; option-monad : monad option =
+    { pure = x -> #some x
+    , bind = | #some x -> f -> f x
+             | #none   -> _ -> #none
+    }
+
+; result-monad : e => monad (result e) =
+    { pure = x -> #ok x
+    , bind = | #ok x  -> f -> f x
+             | #err e -> _ -> #err e
+    }
+
+-- Each of the choices, in order.
+; list-monad : monad list =
+    { pure = x -> [x]
+    , bind = xs -> f -> list/fold [] (ys -> x -> ys ++ f x) xs
+    }
+
+; state-monad : s => monad (state s) =
+    { pure = x -> s -> { value = x, state = s }
+    , bind = m -> f -> s -> (m s |> r -> f r.value r.state)
+    }
+
+; get : s => state s s = s -> { value = s, state = s }
+
+; put : s => s -> state s () = s -> _ -> { value = (), state = s }
+
+; modify : s => (s -> s) -> state s () = f -> s -> { value = (), state = f s }
+
+-- The operations that a monad gives.
+; ops : m => monad m ->
+    { map  : a => b => (a -> b) -> m a -> m b
+    , join : a => m (m a) -> m a
+    , then : a => b => m a -> m b -> m b
+    } = d ->
+    { map  = f -> x -> d.bind x (y -> d.pure (f y))
+    , join = x -> d.bind x (y -> y)
+    , then = x -> y -> d.bind x (_ -> y)
+    }
+
+-- Applies f to each item in order, and collects the results.
+; traverse : m => a => b => monad m -> (a -> m b) -> list a -> m (list b) = d -> f ->
+    list/fold (d.pure []) (acc -> x ->
+      d.bind acc   <| ys ->
+      d.bind (f x) <| y ->
+      d.pure (ys +< y))
+
+; sequence : m => a => monad m -> list (m a) -> m (list a) = d -> traverse d (x -> x)

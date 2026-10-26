@@ -75,3 +75,40 @@ func TestTestRejects(t *testing.T) {
 		}
 	}
 }
+
+// lib/monad.scrap's instances, and generic code that takes them.
+func TestMonadLibrary(t *testing.T) {
+	results, err := testScrap(t, `{ traverse =
+    { all = t.eq (m.traverse m.option-monad text/to-int ["1", "2"]) (#some [1, 2])
+    , stops = t.eq (m.traverse m.option-monad text/to-int ["1", "x"]) #none
+    }
+, sequence =
+    { result = t.eq (m.sequence m.result-monad [#ok 1, #err "no", #err "late"]) (#err "no")
+    , list = t.eq (m.sequence m.list-monad [[1, 2], [3]]) [[1, 3], [2, 3]]
+    }
+, ops =
+    { map = t.eq (o.map (x -> x * 2) (#some 2)) (#some 4)
+    , join = t.eq ((m.ops m.list-monad).join [[1], [2, 3]]) [1, 2, 3]
+    }
+, state = t.eq (number ["a", "b"] 10) { value = [{ n = 10, x = "a" }, { n = 11, x = "b" }], state = 12 }
+}
+; number : list text -> m.state int (list { n : int, x : text }) =
+    m.traverse s (x ->
+      s.bind m.get   <| n ->
+      (m.ops s).then (m.put (n + 1)) (s.pure { n = n, x = x }))
+; s = m.state-monad
+; o = m.ops m.option-monad
+; m = $"./monad.scrap"
+; t = $"./test.scrap"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.Failed {
+			t.Errorf("%s: %s", r.Path, r.Message)
+		}
+	}
+	if len(results) != 7 {
+		t.Errorf("got %d results, want 7: %v", len(results), results)
+	}
+}
