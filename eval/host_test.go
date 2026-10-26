@@ -56,6 +56,37 @@ func TestCheck(t *testing.T) {
 			t.Errorf("%s: expected an error containing %q, got %v", f.source, f.error, err)
 		}
 	}
+	// A program that runs until the input ends. Its step misspells the
+	// state #running, which only the catch-all arm would take.
+	const typo = `{ init = { state = #running, out = "", next = #read-line }, step = step }
+; step = | #eof    -> _        -> { state = #done,   out = "", next = #exit 0 }
+         | #line _ -> #running -> { state = #runing, out = "", next = #read-line }
+         | _       -> _        -> { state = #done,   out = "", next = #exit 1 }`
+	fixed := strings.Replace(typo, "#runing", "#running", 1)
+	annotate := func(s string) string {
+		return strings.Replace(s, "; step =", `; state : type = [#running, #done]
+; step : [#line text, #eof] -> state -> { state : state, out : text, next : [#read-line, #exit int] } =`, 1)
+	}
+	for _, f := range []struct{ name, source, error string }{
+		{"typo", typo, `'[ #done, #runing, #running, ..a ]' is open`},
+		{"fixed", fixed, `'[ #done, #running, ..a ]' is open`},
+		{"annotated typo", annotate(typo), `cannot unify`},
+		{"annotated", annotate(fixed), ``},
+		{"no catch-all", `{ init = { state = #running, out = "", next = #read-line }, step = step }
+; step = | #eof    -> #running -> { state = #done,    out = "", next = #exit 0 }
+         | #eof    -> #done    -> { state = #done,    out = "", next = #exit 0 }
+         | #line _ -> #running -> { state = #running, out = "", next = #read-line }
+         | #line _ -> #done    -> { state = #done,    out = "", next = #exit 1 }`, ``},
+	} {
+		err := e.Check(read(t, e, f.source), iface)
+		if f.error == "" && err != nil {
+			t.Errorf("%s: %v", f.name, err)
+		}
+		if f.error != "" && (err == nil || !strings.Contains(err.Error(), f.error)) {
+			t.Errorf("%s: expected an error containing %q, got %v", f.name, f.error, err)
+		}
+	}
+
 	if err := e.Check(read(t, e, counter), read(t, e, `1`)); err == nil {
 		t.Errorf("expected checking against a value to fail")
 	}

@@ -263,6 +263,13 @@ func (e *Environment) Check(s, iface *Scrap) error {
 		strs, where := e.reg.Strings(got, want)
 		return fmt.Errorf("does not implement the interface: '%s' is not '%s'%s", strs[0], strs[1], where)
 	}
+	// The host passes the values that s makes back into it, so nothing else
+	// can add to the types that s chose. A row still open would let a
+	// catch-all arm take tags that no arm names, such as a misspelt one.
+	if open, ok := e.reg.OpenRow(want); ok {
+		strs, where := e.reg.Strings(open)
+		return fmt.Errorf("does not implement the interface: '%s' is open; name its labels in an annotation, or match it without a catch-all arm%s", strs[0], where)
+	}
 	return nil
 }
 
