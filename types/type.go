@@ -31,6 +31,10 @@ const (
 	extendKind             // aux: the label. a: its field. b: the rest of the row.
 	fieldKind              // An entry of a row. a: its payload. b: its flag: presentRef, absentRef or a variable.
 	rigidKind              // A rigid type variable, equal only to itself. aux: its level. a: its name's label. b: its lacks.
+	boundKind              // A variable that a forall or lam binds. a: its name's label.
+	forallKind             // A polymorphic field's type, as `a => T`. a: its bound variable. b: T.
+	lamKind                // A type constructor, as `a => T`. a: its bound variable. b: T.
+	appKind                // A type constructor that is a variable, applied. a: the constructor. b: the argument.
 )
 
 // A node is a type in a Registry. Its kind says how it uses the other fields.
@@ -369,9 +373,22 @@ func (r *Registry) enter() { r.level++ }
 func (r *Registry) exit() { r.level-- }
 
 // Resolve follows bound variables to the type they are bound to.
+//
+// An application of a constructor that is bound to a lam reduces to the
+// lam's body, with its variable replaced by the argument, and links to it.
 func (r *Registry) Resolve(ref TypeRef) TypeRef {
 	n := r.at(ref)
-	if n.kind != linkKind {
+	switch n.kind {
+	case linkKind:
+	case appKind:
+		head := r.Resolve(n.a)
+		if r.at(head).kind != lamKind {
+			return ref
+		}
+		target := r.Resolve(r.beta(head, n.b))
+		r.link(ref, target)
+		return target
+	default:
 		return ref
 	}
 	target := r.Resolve(n.a)
@@ -380,6 +397,48 @@ func (r *Registry) Resolve(ref TypeRef) TypeRef {
 		r.set(ref, n)
 	}
 	return target
+}
+
+// beta returns the body of the lam or forall, with its variable replaced by
+// arg.
+func (r *Registry) beta(lam, arg TypeRef) TypeRef {
+	n := r.at(lam)
+	return r.substitute(n.b, map[TypeRef]TypeRef{n.a: arg})
+}
+
+// substitute copies ref, replacing the variables that sub maps, and only
+// those: generalized ones stay, as part of the scheme that ref is in.
+func (r *Registry) substitute(ref TypeRef, sub map[TypeRef]TypeRef) TypeRef {
+	in := instantiator{r: r, fresh: sub, only: true}
+	return in.copy(ref)
+}
+
+// bound returns a new variable named name, for a forall or lam to bind.
+func (r *Registry) bound(name string) TypeRef {
+	return r.add(node{kind: boundKind, a: TypeRef(r.labels.Of(name))})
+}
+
+// forall returns the type of a polymorphic field, `v => body`, where v is
+// a bound variable.
+func (r *Registry) forall(v, body TypeRef) TypeRef {
+	return r.add(node{kind: forallKind, a: v, b: body})
+}
+
+// lam returns the type constructor `v => body`, where v is a bound
+// variable.
+func (r *Registry) lam(v, body TypeRef) TypeRef {
+	return r.add(node{kind: lamKind, a: v, b: body})
+}
+
+// app returns the type constructor fn applied to arg.
+func (r *Registry) app(fn, arg TypeRef) TypeRef {
+	return r.add(node{kind: appKind, a: fn, b: arg})
+}
+
+// skolem returns a new rigid variable that stands for the bound variable v,
+// as one that a forall's user can't choose.
+func (r *Registry) skolem(v TypeRef) TypeRef {
+	return r.add(node{kind: rigidKind, aux: r.level, a: r.at(v).a})
 }
 
 func (r *Registry) link(v, to TypeRef) {
@@ -403,8 +462,10 @@ func (r *Registry) generalize(ref TypeRef) {
 		}
 	case listKind, recordKind:
 		r.generalize(n.a)
-	case funcKind, extendKind, fieldKind:
+	case funcKind, extendKind, fieldKind, appKind:
 		r.generalize(n.a)
+		r.generalize(n.b)
+	case forallKind, lamKind:
 		r.generalize(n.b)
 	}
 }
@@ -416,7 +477,8 @@ func (r *Registry) Instantiate(ref TypeRef) TypeRef {
 }
 
 // instantiate copies ref, replacing generalized variables by fresh ones,
-// or by what fresh maps them to.
+// or by what fresh maps them to. Fresh may also map bound and rigid
+// variables, which are replaced only if it does.
 func (r *Registry) instantiate(ref TypeRef, fresh map[TypeRef]TypeRef) TypeRef {
 	in := instantiator{r: r, fresh: fresh}
 	return in.copy(ref)
@@ -425,6 +487,8 @@ func (r *Registry) instantiate(ref TypeRef, fresh map[TypeRef]TypeRef) TypeRef {
 type instantiator struct {
 	r     *Registry
 	fresh map[TypeRef]TypeRef
+	// Whether to replace only the variables in fresh.
+	only bool
 	// The copies of the enums copied so far, or NoType for those being
 	// copied, which recursive types refer back to.
 	enums map[TypeRef]TypeRef
@@ -439,6 +503,12 @@ func (in *instantiator) copy(ref TypeRef) TypeRef {
 	n := r.at(ref)
 	switch n.kind {
 	case genKind:
+		if in.only {
+			if v, ok := in.fresh[ref]; ok {
+				return v
+			}
+			return ref
+		}
 		if in.fresh == nil {
 			in.fresh = make(map[TypeRef]TypeRef)
 		}
@@ -449,6 +519,18 @@ func (in *instantiator) copy(ref TypeRef) TypeRef {
 		}
 		r.lack(r.Resolve(v), r.lacks(ref)...)
 		return v
+	case boundKind, rigidKind:
+		if v, ok := in.fresh[ref]; ok {
+			return v
+		}
+		return ref
+	case forallKind, lamKind, appKind:
+		a, b := in.copy(n.a), in.copy(n.b)
+		if a == n.a && b == n.b {
+			return ref
+		}
+		n.a, n.b = a, b
+		return r.add(n)
 	case enumKind:
 		if in.enums == nil {
 			in.enums, in.backs = make(map[TypeRef]TypeRef), make(map[TypeRef]TypeRef)
@@ -589,7 +671,19 @@ func (r *Registry) unify(a, b TypeRef) error {
 	if nb.kind == varKind {
 		return r.bind(b, a)
 	}
+	if na.kind == appKind {
+		return r.unifyApp(a, b)
+	}
+	if nb.kind == appKind {
+		return r.unifyApp(b, a)
+	}
 	if na.kind != nb.kind {
+		if na.kind == forallKind {
+			a, b = b, a
+		}
+		if r.at(b).kind == forallKind {
+			return r.errorf("cannot unify '%s' with '%s', which is polymorphic: give the value an annotation", a, b)
+		}
 		return r.mismatch(a, b)
 	}
 
@@ -621,8 +715,72 @@ func (r *Registry) unify(a, b TypeRef) error {
 			return err
 		}
 		return r.unify(na.a, nb.a)
+	case forallKind, lamKind:
+		// Equal if their bodies are, for a variable that neither can
+		// choose, and that nothing else may come to depend on.
+		r.enter()
+		defer r.exit()
+		sk := r.skolem(na.a)
+		return r.unify(r.beta(a, sk), r.beta(b, sk))
 	}
 	return r.mismatch(a, b)
+}
+
+// unifyApp unifies the application a, whose constructor is a variable, with
+// b. Two applications are equal if their constructors and arguments are.
+//
+// Otherwise, if a's constructor is an unbound variable applied to distinct
+// rigid variables that it can't depend on, as when a polymorphic field's
+// type `m a` meets `option a`, the constructor is the only one that gives
+// b: b with each of them abstracted (Miller's pattern fragment).
+func (r *Registry) unifyApp(a, b TypeRef) error {
+	na, nb := r.at(a), r.at(b)
+	if nb.kind == appKind {
+		if err := r.unify(na.a, nb.a); err != nil {
+			return err
+		}
+		return r.unify(na.b, nb.b)
+	}
+	head, args := r.spine(a)
+	if r.at(head).kind != varKind {
+		return r.mismatch(a, b)
+	}
+	level := r.at(head).aux
+	for i, arg := range args {
+		n := r.at(arg)
+		if n.kind != rigidKind || n.aux <= level || slices.Contains(args[:i], arg) {
+			return r.errorf("cannot infer the type constructor of '%s' from '%s': pass a value whose annotation names it, such as a monad, first", a, b)
+		}
+	}
+	vars := make([]TypeRef, len(args))
+	fresh := make(map[TypeRef]TypeRef, len(args))
+	for i, arg := range args {
+		vars[i] = r.add(node{kind: boundKind, a: r.at(arg).a})
+		fresh[arg] = vars[i]
+	}
+	lam := r.substitute(b, fresh)
+	for i := len(vars) - 1; i >= 0; i-- {
+		lam = r.lam(vars[i], lam)
+	}
+	if err := r.bind(head, lam); err != nil {
+		return err
+	}
+	return r.unify(a, b)
+}
+
+// spine returns the constructor of the application ref, and its resolved
+// arguments.
+func (r *Registry) spine(ref TypeRef) (head TypeRef, args []TypeRef) {
+	for {
+		ref = r.Resolve(ref)
+		n := r.at(ref)
+		if n.kind != appKind {
+			slices.Reverse(args)
+			return ref, args
+		}
+		args = append(args, r.Resolve(n.b))
+		ref = n.a
+	}
 }
 
 // unifyFlags unifies the flags of two fields. A label present in one row
@@ -684,10 +842,12 @@ func (r *Registry) occurs(v TypeRef, level uint32, t TypeRef) error {
 		return r.occurs(v, level, n.a)
 	case listKind, recordKind:
 		return r.occurs(v, level, n.a)
-	case funcKind, extendKind, fieldKind:
+	case funcKind, extendKind, fieldKind, appKind:
 		if err := r.occurs(v, level, n.a); err != nil {
 			return err
 		}
+		return r.occurs(v, level, n.b)
+	case forallKind, lamKind:
 		return r.occurs(v, level, n.b)
 	}
 	return nil
@@ -704,8 +864,10 @@ func (r *Registry) guarded(t, v TypeRef) bool {
 		return t != v
 	case listKind, recordKind:
 		return r.guarded(n.a, v)
-	case funcKind, extendKind, fieldKind:
+	case funcKind, extendKind, fieldKind, appKind:
 		return r.guarded(n.a, v) && r.guarded(n.b, v)
+	case forallKind, lamKind:
+		return r.guarded(n.b, v)
 	}
 	return true
 }
@@ -862,11 +1024,8 @@ func (r *Registry) Describe(res Result) string {
 	}
 	var b strings.Builder
 	for _, p := range res.Params {
-		if p.Row {
-			b.WriteString("row -> ")
-		} else {
-			b.WriteString("type -> ")
-		}
+		b.WriteString(param{row: p.Row, arity: p.Arity}.kind())
+		b.WriteString(" -> ")
 	}
 	b.WriteString("type = ")
 	for _, p := range res.Params {
@@ -973,6 +1132,11 @@ func (s *stringer) flags(ref TypeRef, input bool) {
 		s.flags(n.a, input)
 	case funcKind:
 		s.flags(n.a, !input)
+		s.flags(n.b, input)
+	case appKind:
+		s.flags(n.a, input)
+		s.flags(n.b, input)
+	case forallKind, lamKind:
 		s.flags(n.b, input)
 	case extendKind:
 		s.flags(n.a, input)
@@ -1083,8 +1247,10 @@ func (s *stringer) reserveBody(ref TypeRef) {
 		s.path = s.path[:len(s.path)-1]
 	case listKind, recordKind:
 		s.reserve(n.a)
-	case funcKind:
+	case funcKind, appKind:
 		s.reserve(n.a)
+		s.reserve(n.b)
+	case forallKind, lamKind:
 		s.reserve(n.b)
 	case extendKind:
 		// In the order that they are written, which recursive types are
@@ -1137,8 +1303,34 @@ func (s *stringer) writeBody(ref TypeRef, nesting int) {
 			panic("cannot write NoType")
 		}
 		s.WriteString(primitiveNames[ref])
-	case varKind, genKind:
+	case varKind, genKind, boundKind:
 		s.variable(ref)
+	case forallKind, lamKind:
+		if n.kind == lamKind && s.eta(n, nesting) {
+			return
+		}
+		if nesting >= argLevel {
+			s.WriteByte('(')
+		}
+		s.variable(s.reg.Resolve(n.a))
+		s.WriteString(" => ")
+		s.write(n.b, topLevel)
+		if nesting >= argLevel {
+			s.WriteByte(')')
+		}
+	case appKind:
+		head, args := s.reg.spine(ref)
+		if nesting >= atomLevel {
+			s.WriteByte('(')
+		}
+		s.write(head, atomLevel)
+		for _, arg := range args {
+			s.WriteByte(' ')
+			s.write(arg, atomLevel)
+		}
+		if nesting >= atomLevel {
+			s.WriteByte(')')
+		}
 	case rigidKind:
 		s.WriteString(s.reg.labels.Name(n.name()))
 	case listKind:
@@ -1179,6 +1371,32 @@ func (s *stringer) writeBody(ref TypeRef, nesting int) {
 	default:
 		panic("bad type-ref")
 	}
+}
+
+// eta writes the constructor `v => T v` as T, as in `monad option` or
+// `monad (state s)`, if T doesn't otherwise mention v, and reports whether it
+// did.
+func (s *stringer) eta(n node, nesting int) bool {
+	body := s.reg.Resolve(n.b)
+	free := func(ref TypeRef) bool {
+		return s.reg.substitute(ref, map[TypeRef]TypeRef{n.a: HoleRef}) == ref
+	}
+	if b := s.reg.at(body); b.kind == listKind && s.reg.Resolve(b.a) == n.a {
+		s.WriteString("list")
+		return true
+	}
+	name, ok := s.reg.names[body]
+	if !ok || len(name.args) == 0 || s.reg.Resolve(name.args[len(name.args)-1]) != n.a {
+		return false
+	}
+	args := name.args[:len(name.args)-1]
+	for _, arg := range args {
+		if !free(arg) {
+			return false
+		}
+	}
+	s.named(typeName{name.def, args}, nesting)
+	return true
 }
 
 // enum writes the tags of an enum.

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Victorystick/scrapscript/ast"
+	"github.com/Victorystick/scrapscript/label"
 	"github.com/Victorystick/scrapscript/token"
 )
 
@@ -64,9 +65,10 @@ type Result struct {
 
 // A Param is a parameter of an exported type constructor.
 type Param struct {
-	Name string
-	Var  TypeRef
-	Row  bool
+	Name  string
+	Var   TypeRef
+	Row   bool
+	Arity int // of a constructor parameter, the number of types it takes
 }
 
 // Imports gives the results of the scraps that a scrap's Import nodes refer
@@ -169,13 +171,13 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 			}
 			c.bail(x, "unbound variable: "+name)
 		}
-		return c.reg.Instantiate(bound.val)
+		return c.use(c.reg.Instantiate(bound.val))
 	case ast.Where:
 		return where(c, x, c.infer)
 	case ast.List:
 		return c.list(x)
 	case ast.Record:
-		return c.record(x)
+		return c.record(x, nil)
 	case ast.Access:
 		if c.static(x).isType() {
 			c.bail(x, fmt.Sprintf("cannot use type %s as a value", c.src.NodeText(x)))
@@ -184,7 +186,7 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 		field := c.reg.Var()
 		row := c.reg.extend(c.reg.labels.Of(c.src.TokenText(key)), field, c.reg.Var())
 		c.ensure(rec, c.infer(rec), c.reg.add(node{kind: recordKind, a: row}))
-		return field
+		return c.use(field)
 	case ast.Variant:
 		tag, payload := c.src.Variant(x)
 		typ := HoleRef
@@ -267,6 +269,53 @@ func (c *context) imported(x ast.Node) Result {
 	return res
 }
 
+// use returns the type of a use of a value of type ref. A polymorphic
+// field's type, `a => T`, is T for a fresh a, which each use chooses.
+func (c *context) use(ref TypeRef) TypeRef {
+	for {
+		ref = c.reg.Resolve(ref)
+		if c.reg.at(ref).kind != forallKind {
+			return ref
+		}
+		ref = c.reg.beta(ref, c.reg.Var())
+	}
+}
+
+// polymorphic returns the polymorphic fields of want, by label, if it is a
+// record type that has any, or nil.
+func (c *context) polymorphic(want TypeRef) map[label.ID]TypeRef {
+	n := c.reg.at(c.reg.Resolve(want))
+	if n.kind != recordKind {
+		return nil
+	}
+	var poly map[label.ID]TypeRef
+	for l, payload := range c.reg.fields(n.a) {
+		if payload = c.reg.Resolve(payload); c.reg.at(payload).kind == forallKind {
+			if poly == nil {
+				poly = make(map[label.ID]TypeRef)
+			}
+			poly[l] = payload
+		}
+	}
+	return poly
+}
+
+// checkPolymorphic checks that x has the polymorphic type want, `a => T`:
+// that it has type T for an a that it can't choose.
+func (c *context) checkPolymorphic(x ast.Node, want TypeRef) {
+	c.reg.enter()
+	defer c.reg.exit()
+	for {
+		want = c.reg.Resolve(want)
+		n := c.reg.at(want)
+		if n.kind != forallKind {
+			break
+		}
+		want = c.reg.beta(want, c.reg.skolem(n.a))
+	}
+	c.check(x, want)
+}
+
 // check checks that x has the type want. A function's parameter takes the
 // argument type of want before its body is checked, so that an annotation
 // informs the inference of the body, as for `++`.
@@ -285,6 +334,14 @@ func (c *context) check(x ast.Node, want TypeRef) {
 			return
 		}
 	}
+	if c.src.Kind(x) == ast.Record {
+		if poly := c.polymorphic(want); poly != nil {
+			ref := c.record(x, poly)
+			c.typed(x, ref)
+			c.ensure(x, ref, want)
+			return
+		}
+	}
 	c.ensure(x, c.infer(x), want)
 }
 
@@ -298,6 +355,12 @@ func (c *context) ensure(x ast.Node, got, want TypeRef) {
 func (c *context) call(x, fn, arg ast.Node) TypeRef {
 	res := c.reg.Var()
 	fnTy := c.infer(fn)
+	// A record for a function that takes one with polymorphic fields is
+	// checked against it, as those fields can't be inferred.
+	if n := c.reg.at(c.reg.Resolve(fnTy)); n.kind == funcKind && c.polymorphic(n.a) != nil {
+		c.check(arg, n.a)
+		return n.b
+	}
 	argTy := c.infer(arg)
 	c.ensure(x, fnTy, c.reg.Func(argTy, res))
 	return res
@@ -448,7 +511,9 @@ func (c *context) list(x ast.Node) TypeRef {
 	return c.reg.List(elem)
 }
 
-func (c *context) record(x ast.Node) TypeRef {
+// record infers the type of the record literal x. Its fields in poly have
+// the polymorphic types there.
+func (c *context) record(x ast.Node, poly map[label.ID]TypeRef) TypeRef {
 	rest, fields := c.src.Record(x)
 
 	// A spread record may only have its existing fields updated, keeping
@@ -477,6 +542,12 @@ func (c *context) record(x ast.Node) TypeRef {
 				members = make(map[string]bool)
 			}
 			members[k] = true
+			continue
+		}
+		if t, ok := poly[c.reg.labels.Of(k)]; ok {
+			c.checkPolymorphic(v, t)
+			c.typed(v, t)
+			ref[k] = t
 			continue
 		}
 		ref[k] = c.infer(v)

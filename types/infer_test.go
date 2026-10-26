@@ -273,6 +273,24 @@ func TestInfer(t *testing.T) {
 		// Different unrollings of one type are the same type, and unify.
 		{`same ; same : t -> u = x -> x ; t : type = [#a t, #z] ; u : type = [#a [#a u, #z], #z]`,
 			"t -> t\n; t : type = [ #a t, #z ]"},
+		// A polymorphic field: each use chooses its type.
+		{`{ a = r.id 1, b = r.id "" } ; r : { id : a => a -> a } = { id = x -> x }`, `{ a : int, b : text }`},
+		{`f ; f : { id : a => a -> a } -> int = r -> r.id 1`, `{ id : a => a -> a } -> int`},
+		{`f { id = x -> x } ; f : { id : a => a -> a } -> int = r -> r.id 1`, `int`},
+		// Type constructors as arguments.
+		{`x ; x : t list = [1] ; t : (type -> type) -> type = f => f int`, `list int`},
+		{`x ; x : t (either text) = #r 1 ; t = f => f int ; either = a => b => [#l a, #r b]`,
+			"either text int\n; either = a => b => [ #l a, #r b ]"},
+		{`f ; f : m => m int -> m int = x -> x`, `a int -> a int`},
+		{`f ; f : m => (m int -> m text) -> m int -> m text = g -> g`, `(a int -> a text) -> a int -> a text`},
+		// A constructor found from a polymorphic field, by abstraction.
+		{`m.pure 1 ; m : monad option = { pure = x -> #some x }` + monad,
+			"option int\n; option = a => [ #none, #some a ]"},
+		{`f m ; f : m => monad m -> m int = m -> m.pure 1 ; m : monad list = { pure = x -> [x] }` + monad, `list int`},
+		{`m ; m : monad option = { pure = x -> #some x }` + monad,
+			"monad option\n; monad = a => { pure : b => b -> a b }\n; option = a => [ #none, #some a ]"},
+		{`m ; m : s => monad (state s) = { pure = x -> s -> { s = s, x = x } } ; state = s => a => s -> { s : s, x : a }` + monad,
+			"monad (state a)\n; monad = a => { pure : b => b -> a b }\n; state = a => b => a -> { s : a, x : b }"},
 	}
 
 	for _, ex := range examples {
@@ -290,8 +308,31 @@ func TestInfer(t *testing.T) {
 	}
 }
 
+// monad is a where-clause that defines a monad as a record of its pure.
+const monad = `
+; monad : (type -> type) -> type = m => { pure : a => a -> m a }
+; option : type -> type = a => [#some a, #none]`
+
 func TestInferFailure(t *testing.T) {
 	examples := []struct{ source, message string }{
+		// A polymorphic field's value can't choose its type.
+		{`r ; r : { id : a => a -> a } = { id = x -> x + 1 }`, `cannot unify 'a' with 'int'`},
+		{`r ; r : { id : a => a -> a } = { id = x -> 1 }`, `cannot unify 'int' with 'a'`},
+		// Nor can an unannotated value have one.
+		{`f r ; f : { id : a => a -> a } -> int = r -> r.id 1 ; r = { id = x -> x }`, `which is polymorphic: give the value an annotation`},
+		{`r ; r : { id : a => b => a -> b } = { id = x -> x }`, `cannot unify 'a' with 'b'`},
+		{`r ; r : { f : x => { a : int, ..x } -> int } = { f = r -> r.a }`, `a polymorphic field's variables must be types, not row`},
+		{`r ; r : a => { f : a => a } -> int = _ -> 1`, `cannot bind type variable a twice`},
+		{`r ; r : (a => a) -> int = _ -> 1`, `type variables must be bound at the start of an annotation`},
+		// Constructors.
+		{`f ; f : m => m int -> m = x -> x`, `m takes 1 type argument, not 0`},
+		{`f ; f : m => m int -> m int text = x -> x`, `m takes 1 type argument, not 2`},
+		{`x ; x : t int = 1 ; t : (type -> type) -> type = f => f int`, `int is not a type constructor`},
+		// Structural types have no constructor to infer.
+		{`g [1] ; g : m => m int -> int = _ -> 1`, `cannot infer the type constructor of 'a int' from 'list int'`},
+		{`x ; x : t r = 1 ; t = f => f int ; r = x => { ..x }`, `type argument 1 of r must be given, as it is a row`},
+		{`m ; m : monad option = { pure = x -> [x] }` + monad, `cannot unify 'list a' with 'option a'`},
+		{`f ; f : m => monad m -> m int = m -> #some 1` + monad, `cannot unify 'm int' with '[ #some int, ..a ]'`},
 		// Unbound
 		{`b ; a = b -> b`, `unbound variable: b`},
 		// Lists
@@ -379,7 +420,7 @@ func TestInferFailure(t *testing.T) {
 		{`1 ; t : type = a => [#a a]`, `t has kind type -> type, not type`},
 		{`1 ; t : type -> type = int`, `t has kind type, not type -> type`},
 		{`1 ; t : row -> type = a => [#a a]`, `t has kind type -> type, not row -> type`},
-		{`1 ; t : (type -> type) -> type = f => f int`, `higher kinds are not supported yet`},
+		{`1 ; t : ((type -> type) -> type) -> type = f => f list`, `a constructor's parameters must be types`},
 		{`1 ; t : int -> type = a => a`, `int is not a kind`},
 		{`1 ; t : type -> int = a => a`, `int is not a kind of types`},
 		{`1 ; t = a => a => [#a a]`, `cannot bind type variable a twice`},
@@ -391,7 +432,7 @@ func TestInferFailure(t *testing.T) {
 		{`ignore ; ignore : t int -> int = _ -> 1 ; t : type = int`, `t is not a type constructor`},
 		{`ignore ; ignore : list -> int = _ -> 1`, `list takes 1 type argument, not 0`},
 		{`ignore ; ignore : list int int -> int = _ -> 1`, `list takes 1 type argument, not 2`},
-		{`1 ; t = f => f int`, `f is not a type constructor`},
+		{`1 ; t : type -> type = f => f int`, `t has kind (type -> type) -> type, not type -> type`},
 		{`1 ; t = a => [#a b]`, `unknown type b`},
 		{`1 ; t = a => { a : a, ..a }`, `a is a row, not a type`},
 		{`ignore ; ignore : t int -> int = _ -> 1 ; t = r => { ..r }`, `type argument 1 of t must be a row variable, not int`},

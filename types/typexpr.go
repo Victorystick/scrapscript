@@ -47,16 +47,31 @@ type alias struct {
 }
 
 // A param is a type constructor's parameter. Its kind is row if it is used
-// as a row tail, and type otherwise.
+// as a row tail, a constructor of arity arguments if it is applied to them,
+// and type otherwise.
 type param struct {
-	name string
-	row  bool
+	name  string
+	row   bool
+	arity int
+}
+
+// kind returns the kind of the parameter, such as `type` or
+// `(type -> type)`.
+func (p param) kind() string {
+	switch {
+	case p.row:
+		return "row"
+	case p.arity > 0:
+		return "(" + strings.Repeat("type -> ", p.arity) + "type)"
+	}
+	return "type"
 }
 
 // A tvar is a type variable in scope in a type expression.
 type tvar struct {
-	ref TypeRef
-	row bool
+	ref   TypeRef
+	row   bool
+	arity int
 }
 
 // sortBinding returns the alias that a sort binding of name to t defines,
@@ -113,7 +128,7 @@ func (c *context) annotation(x ast.Node, fresh func(name string) TypeRef) TypeRe
 	c.markRows(params, t)
 	tvars := c.tvars
 	for _, p := range params {
-		c.tvars = c.tvars.Bind(p.name, tvar{fresh(p.name), p.row})
+		c.tvars = c.tvars.Bind(p.name, tvar{fresh(p.name), p.row, p.arity})
 	}
 	ref := c.typ(t)
 	c.tvars = tvars
@@ -124,25 +139,24 @@ func (c *context) annotation(x ast.Node, fresh func(name string) TypeRef) TypeRe
 func (a *alias) kind() string {
 	var b strings.Builder
 	for _, p := range a.params {
-		if p.row {
-			b.WriteString("row -> ")
-		} else {
-			b.WriteString("type -> ")
-		}
+		b.WriteString(p.kind())
+		b.WriteString(" -> ")
 	}
 	b.WriteString("type")
 	return b.String()
 }
 
 // kind returns the kind that the annotation x denotes. Parameters may be
-// types or rows, and the result is a type.
+// types, rows or constructors of types, and the result is a type.
 func (c *context) kind(x ast.Node) string {
 	var b strings.Builder
 	for c.src.Kind(x) == ast.Func {
 		arg, result := c.src.Func(x)
 		switch k := c.src.NodeText(arg); {
 		case c.src.Kind(arg) == ast.Func:
-			c.bail(arg, "higher kinds are not supported yet")
+			// A constructor of types, as (type -> type).
+			b.WriteString(param{arity: c.kindArity(arg)}.kind())
+			b.WriteString(" -> ")
 		case c.src.Kind(arg) != ast.Ident || k != "type" && k != "row":
 			c.bail(arg, fmt.Sprintf("%s is not a kind", k))
 		default:
@@ -158,8 +172,28 @@ func (c *context) kind(x ast.Node) string {
 	return b.String()
 }
 
+// kindArity returns the number of types that a constructor of the kind x takes,
+// as 1 for `type -> type`.
+func (c *context) kindArity(x ast.Node) int {
+	n := 0
+	for c.src.Kind(x) == ast.Func {
+		arg, result := c.src.Func(x)
+		if c.src.Kind(arg) != ast.Ident || c.src.NodeText(arg) != "type" {
+			c.bail(arg, "a constructor's parameters must be types")
+		}
+		n++
+		x = result
+	}
+	if c.src.Kind(x) != ast.Ident || c.src.NodeText(x) != "type" {
+		c.bail(x, fmt.Sprintf("%s is not a kind of types", c.src.NodeText(x)))
+	}
+	return n
+}
+
 // markRows marks the params that t uses as rows: as row tails, or as the
-// arguments of an alias's row parameters.
+// arguments of an alias's row parameters. It also finds the arity of those
+// that t uses as constructors: applied to types, or as the arguments of an
+// alias's constructor parameters.
 func (c *context) markRows(params []param, t ast.Node) {
 	index := func(x ast.Node) int {
 		if c.src.Kind(x) != ast.Ident {
@@ -173,11 +207,23 @@ func (c *context) markRows(params []param, t ast.Node) {
 			params[i].row = true
 		}
 	}
+	// constructor marks x as a constructor of n types, if it is a param.
+	constructor := func(x, at ast.Node, n int) {
+		i := index(x)
+		if i < 0 || n == 0 {
+			return
+		}
+		if a := params[i].arity; a != 0 && a != n {
+			c.bail(at, fmt.Sprintf("%s takes %s, not %d", params[i].name, typeArguments(a), n))
+		}
+		params[i].arity = n
+	}
 	switch c.src.Kind(t) {
 	case ast.Call:
 		fn, args := c.typeApp(t)
+		constructor(fn, t, len(args))
 		// The kinds of the constructor's parameters, if it is known.
-		var rows []bool
+		var kinds []param
 		var s static
 		switch c.src.Kind(fn) {
 		case ast.Ident:
@@ -190,20 +236,25 @@ func (c *context) markRows(params []param, t ast.Node) {
 		switch {
 		case s.alias != nil:
 			c.kinds(s.alias)
-			for _, p := range s.alias.params {
-				rows = append(rows, p.row)
-			}
+			kinds = s.alias.params
 		case s.isType():
 			for _, p := range s.res.Params {
-				rows = append(rows, p.Row)
+				kinds = append(kinds, param{row: p.Row, arity: p.Arity})
 			}
 		}
 		for i, arg := range args {
-			if i < len(rows) && rows[i] {
-				mark(arg)
+			if i < len(kinds) {
+				if kinds[i].row {
+					mark(arg)
+				}
+				constructor(arg, arg, kinds[i].arity)
 			}
 			c.markRows(params, arg)
 		}
+	case ast.Forall:
+		// A polymorphic field's type, whose variables are its own.
+		_, body := c.src.Forall(t)
+		c.markRows(params, body)
 	case ast.Func:
 		arg, result := c.src.Func(t)
 		c.markRows(params, arg)
@@ -257,10 +308,13 @@ func (c *context) typ(x ast.Node) TypeRef {
 			if v.val.row {
 				c.bail(x, fmt.Sprintf("%s is a row, not a type", name))
 			}
+			if v.val.arity > 0 {
+				c.bail(x, fmt.Sprintf("%s takes %s, not 0", name, typeArguments(v.val.arity)))
+			}
 			return v.val.ref
 		}
 		if s := c.staticName(c.src.TokenBytes(c.src.Main(x))); !s.isNone() {
-			return c.applyStatic(x, x, s, nil)
+			return c.applyStatic(x, x, s, nil, nil)
 		}
 		if ref, ok := primitiveTypes[name]; ok {
 			return ref
@@ -270,7 +324,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 		}
 		c.bail(x, fmt.Sprintf("unknown type %s", name))
 	case ast.Import, ast.Access:
-		return c.applyStatic(x, x, c.static(x), nil)
+		return c.applyStatic(x, x, c.static(x), nil, nil)
 	case ast.Literal:
 		if c.src.LiteralKind(x) == token.HOLE {
 			return HoleRef
@@ -303,7 +357,7 @@ func (c *context) typ(x ast.Node) TypeRef {
 			if _, ok := ref[k]; ok {
 				c.bail(fields.Value(i), fmt.Sprintf("cannot define field %s more than once", k))
 			}
-			ref[k] = c.typ(fields.Value(i))
+			ref[k] = c.fieldType(fields.Value(i))
 		}
 		return c.reg.add(node{kind: recordKind, a: c.reg.row(ref, c.rowTail(tail))})
 	case ast.Forall:
@@ -342,22 +396,74 @@ func (c *context) typeApp(x ast.Node) (fn ast.Node, args []ast.Node) {
 	return fn, args
 }
 
+// fieldType returns the type of a record type's field, x. It may start
+// with type variables, as `a => a -> m a`, for a polymorphic field: each use
+// of the field may choose them anew.
+func (c *context) fieldType(x ast.Node) TypeRef {
+	if c.src.Kind(x) != ast.Forall {
+		return c.typ(x)
+	}
+	params, body := c.params(x)
+	c.markRows(params, body)
+	tvars := c.tvars
+	vars := make([]TypeRef, len(params))
+	for i, p := range params {
+		if p.row || p.arity > 0 {
+			c.bail(x, fmt.Sprintf("a polymorphic field's variables must be types, not %s", p.kind()))
+		}
+		if c.tvars.Get(p.name) != nil {
+			c.bail(x, fmt.Sprintf("cannot bind type variable %s twice", p.name))
+		}
+		vars[i] = c.reg.bound(p.name)
+		c.tvars = c.tvars.Bind(p.name, tvar{ref: vars[i]})
+	}
+	ref := c.typ(body)
+	c.tvars = tvars
+	for i := len(vars) - 1; i >= 0; i-- {
+		ref = c.reg.forall(vars[i], ref)
+	}
+	return ref
+}
+
 // application returns the type that the type application x denotes.
 func (c *context) application(x ast.Node) TypeRef {
+	return c.applied(x, nil)
+}
+
+// applied returns the type that the type expression x denotes, applied to
+// extra as well as to the arguments that x applies it to.
+func (c *context) applied(x ast.Node, extra []TypeRef) TypeRef {
 	fn, args := c.typeApp(x)
+	n := len(args) + len(extra)
 
 	switch c.src.Kind(fn) {
 	case ast.Import, ast.Access:
-		return c.applyStatic(x, fn, c.static(fn), args)
+		return c.applyStatic(x, fn, c.static(fn), args, extra)
 	case ast.Ident:
 		name := c.src.TokenText(c.src.Main(fn))
+		if v := c.tvars.Get(name); v != nil && v.val.arity > 0 {
+			if n != v.val.arity {
+				c.bail(x, fmt.Sprintf("%s takes %s, not %d", name, typeArguments(v.val.arity), n))
+			}
+			ref := v.val.ref
+			for _, arg := range args {
+				ref = c.reg.app(ref, c.typ(arg))
+			}
+			for _, arg := range extra {
+				ref = c.reg.app(ref, arg)
+			}
+			return ref
+		}
 		if c.tvars.Get(name) == nil {
 			if s := c.staticName(c.src.TokenBytes(c.src.Main(fn))); !s.isNone() {
-				return c.applyStatic(x, fn, s, args)
+				return c.applyStatic(x, fn, s, args, extra)
 			}
 			if name == "list" {
-				if len(args) != 1 {
-					c.bail(x, fmt.Sprintf("list takes %s, not %d", typeArguments(1), len(args)))
+				if n != 1 {
+					c.bail(x, fmt.Sprintf("list takes %s, not %d", typeArguments(1), n))
+				}
+				if len(extra) > 0 {
+					return c.reg.List(extra[0])
 				}
 				return c.reg.List(c.typ(args[0]))
 			}
@@ -367,31 +473,53 @@ func (c *context) application(x ast.Node) TypeRef {
 	return NoType
 }
 
-// apply returns the type that the alias a denotes, applied to args.
-func (c *context) apply(x ast.Node, a *alias, args []ast.Node) TypeRef {
-	if len(args) != len(a.params) {
+// constructor returns the constructor of arity types that x denotes, the
+// argument of a constructor parameter: a variable of that arity, or a
+// constructor applied to all but its last arity parameters, as `option` or
+// `state s`.
+func (c *context) constructor(x ast.Node, arity int) TypeRef {
+	if c.src.Kind(x) == ast.Ident {
+		if v := c.tvars.Get(c.src.TokenText(c.src.Main(x))); v != nil && v.val.arity == arity {
+			return v.val.ref
+		}
+	}
+	vars := make([]TypeRef, arity)
+	for i := range vars {
+		vars[i] = c.reg.bound(string(varNames[i%len(varNames)]))
+	}
+	ref := c.applied(x, vars)
+	for i := len(vars) - 1; i >= 0; i-- {
+		ref = c.reg.lam(vars[i], ref)
+	}
+	return ref
+}
+
+// apply returns the type that the alias a denotes, applied to args and then
+// to extra.
+func (c *context) apply(x ast.Node, a *alias, args []ast.Node, extra []TypeRef) TypeRef {
+	if n := len(args) + len(extra); n != len(a.params) {
 		if len(a.params) == 0 {
 			c.bail(x, fmt.Sprintf("%s is not a type constructor", a.name))
 		}
-		c.bail(x, fmt.Sprintf("%s takes %s, not %d", a.name, typeArguments(len(a.params)), len(args)))
+		c.bail(x, fmt.Sprintf("%s takes %s, not %d", a.name, typeArguments(len(a.params)), n))
 	}
-	if len(args) == 0 {
+	if len(a.params) == 0 {
 		return c.alias(x, a)
 	}
-	rows := make([]bool, len(a.params))
-	for i, p := range a.params {
-		rows[i] = p.row
-	}
-	return c.expand(x, a, c.typeArgs(a.name, rows, args))
+	return c.expand(x, a, c.typeArgs(x, a.name, a.params, args, extra))
 }
 
 // typeArgs returns the types of the arguments to the constructor name,
-// whose parameters are rows where rows says so. A row argument must be a
-// row variable.
-func (c *context) typeArgs(name string, rows []bool, args []ast.Node) []TypeRef {
-	refs := make([]TypeRef, len(args))
+// args followed by extra, whose parameters are params. A row argument must
+// be a row variable, and a constructor argument a constructor of its arity.
+func (c *context) typeArgs(x ast.Node, name string, params []param, args []ast.Node, extra []TypeRef) []TypeRef {
+	refs := make([]TypeRef, len(args), len(params))
 	for i, arg := range args {
-		if !rows[i] {
+		switch p := params[i]; {
+		case p.arity > 0:
+			refs[i] = c.constructor(arg, p.arity)
+			continue
+		case !p.row:
 			refs[i] = c.typ(arg)
 			continue
 		}
@@ -404,40 +532,45 @@ func (c *context) typeArgs(name string, rows []bool, args []ast.Node) []TypeRef 
 		c.bail(arg, fmt.Sprintf("type argument %d of %s must be a row variable, not %s",
 			i+1, name, c.src.NodeText(arg)))
 	}
-	return refs
+	for i, p := range params[len(args):] {
+		if p.row || p.arity > 0 {
+			c.bail(x, fmt.Sprintf("type argument %d of %s must be given, as it is a %s", len(args)+i+1, name, p.kind()))
+		}
+	}
+	return append(refs, extra...)
 }
 
 // applyStatic returns the type that the path fn denotes, its static part s,
-// applied to args if it is a type constructor.
-func (c *context) applyStatic(x, fn ast.Node, s static, args []ast.Node) TypeRef {
+// applied to args and extra if it is a type constructor.
+func (c *context) applyStatic(x, fn ast.Node, s static, args []ast.Node, extra []TypeRef) TypeRef {
 	switch {
 	case s.alias != nil:
-		return c.apply(x, s.alias, args)
+		return c.apply(x, s.alias, args, extra)
 	case s.isType():
-		return c.applyResult(x, c.src.NodeText(fn), s.res, args)
+		return c.applyResult(x, c.src.NodeText(fn), s.res, args, extra)
 	}
 	c.notType(fn)
 	return NoType
 }
 
 // applyResult returns the type that the imported type res, written name,
-// denotes, applied to args if it is a type constructor.
-func (c *context) applyResult(x ast.Node, name string, res Result, args []ast.Node) TypeRef {
-	if len(args) != len(res.Params) {
+// denotes, applied to args and extra if it is a type constructor.
+func (c *context) applyResult(x ast.Node, name string, res Result, args []ast.Node, extra []TypeRef) TypeRef {
+	if n := len(args) + len(extra); n != len(res.Params) {
 		if len(res.Params) == 0 {
 			c.bail(x, fmt.Sprintf("%s is not a type constructor", name))
 		}
-		c.bail(x, fmt.Sprintf("%s takes %s, not %d", name, typeArguments(len(res.Params)), len(args)))
+		c.bail(x, fmt.Sprintf("%s takes %s, not %d", name, typeArguments(len(res.Params)), n))
 	}
-	if len(args) == 0 {
+	if len(res.Params) == 0 {
 		return c.reg.reference(name, res.Type, nil)
 	}
 	vars := make([]TypeRef, len(res.Params))
-	rows := make([]bool, len(res.Params))
+	params := make([]param, len(res.Params))
 	for i, p := range res.Params {
-		vars[i], rows[i] = p.Var, p.Row
+		vars[i], params[i] = p.Var, param{name: p.Name, row: p.Row, arity: p.Arity}
 	}
-	refs := c.typeArgs(name, rows, args)
+	refs := c.typeArgs(x, name, params, args, extra)
 	return c.reg.reference(name, c.reg.apply(vars, res.Type, refs), refs)
 }
 
@@ -452,7 +585,7 @@ func (c *context) export(x ast.Node, a *alias) Result {
 	refs := make([]TypeRef, len(a.params))
 	for i, p := range a.params {
 		refs[i] = c.reg.Gen()
-		params[i] = Param{Name: p.name, Var: refs[i], Row: p.row}
+		params[i] = Param{Name: p.name, Var: refs[i], Row: p.row, Arity: p.arity}
 	}
 	return Result{Type: c.expand(x, a, refs), Sort: true, Params: params}
 }
@@ -498,7 +631,7 @@ func (c *context) expand(x ast.Node, a *alias, refs []TypeRef) TypeRef {
 	aliases, tvars := c.aliases, c.tvars
 	c.aliases, c.tvars = a.scope, nil
 	for i, p := range a.params {
-		c.tvars = c.tvars.Bind(p.name, tvar{refs[i], p.row})
+		c.tvars = c.tvars.Bind(p.name, tvar{refs[i], p.row, p.arity})
 	}
 	ref := c.typ(a.body)
 	c.aliases, c.tvars = aliases, tvars

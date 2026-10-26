@@ -60,6 +60,9 @@ func (r *Registry) Shape(ref TypeRef) Shape {
 		s.Kind = ShapeVariable
 	case rigidKind:
 		s.Kind, s.Rigid = ShapeVariable, true
+	case boundKind, forallKind, lamKind, appKind:
+		// Types that only annotations give, which no value's shape follows.
+		s.Kind = ShapeVariable
 	case listKind:
 		s.Kind, s.Elem = ShapeList, n.a
 	case funcKind:
