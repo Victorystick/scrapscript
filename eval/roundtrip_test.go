@@ -12,6 +12,9 @@ var brokenRoundTrips = map[string]string{
 
 // More sources to round-trip, beyond those of the other eval tests.
 var roundTrips = []string{
+	// Destructured closures print as their values.
+	`f ; f = x -> max x 1 ; { max } = { max = a -> b -> a + b }`,
+	`x -> (max x 1 ; { max, min = lo } = { max = a -> b -> a + b, min = 1 })`,
 	// Closures of one lambda print with their own captures.
 	`list/map mk [1, 2] ; mk = n -> (f ; f = x -> x + n)`,
 	`list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x)) [1, 2, 3]`,

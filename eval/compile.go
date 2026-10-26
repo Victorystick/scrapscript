@@ -559,7 +559,7 @@ func (c *compiler) error(n ast.Node, msg string) {
 }
 
 func (c *compiler) name(t ast.Tok) string {
-	return c.src.TokenText(t)
+	return c.src.Name(t)
 }
 
 func (c *compiler) node(o op, a, b int32, x ast.Node) cnode {

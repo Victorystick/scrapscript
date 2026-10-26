@@ -28,6 +28,8 @@ func TestInfer(t *testing.T) {
 		// Records
 		{`{ a = 1 }`, `{ a : int }`},
 		{`{ ..base, a = ~01 } ; base = { a = ~00 }`, `{ a : byte }`},
+		{`{ a = id 1, b = c } ; { id, b = c } = { id = x -> x, b = "" }`, `{ a : int, b : text }`},
+		{`r -> (a ; { a } = r)`, `{ a : a, ..b } -> a`},
 		// // Enums
 
 		{`#r`, `[ #r, ..a ]`},

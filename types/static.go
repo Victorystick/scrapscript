@@ -79,7 +79,7 @@ func (c *context) group(x ast.Node) group {
 	}
 	for _, b := range binds {
 		_, id, typ, val := c.src.Where(b)
-		name := c.src.TokenText(id)
+		name := c.src.Name(id)
 		if seen[name] {
 			c.bail(b, fmt.Sprintf("cannot bind %s twice", name))
 		}
@@ -129,7 +129,7 @@ func (c *context) mayBeStatic(x ast.Node) bool {
 func (c *context) static(x ast.Node) static {
 	switch c.src.Kind(x) {
 	case ast.Ident:
-		return c.staticName(c.src.TokenBytes(c.src.Main(x)))
+		return c.staticName(c.src.NameBytes(c.src.Main(x)))
 	case ast.Where:
 		g := c.group(x)
 		aliases := c.aliases
@@ -254,7 +254,7 @@ func (c *context) typeOnly(v ast.Node) bool {
 	switch c.src.Kind(v) {
 	case ast.Ident:
 		// A value in scope, such as a function's parameter, shadows a type.
-		name := c.src.TokenBytes(c.src.Main(v))
+		name := c.src.NameBytes(c.src.Main(v))
 		for s := c.scope; s != nil; s = s.parent {
 			if s.name == string(name) {
 				return false
