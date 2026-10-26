@@ -38,6 +38,21 @@
 // CSS Custom Highlight API: per class, named as the highlight package names
 // them, its ranges as start and end pairs, in UTF-16 code units as
 // JavaScript indexes strings.
+//
+// "web" runs an app of the web platform, which web.scrap is the interface
+// of, as a page does: the source is the app, which keeps a model and makes a
+// view of it, a page of elements and text, whose elements send messages to
+// update it with. The response has the "state", the model as a scrap, which
+// later requests pass back as theirs, and its "view": each text as a string,
+// and each element as {"tag": "...", "attrs": {...}, "on": {...},
+// "children": [...]}, its handlers by event, {"message": "..."}, a scrap of
+// the message to pass back, or of a function of the target's value to pass
+// back with it as the "input", where "value" is true.
+//
+// The model is the request's "state", a scrap, or else the app's init. If
+// the request has a "message", a scrap, of a message or, with an "input"
+// text, of a function to apply to it, it updates the model with it first,
+// and the response has the message as a scrap too.
 package main
 
 import (
@@ -64,6 +79,10 @@ type request struct {
 	Sources map[string]string `json:"sources"`
 	Drafts  map[string]string `json:"drafts"`
 	Command string            `json:"command"`
+	// What "web" runs the app with.
+	State   string  `json:"state"`
+	Message string  `json:"message"`
+	Input   *string `json:"input"`
 }
 
 type response struct {
@@ -71,6 +90,9 @@ type response struct {
 	Type       string           `json:"type,omitempty"`
 	Value      string           `json:"value,omitempty"`
 	Results    []result         `json:"results,omitzero"`
+	State      string           `json:"state,omitempty"`
+	Message    string           `json:"message,omitempty"`
+	View       any              `json:"view,omitempty"`
 	Error      string           `json:"error,omitempty"`
 	Missing    []string         `json:"missing,omitempty"`
 }
@@ -124,7 +146,7 @@ func (s sources) FetchSha256(key string) ([]byte, error) {
 
 func respond(req request) response {
 	switch req.Command {
-	case "", "type", "eval", "test":
+	case "", "type", "eval", "test", "web":
 	case "highlight":
 		return response{Highlights: highlights(req.Source)}
 	default:
@@ -135,7 +157,11 @@ func respond(req request) response {
 	// missing reads the drafts that the scrap refers to; any other path is
 	// to a file that doesn't exist.
 	env.UseDrafts(noFiles{})
-	s, err := env.Read([]byte(req.Source))
+	source := req.Source
+	if req.Command == "web" {
+		source = webProgram(env, req)
+	}
+	s, err := env.Read([]byte(source))
 	if err != nil {
 		return response{Error: token.Render(err, nil)}
 	}
@@ -145,6 +171,9 @@ func respond(req request) response {
 	}
 	if len(missing) > 0 {
 		return response{Missing: missing}
+	}
+	if req.Command == "web" {
+		return web(env, s, req)
 	}
 	t, err := env.Infer(s)
 	if err != nil {
