@@ -74,7 +74,7 @@ the interface isn't published.
 | `run.go` | Written by hand: `run` and `Run`, which carry out the platform's effects. |
 | `run_test.go` | Checks that `Run` agrees with the platform's reference semantics. |
 
-1. `host.Main` parses the command line and reads the script. Scraps that it
+1. `cli.Main`, in `host/cli`, parses the command line and reads the script. Scraps that it
    refers to by hash are looked up among the embedded scraps first, and then
    in the scrapyard.
 2. `Load` checks the script against the interface, once, then evaluates it and
