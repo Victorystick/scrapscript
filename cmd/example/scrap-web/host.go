@@ -18,8 +18,10 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/Victorystick/scrapscript/eval"
+	"github.com/Victorystick/scrapscript/host"
 	"github.com/Victorystick/scrapscript/host/wasmhost"
 	"github.com/Victorystick/scrapscript/token"
 )
@@ -33,17 +35,21 @@ func init() {
 type request struct {
 	wasmhost.Scraps
 	Op string `json:"op"`
-	// What "load" loads: the app, and a scrap of its model, if not init.
-	Source string `json:"source"`
-	State  string `json:"state"`
+	// What "load" loads: the app, and a scrap of its model, if not init,
+	// and the messages, as scraps, to update it with, as a page keeps them
+	// to load a changed app with.
+	Source   string   `json:"source"`
+	State    string   `json:"state"`
+	Messages []string `json:"messages"`
 	// The generation of the first view that "load" makes, 1 by default. A
 	// page that loads apps anew passes one after the last it showed, so
 	// that it can't mistake events of an earlier view for the last's.
 	Generation int `json:"generation"`
 	// The events that "send" updates the model with.
 	Events []event `json:"events"`
-	// The step that "goto" goes back to.
-	Step int `json:"step"`
+	// The step that "goto" goes to, that "state" prints the model of, and
+	// that "load" shows, rather than the last.
+	Step *int `json:"step"`
 }
 
 // An event is one that an element of the view of a generation handled,
@@ -64,8 +70,11 @@ type response struct {
 	// generation.
 	Patch      json.RawMessage `json:"patch,omitempty"`
 	Generation int             `json:"generation,omitempty"`
-	Steps      []step          `json:"steps,omitempty"`
-	State      string          `json:"state,omitempty"`
+	// How many of the messages that "load" was given it updated the model
+	// with, as all but those after one that failed.
+	Replayed int    `json:"replayed,omitempty"`
+	Steps    []step `json:"steps,omitempty"`
+	State    string `json:"state,omitempty"`
 }
 
 // A step is an update of the model, by a message, as a scrap. Step 0 is
@@ -126,6 +135,10 @@ func (r *response) append(b []byte) []byte {
 		field("generation")
 		b = strconv.AppendInt(b, int64(r.Generation), 10)
 	}
+	if r.Replayed != 0 {
+		field("replayed")
+		b = strconv.AppendInt(b, int64(r.Replayed), 10)
+	}
 	if r.Steps != nil {
 		field("steps")
 		b = append(b, '[')
@@ -166,9 +179,19 @@ func respond(req request) response {
 	case "send":
 		return current.send(req.Events)
 	case "state":
-		return response{State: current.env.Print(current.model.v)}
+		i := current.at
+		if req.Step != nil {
+			var err error
+			if i, err = current.index(*req.Step); err != nil {
+				return response{Error: err.Error()}
+			}
+		}
+		return response{State: current.env.Print(current.models[i].v)}
 	case "goto":
-		return current.goTo(req.Step)
+		if req.Step == nil {
+			return response{Error: "bad request: no step"}
+		}
+		return current.goTo(*req.Step)
 	case "view":
 		return response{Patch: reshow(), Generation: current.generation}
 	}
@@ -185,12 +208,14 @@ const (
 
 // A session runs an app.
 type session struct {
-	env   *eval.Environment
-	app   App
-	model Model
-	// The models that steps led to, the first of which is step first.
+	env *eval.Environment
+	app App
+	// The models that steps led to, the first of which is step first, and
+	// the index of the one shown, which an update updates, dropping those
+	// after it.
 	models []Model
 	first  int
+	at     int
 	// The generation of the last view, and the handlers of the last views,
 	// the last last.
 	generation int
@@ -198,7 +223,8 @@ type session struct {
 }
 
 // load loads the app in req's source, with the model in its state or
-// init, and returns its session, and its first view. It fails as a response with no session.
+// init, updated with its messages, and returns its session, and its first
+// view. It fails as a response with no session.
 func load(req request) (*session, response) {
 	env := eval.NewEnvironment()
 	req.Use(env)
@@ -207,12 +233,18 @@ func load(req request) (*session, response) {
 		return nil, response{Error: token.Render(err, nil)}
 	}
 	scraps := []*eval.Scrap{src}
-	var state *eval.Scrap
+	var state, messages *eval.Scrap
 	if req.State != "" {
 		if state, err = env.Read([]byte(req.State)); err != nil {
 			return nil, response{Error: "the state: " + token.Render(err, nil)}
 		}
 		scraps = append(scraps, state)
+	}
+	if len(req.Messages) > 0 {
+		if messages, err = env.Read([]byte(list(req.Messages))); err != nil {
+			return nil, response{Error: "the messages: " + token.Render(err, nil)}
+		}
+		scraps = append(scraps, messages)
 	}
 	missing, err := req.Missing(env, scraps...)
 	if err != nil {
@@ -227,7 +259,7 @@ func load(req request) (*session, response) {
 	}
 	model := app.Init
 	if state != nil {
-		if err := fits(env, req.Source, req.State); err != nil {
+		if err := fits(env, req.Source, req.State, nil); err != nil {
 			return nil, response{Error: "the state is not a model of the app: " + token.Render(err, nil)}
 		}
 		v, err := env.Eval(state)
@@ -236,19 +268,99 @@ func load(req request) (*session, response) {
 		}
 		model = Model{v}
 	}
-	s := &session{env: env, app: app, model: model, models: []Model{model}, generation: max(req.Generation, 1) - 1}
+	s := &session{env: env, app: app, models: []Model{model}, generation: max(req.Generation, 1) - 1}
+	replayed, replayErr := s.replay(req, messages)
+	if req.Step != nil {
+		if s.at, err = s.index(*req.Step); err != nil {
+			s.at = len(s.models) - 1
+		}
+	}
 	res := s.render()
 	if res.Error != "" {
 		return nil, res
 	}
+	res.Replayed = replayed
+	if replayErr != nil {
+		res.Error = token.Render(replayErr, nil)
+	}
 	return s, res
 }
 
-// fits checks that the state has the type of the models of the app, which
-// checks. The state is a scrap of its own, as its type isn't the
-// interface's to say.
-func fits(env *eval.Environment, app, state string) error {
-	src := "(app -> state -> [app.init, state])\n(" + app + "\n)\n(" + state + "\n)"
+// replay updates the session's model with the messages, as many as fit
+// the app and update it, and returns how many did, and why the rest
+// didn't.
+func (s *session) replay(req request, messages *eval.Scrap) (int, error) {
+	defer func() { s.at = len(s.models) - 1 }()
+	if messages == nil {
+		return 0, nil
+	}
+	var unfit error
+	if n := len(req.Messages); fits(s.env, req.Source, req.State, req.Messages) != nil {
+		// That only some messages fit is rare, as after an edit of the
+		// app's messages, so look for how many, rather than check each.
+		lo, hi := 0, n-1
+		for lo < hi {
+			if m := (lo + hi + 1) / 2; fits(s.env, req.Source, req.State, req.Messages[:m]) == nil {
+				lo = m
+			} else {
+				hi = m - 1
+			}
+		}
+		err := fits(s.env, req.Source, req.State, req.Messages[:lo+1])
+		unfit = fmt.Errorf("message %d is not a message of the app: %w", lo+1, err)
+		if lo == 0 {
+			return 0, unfit
+		}
+		if messages, err = s.env.Read([]byte(list(req.Messages[:lo]))); err != nil {
+			return 0, err
+		}
+	}
+	v, err := s.env.Eval(messages)
+	if err != nil {
+		return 0, err
+	}
+	msgs := host.ListFrom(v, func(v eval.Value) Msg { return Msg{v} })
+	for i, msg := range msgs {
+		model, err := s.app.Update(msg, s.models[len(s.models)-1])
+		if err != nil {
+			return i, fmt.Errorf("updating with message %d: %w", i+1, err)
+		}
+		s.keep(model)
+	}
+	return len(msgs), unfit
+}
+
+// list returns the list of the scraps.
+func list(scraps []string) string {
+	var b strings.Builder
+	b.WriteString("[")
+	for i, m := range scraps {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		// On lines of their own, as a scrap may end with a comment.
+		b.WriteString("(\n")
+		b.WriteString(m)
+		b.WriteString("\n)")
+	}
+	b.WriteString("]")
+	return b.String()
+}
+
+// fits checks that the state, if any, has the type of the models of the
+// app, which checks, and the messages that of its messages. They are
+// scraps of their own, as their types aren't the interface's to say.
+func fits(env *eval.Environment, app, state string, messages []string) error {
+	var src string
+	switch {
+	case messages == nil:
+		src = "(app -> state -> [app.init, state])\n(" + app + "\n)\n(" + state + "\n)"
+	case state == "":
+		src = "(app -> ms -> list/map (m -> app.update m app.init) ms)\n(" + app + "\n)\n" + list(messages)
+	default:
+		src = "(app -> state -> ms -> [[app.init, state], list/map (m -> app.update m state) ms])\n(" +
+			app + "\n)\n(" + state + "\n)\n" + list(messages)
+	}
 	s, err := env.Read([]byte(src))
 	if err != nil {
 		return err
@@ -262,11 +374,30 @@ func fits(env *eval.Environment, app, state string) error {
 	return err
 }
 
+// keep keeps the model that an update led to, as the last.
+func (s *session) keep(model Model) {
+	s.models = append(s.models, model)
+	if len(s.models) > maxModels {
+		s.models = s.models[1:]
+		s.first++
+	}
+}
+
+// index returns the index of the model of a step that the session keeps.
+func (s *session) index(step int) (int, error) {
+	i := step - s.first
+	if i < 0 || i >= len(s.models) {
+		return 0, fmt.Errorf("bad request: no step %d", step)
+	}
+	return i, nil
+}
+
 // send updates the model with the message of each event's handler, as of
 // the view of its generation, as Elm does with the handlers that were on
 // the page when the event happened, and shows the view of the result. It
 // ignores events of views that it no longer keeps, and stops at the first
-// update that fails.
+// update that fails. If the model is one before the last, as after goto,
+// the first update drops those after it.
 func (s *session) send(events []event) response {
 	var steps []step
 	var err error
@@ -278,17 +409,14 @@ func (s *session) send(events []event) response {
 		} else if err != nil {
 			break
 		}
-		model, uerr := s.app.Update(msg, s.model)
+		model, uerr := s.app.Update(msg, s.models[s.at])
 		if err = uerr; err != nil {
 			break
 		}
-		s.model = model
-		s.models = append(s.models, model)
-		if len(s.models) > maxModels {
-			s.models = s.models[1:]
-			s.first++
-		}
-		steps = append(steps, step{s.first + len(s.models) - 1, s.env.Print(msg.v)})
+		s.models = s.models[:s.at+1]
+		s.keep(model)
+		s.at = len(s.models) - 1
+		steps = append(steps, step{s.first + s.at, s.env.Print(msg.v)})
 	}
 	var res response
 	if len(steps) > 0 {
@@ -337,18 +465,18 @@ func (s *session) message(e event) (Msg, bool, error) {
 
 // goTo goes back, or forth, to the model of a step that the session keeps.
 func (s *session) goTo(step int) response {
-	i := step - s.first
-	if i < 0 || i >= len(s.models) {
-		return response{Error: fmt.Sprintf("bad request: no step %d", step)}
+	i, err := s.index(step)
+	if err != nil {
+		return response{Error: err.Error()}
 	}
-	s.model = s.models[i]
+	s.at = i
 	return s.render()
 }
 
 // render patches the view to the model's, of the next generation, and
 // keeps its handlers.
 func (s *session) render() response {
-	html, err := s.app.View(s.model)
+	html, err := s.app.View(s.models[s.at])
 	if err != nil {
 		return response{Error: token.Render(err, nil)}
 	}

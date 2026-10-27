@@ -51,3 +51,22 @@ func BenchmarkSend(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkReplay measures loading an app of n items with n messages, as a
+// page does when the app changes.
+func BenchmarkReplay(b *testing.B) {
+	for _, n := range []int{10, 1000} {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			messages := make([]string, n)
+			for i := range messages {
+				messages[i] = fmt.Sprintf("#toggle %d", i%10)
+			}
+			req, _ := json.Marshal(request{Op: "load", Source: `$"./main.scrap"`, Messages: messages, Scraps: wasmhost.Scraps{Drafts: todos(n)}})
+			for b.Loop() {
+				current = nil
+				resetView()
+				handle(req)
+			}
+		})
+	}
+}

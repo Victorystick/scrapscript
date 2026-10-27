@@ -45,15 +45,23 @@ view that the page shows, which it answers each request that changes it
 with a patch of. Each request and response is JSON. A page:
 
 1. loads the app, with the scraps that it refers to, as `wasmhost.Scraps`,
-   and optionally a scrap of the model to start from instead of `init`:
+   optionally a scrap of the model to start from instead of `init`, and
+   the messages, as scraps, to update it with, as the steps that it was
+   sent gave them:
 
    ```json
-   {"op": "load", "source": "$\"./main.scrap\"", "drafts": {"main.scrap": "…"}, "state": "{ count = 5 }"}
+   {"op": "load", "source": "$\"./main.scrap\"", "drafts": {"main.scrap": "…"}, "state": "{ count = 5 }", "messages": ["#inc", "#inc"]}
    ```
 
-   The response is a patch of the view, `{"patch": […], "generation": 1}`,
-   or `{"missing": […]}` with the hashes of the scraps to fetch and ask
-   again with, or `{"error": "…"}`.
+   The response is a patch of the view, `{"patch": […], "generation": 1,
+   "replayed": 2}`, or `{"missing": […]}` with the hashes of the scraps to
+   fetch and ask again with, or `{"error": "…"}`. It replays as many of the
+   messages as are messages of the app and update it, which a page that
+   keeps them loads a changed app with, as Elm's debugger replays them: so
+   a change to `update` changes the model that they led to, and the steps
+   go on, which the page can go back to. `"error"` says why it stopped
+   before the last, if it did. `"step"` shows the model of a step before
+   the last.
 
    A patch is a list of operations, which `dom.go` describes, on the nodes
    of the view, each of which has an id while the page shows it:
@@ -89,12 +97,13 @@ with a patch of. Each request and response is JSON. A page:
    handlers that were on the page when an event happened. It ignores events
    of views older than the last 16, and answers with `{}` if all are.
 
-3. asks for the model as a scrap, `{"op": "state"}`, as it needs it: to
-   keep it, or to load a new version of the app with it, which the host
-   checks the model's type against.
+3. asks for the model as a scrap, `{"op": "state"}`, as it needs it, or
+   that of a step, `{"op": "state", "step": 1}`, to start from with fewer
+   messages.
 
 4. goes back to the model after a step, `{"op": "goto", "step": 1}`, for
-   the last 1000 steps.
+   the last 1000 steps. The next event updates that model, and drops the
+   steps after it.
 
 5. asks for the whole view, `{"op": "view"}`, if it lost it, as when its
    frame reloaded.
@@ -107,9 +116,10 @@ can't mistake events of an earlier app's views for the new one's.
 The page runs the module where it likes. Elm runs on the page's thread,
 which an app that loops forever freezes; a page that runs apps as they are
 being written, such as a playground, runs the module in a Web Worker
-instead, which it can stop, and loads the app again from the last model that
-it asked for. https://scraps.oseg.dev/web is such a playground; its source,
-in [cloudflare-scrapyard](https://github.com/Victorystick/cloudflare-scrapyard),
+instead, which it can stop, and loads the app again with the messages that
+it kept, but the last. https://scraps.oseg.dev/web is such a playground;
+its source, in
+[cloudflare-scrapyard](https://github.com/Victorystick/cloudflare-scrapyard),
 has the page's side, with just enough of WASI to run the module.
 
 ## Hosting another platform

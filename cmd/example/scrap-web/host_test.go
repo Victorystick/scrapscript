@@ -78,8 +78,8 @@ func (p *page) send(events ...string) response {
 }
 
 // loadReq returns a request that loads the counter with the state.
-func loadReq(state string) string {
-	req := request{Op: "load", Source: `$"./main.scrap"`, State: state, Scraps: wasmhost.Scraps{Drafts: counter}}
+func loadReq(state string, messages ...string) string {
+	req := request{Op: "load", Source: `$"./main.scrap"`, State: state, Messages: messages, Scraps: wasmhost.Scraps{Drafts: counter}}
 	b, err := json.Marshal(req)
 	if err != nil {
 		panic(err)
@@ -177,10 +177,54 @@ func TestHost(t *testing.T) {
 		p.send(p.event("button", 0, "click"), p.event("button", 0, "click"))
 		p.run(`{"op":"goto","step":1}`)
 		p.shows(html("1", ""))
-		if res := p.send(p.event("button", 0, "click")); steps(res) != "3 #inc" {
-			t.Errorf("expected step 3, got %s", steps(res))
+		p.state(`{ count = 1, name = "" }`)
+		if got := p.run(`{"op":"state","step":2}`).State; got != `{ count = 2, name = "" }` {
+			t.Errorf("expected the state of step 2, got %s", got)
+		}
+		// An update after goto drops the steps after it.
+		res := p.send(p.event("input", 0, "input", "x"))
+		if got, want := steps(res), `2 #name "x"`; got != want {
+			t.Errorf("expected steps %s, got %s", want, got)
+		}
+		p.shows(html("1", "x"))
+		if res := p.run(`{"op":"goto","step":3}`); res.Error != "bad request: no step 3" {
+			t.Errorf("expected no step 3, got %+v", res)
+		}
+	})
+	t.Run("replay", func(t *testing.T) {
+		p := newPage(t)
+		res := p.run(loadReq(`$"./state.scrap"`, "#inc", `#name "me"`, "#inc"))
+		if res.Replayed != 3 || res.Error != "" {
+			t.Errorf("expected 3 messages replayed, got %+v", res)
+		}
+		p.shows(html("7", "me"))
+		if res := p.send(p.event("button", 0, "click")); steps(res) != "4 #inc" {
+			t.Errorf("expected step 4, got %s", steps(res))
+		}
+		p.run(`{"op":"goto","step":1}`)
+		p.shows(html("6", "you"))
+	})
+	t.Run("replay to a step", func(t *testing.T) {
+		p := newPage(t)
+		one := 1
+		req, _ := json.Marshal(request{Op: "load", Source: `$"./main.scrap"`, Messages: []string{"#inc", "#inc"}, Step: &one, Scraps: wasmhost.Scraps{Drafts: counter}})
+		res := p.run(string(req))
+		if res.Replayed != 2 {
+			t.Errorf("expected 2 messages replayed, got %+v", res)
+		}
+		p.shows(html("1", ""))
+	})
+	t.Run("replay of messages that no longer fit", func(t *testing.T) {
+		p := newPage(t)
+		res := p.run(loadReq("", "#inc", "#inc", "#dec", "#inc"))
+		if res.Replayed != 2 || !strings.Contains(res.Error, "message 3 is not a message of the app") {
+			t.Errorf("expected 2 messages replayed, got %+v", res)
 		}
 		p.shows(html("2", ""))
+		res = p.run(loadReq("", "#dec"))
+		if res.Replayed != 0 || res.Patch == nil || !strings.Contains(res.Error, "message 1 is not a message of the app") {
+			t.Errorf("expected none replayed, got %+v", res)
+		}
 	})
 	t.Run("a new version of the app patches the view", func(t *testing.T) {
 		p := newPage(t)
@@ -235,10 +279,12 @@ func TestHostErrors(t *testing.T) {
 		{"state of another type", []string{loadReq(`$"./text-count.scrap"`)},
 			"the state is not a model of the app: cannot unify 'int' with 'text'"},
 		{"bad state", []string{loadReq(`1 + "a"`)}, "cannot unify 'text' with 'int'"},
+		{"bad messages", []string{loadReq("", "#inc", "(")}, "the messages: parse error"},
 		{"no such handler", []string{loadReq(""), click}, "bad request: node 1 has no click handler"},
 		{"no input", []string{loadReq(""), `{"op":"send","events":[{"generation":1,"node":3,"event":"input"}]}`},
 			"bad request: the input handler of node 3 takes an input"},
 		{"no such step", []string{loadReq(""), `{"op":"goto","step":1}`}, "bad request: no step 1"},
+		{"no step", []string{loadReq(""), `{"op":"goto"}`}, "bad request: no step"},
 		{"unknown op", []string{loadReq(""), `{"op":"push"}`}, `bad request: unknown op "push"`},
 	}
 	for _, ex := range examples {
