@@ -40,8 +40,9 @@ the page shows the view of the result.
 
 ## Running it in a page
 
-The host keeps the app, and its model, as values between requests. Each
-request and response is JSON. A page:
+The host keeps the app, and its model, as values between requests, and the
+view that the page shows, which it answers each request that changes it
+with a patch of. Each request and response is JSON. A page:
 
 1. loads the app, with the scraps that it refers to, as `wasmhost.Scraps`,
    and optionally a scrap of the model to start from instead of `init`:
@@ -50,33 +51,41 @@ request and response is JSON. A page:
    {"op": "load", "source": "$\"./main.scrap\"", "drafts": {"main.scrap": "…"}, "state": "{ count = 5 }"}
    ```
 
-   The response is the first view, or `{"missing": […]}` with the hashes of
-   the scraps to fetch and ask again with, or `{"error": "…"}`. The view's
-   text is a string, and each element is
+   The response is a patch of the view, `{"patch": […], "generation": 1}`,
+   or `{"missing": […]}` with the hashes of the scraps to fetch and ask
+   again with, or `{"error": "…"}`.
+
+   A patch is a list of operations, which `dom.go` describes, on the nodes
+   of the view, each of which has an id while the page shows it:
 
    ```json
-   {"tag": "button", "attrs": {"class": "…"}, "on": {"click": {"handler": 1}}, "children": […]}
+   [0, 1, 0, 0, 1, "p", 0, 0, 3, 2, "button", 0, 1, "click", 1, 3, null, "-", …]
    ```
 
-   Each of its handlers has an index, and `"value": true` if it takes the
-   value of the event's target. The response numbers the view, from the
-   request's `"generation"`, 1 by default: `{"view": …, "generation": 1}`.
+   clears the page's view, and inserts a `p` as node 1 into the body, node
+   0, first, with a `button`, node 2, which listens for clicks, of the text
+   `-`, and so on. The view is numbered, from the request's `"generation"`,
+   1 by default. A new version of the app patches the view that the page
+   shows, so that an input keeps its focus and text. An element with a
+   `key` attribute is matched with its siblings in the last view by it,
+   rather than by order, so that it moves, rather than another element
+   changing to look like it.
 
-2. sends the events that the views' handlers handle, each with the
-   generation of its view, and the value of its target if its handler
-   takes one:
+2. sends the events that the view's elements handle, each with the
+   generation of its view, its node, the event, and the value of its
+   target, as an input's text, which an `#on-value` handler takes:
 
    ```json
-   {"op": "send", "events": [{"generation": 1, "handler": 1}, {"generation": 1, "handler": 0, "input": "milk"}]}
+   {"op": "send", "events": [{"generation": 1, "node": 2, "event": "click"}, {"generation": 1, "node": 4, "event": "input", "input": "milk"}]}
    ```
 
    The host updates the model with the message of each in turn, and
-   answers with the view of the result, of the next generation, and the
-   steps that the messages took, each message as a scrap: `{"view": …,
-   "generation": 2, "steps": [{"step": 1, "message": "#inc"}, …]}`. A page
-   that sends the events that happen while the host is busy together gets
-   one view for them, as Elm draws once per frame. Those events are of
-   views before the last, whose handlers the host keeps, as Elm uses the
+   answers with a patch to the view of the result, of the next generation,
+   and the steps that the messages took, each message as a scrap: `{"patch":
+   […], "generation": 2, "steps": [{"step": 1, "message": "#inc"}, …]}`. A
+   page that sends the events that happen while the host is busy together
+   gets one patch for them, as Elm draws once per frame. Those events are
+   of views before the last, whose handlers the host keeps, as Elm uses the
    handlers that were on the page when an event happened. It ignores events
    of views older than the last 16, and answers with `{}` if all are.
 
@@ -87,10 +96,13 @@ request and response is JSON. A page:
 4. goes back to the model after a step, `{"op": "goto", "step": 1}`, for
    the last 1000 steps.
 
+5. asks for the whole view, `{"op": "view"}`, if it lost it, as when its
+   frame reloaded.
+
 A module that is new, as after a trap, answers `{"unloaded": true}` until it
-loads an app. A page that loads apps anew passes a `"generation"` after the
-last that it showed, so that it can't mistake events of an earlier app's
-views for the new one's.
+loads an app, and its first patch clears the page's view. A page that loads
+apps anew passes a `"generation"` after the last that it showed, so that it
+can't mistake events of an earlier app's views for the new one's.
 
 The page runs the module where it likes. Elm runs on the page's thread,
 which an app that loops forever freezes; a page that runs apps as they are
@@ -108,8 +120,8 @@ The recipe is the same for any platform:
 2. Generate its bindings, with `//go:generate go run ../../scrap-gen-go
    -main=false app.scrap`, which give its types as Go types, and `Load`,
    which checks a scrap against the interface once, and returns its value.
-3. Write the effects by hand: here, `host.go` turns views into JSON for a
-   page, and calls `update` with the messages of the events that it sends
-   back.
+3. Write the effects by hand: here, `host.go` and `dom.go` turn views into
+   patches for a page, and call `update` with the messages of the events
+   that it sends back.
 4. For a page, serve requests with `wasmhost.Serve`, and build with
    `GOOS=wasip1`.

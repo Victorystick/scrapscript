@@ -1,8 +1,9 @@
 // scrap-web hosts the web platform, in a web page: it runs an app, whose
 // interface is app.scrap, as Elm runs one. It is a WebAssembly module that
 // a page runs requests with, as wasmhost describes, and keeps the app and
-// its model between them. The page shows each view that it answers with,
-// and sends it the events that the view's handlers handle. Build it with:
+// its model between them. The page shows the view that it patches (see
+// dom.go), and sends it the events that the view's handlers handle. Build
+// it with:
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o scrap-web.wasm ./cmd/example/scrap-web
 //
@@ -45,12 +46,12 @@ type request struct {
 	Step int `json:"step"`
 }
 
-// An event is one that the handler of an element of the view of a
-// generation handled, with the value of its target, if the handler is a
-// function of it.
+// An event is one that an element of the view of a generation handled,
+// with the value of its target, for a handler that is a function of it.
 type event struct {
 	Generation int     `json:"generation"`
-	Handler    int     `json:"handler"`
+	Node       int     `json:"node"`
+	Event      string  `json:"event"`
 	Input      *string `json:"input"`
 }
 
@@ -58,11 +59,13 @@ type response struct {
 	Missing []string `json:"missing,omitempty"`
 	Error   string   `json:"error,omitempty"`
 	// Whether no app is loaded, as when the module is new.
-	Unloaded   bool   `json:"unloaded,omitempty"`
-	View       any    `json:"view,omitempty"`
-	Generation int    `json:"generation,omitempty"`
-	Steps      []step `json:"steps,omitempty"`
-	State      string `json:"state,omitempty"`
+	Unloaded bool `json:"unloaded,omitempty"`
+	// The patch that shows the view, as dom.go describes, and its
+	// generation.
+	Patch      json.RawMessage `json:"patch,omitempty"`
+	Generation int             `json:"generation,omitempty"`
+	Steps      []step          `json:"steps,omitempty"`
+	State      string          `json:"state,omitempty"`
 }
 
 // A step is an update of the model, by a message, as a scrap. Step 0 is
@@ -81,11 +84,68 @@ func handle(input []byte) []byte {
 	} else {
 		res = respond(req)
 	}
-	out, err := json.Marshal(res)
-	if err != nil {
-		panic(err)
+	return res.append(nil)
+}
+
+// append appends the response as JSON. Unlike encoding/json, it copies the
+// patch, which is most of a response, as it is.
+func (r *response) append(b []byte) []byte {
+	b = append(b, '{')
+	field := func(name string) {
+		if len(b) > 1 {
+			b = append(b, ',')
+		}
+		b = append(b, '"')
+		b = append(b, name...)
+		b = append(b, '"', ':')
 	}
-	return out
+	if r.Missing != nil {
+		field("missing")
+		b = append(b, '[')
+		for i, m := range r.Missing {
+			if i > 0 {
+				b = append(b, ',')
+			}
+			b = appendString(b, m)
+		}
+		b = append(b, ']')
+	}
+	if r.Error != "" {
+		field("error")
+		b = appendString(b, r.Error)
+	}
+	if r.Unloaded {
+		field("unloaded")
+		b = append(b, "true"...)
+	}
+	if r.Patch != nil {
+		field("patch")
+		b = append(b, r.Patch...)
+	}
+	if r.Generation != 0 {
+		field("generation")
+		b = strconv.AppendInt(b, int64(r.Generation), 10)
+	}
+	if r.Steps != nil {
+		field("steps")
+		b = append(b, '[')
+		for i, s := range r.Steps {
+			if i > 0 {
+				b = append(b, ',')
+			}
+			b = append(b, `{"step":`...)
+			b = strconv.AppendInt(b, int64(s.Step), 10)
+			b = append(b, `,"message":`...)
+			b = appendString(b, s.Message)
+			b = append(b, '}')
+		}
+		b = append(b, ']')
+	}
+	if r.State != "" {
+		field("state")
+		b = appendString(b, r.State)
+	}
+	return append(b, '}')
 }
 
 // The loaded app, if any.
@@ -109,6 +169,8 @@ func respond(req request) response {
 		return response{State: current.env.Print(current.model.v)}
 	case "goto":
 		return current.goTo(req.Step)
+	case "view":
+		return response{Patch: reshow(), Generation: current.generation}
 	}
 	return response{Error: "bad request: unknown op " + strconv.Quote(req.Op)}
 }
@@ -129,15 +191,14 @@ type session struct {
 	// The models that steps led to, the first of which is step first.
 	models []Model
 	first  int
-	// The generation of the last view, and the handlers of the elements of
-	// the last views, the last last.
+	// The generation of the last view, and the handlers of the last views,
+	// the last last.
 	generation int
-	handlers   [][]Attr
+	handlers   [][]handler
 }
 
 // load loads the app in req's source, with the model in its state or
-// init, and returns its session, and its first view. It fails as a
-// response with no session.
+// init, and returns its session, and its first view. It fails as a response with no session.
 func load(req request) (*session, response) {
 	env := eval.NewEnvironment()
 	req.Use(env)
@@ -175,8 +236,7 @@ func load(req request) (*session, response) {
 		}
 		model = Model{v}
 	}
-	first := max(req.Generation, 1)
-	s := &session{env: env, app: app, model: model, models: []Model{model}, generation: first - 1}
+	s := &session{env: env, app: app, model: model, models: []Model{model}, generation: max(req.Generation, 1) - 1}
 	res := s.render()
 	if res.Error != "" {
 		return nil, res
@@ -188,7 +248,8 @@ func load(req request) (*session, response) {
 // checks. The state is a scrap of its own, as its type isn't the
 // interface's to say.
 func fits(env *eval.Environment, app, state string) error {
-	s, err := env.Read([]byte("(app -> state -> [app.init, state])\n(" + app + "\n)\n(" + state + "\n)"))
+	src := "(app -> state -> [app.init, state])\n(" + app + "\n)\n(" + state + "\n)"
+	s, err := env.Read([]byte(src))
 	if err != nil {
 		return err
 	}
@@ -247,20 +308,31 @@ func (s *session) message(e event) (Msg, bool, error) {
 	if i < 0 || i >= len(s.handlers) {
 		return Msg{}, false, nil
 	}
+	// The last handler of an event wins, as the last attribute of a name
+	// does.
 	handlers := s.handlers[i]
-	if e.Handler < 0 || e.Handler >= len(handlers) {
-		return Msg{}, true, fmt.Errorf("bad request: no handler %d", e.Handler)
-	}
-	switch a := handlers[e.Handler]; a.Tag() {
-	case AttrOn:
-		return a.On().Msg, true, nil
-	default:
-		if e.Input == nil {
-			return Msg{}, true, fmt.Errorf("bad request: handler %d takes an input", e.Handler)
+	for j := len(handlers) - 1; j >= 0; j-- {
+		h := handlers[j]
+		if h.node != e.Node {
+			continue
 		}
-		msg, err := a.OnValue().Msg(*e.Input)
-		return msg, true, err
+		switch a := h.attr; a.Tag() {
+		case AttrOn:
+			if a.On().Event == e.Event {
+				return a.On().Msg, true, nil
+			}
+		case AttrOnValue:
+			if a.OnValue().Event != e.Event {
+				continue
+			}
+			if e.Input == nil {
+				return Msg{}, true, fmt.Errorf("bad request: the %s handler of node %d takes an input", e.Event, e.Node)
+			}
+			msg, err := a.OnValue().Msg(*e.Input)
+			return msg, true, err
+		}
 	}
+	return Msg{}, true, fmt.Errorf("bad request: node %d has no %s handler", e.Node, e.Event)
 }
 
 // goTo goes back, or forth, to the model of a step that the session keeps.
@@ -273,67 +345,18 @@ func (s *session) goTo(step int) response {
 	return s.render()
 }
 
-// render returns the view of the model, of the next generation, and keeps
-// its handlers.
+// render patches the view to the model's, of the next generation, and
+// keeps its handlers.
 func (s *session) render() response {
 	html, err := s.app.View(s.model)
 	if err != nil {
 		return response{Error: token.Render(err, nil)}
 	}
+	patch, handlers := patch(html)
 	s.generation++
 	if len(s.handlers) == maxViews {
 		s.handlers = s.handlers[1:]
 	}
-	s.handlers = append(s.handlers, nil)
-	return response{View: s.node(html), Generation: s.generation}
-}
-
-// An element is an element of a view, as a page builds it. Its text nodes
-// are strings.
-type element struct {
-	Tag      string             `json:"tag"`
-	Attrs    map[string]string  `json:"attrs,omitempty"`
-	On       map[string]handler `json:"on,omitempty"`
-	Children []any              `json:"children,omitempty"`
-}
-
-// A handler is what a page sends of an event: the handler's index, and
-// whether the value of the event's target is its input.
-type handler struct {
-	Handler int  `json:"handler"`
-	Value   bool `json:"value,omitempty"`
-}
-
-// node returns the element or text that h is.
-func (s *session) node(h Html) any {
-	if h.Tag() == HtmlText {
-		return h.Text()
-	}
-	el := h.El()
-	e := element{Tag: el.Tag}
-	for _, a := range el.Attrs {
-		var event string
-		switch a.Tag() {
-		case AttrAttr:
-			if e.Attrs == nil {
-				e.Attrs = make(map[string]string)
-			}
-			e.Attrs[a.Attr().Name] = a.Attr().Value
-			continue
-		case AttrOn:
-			event = a.On().Event
-		case AttrOnValue:
-			event = a.OnValue().Event
-		}
-		if e.On == nil {
-			e.On = make(map[string]handler)
-		}
-		last := &s.handlers[len(s.handlers)-1]
-		e.On[event] = handler{len(*last), a.Tag() == AttrOnValue}
-		*last = append(*last, a)
-	}
-	for _, c := range el.Children {
-		e.Children = append(e.Children, s.node(c))
-	}
-	return e
+	s.handlers = append(s.handlers, handlers)
+	return response{Patch: patch, Generation: s.generation}
 }

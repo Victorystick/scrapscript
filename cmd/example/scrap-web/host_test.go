@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,23 +27,54 @@ var counter = map[string]string{
 	"text-count.scrap": `{ count = "5", name = "you" }`,
 }
 
-// view returns the JSON of the counter's view.
-func view(count, name string) string {
-	return `{"tag":"p","attrs":{"class":"counter"},"children":["hi ` + name + `",` +
-		`{"tag":"input","attrs":{"value":"` + name + `"},"on":{"input":{"handler":0,"value":true}}},` +
-		`{"tag":"button","on":{"click":{"handler":1}},"children":["` + count + `"]}]}`
+// html returns the HTML of the counter's view.
+func html(count, name string) string {
+	return `<p class="counter">hi ` + name + `<input value=` + strconv.Quote(name) + ` on:input></input><button on:click>` + count + `</button></p>`
 }
 
-// run runs the requests, as JSON, in a new module, and returns the
-// responses.
-func run(t *testing.T, requests ...string) []string {
-	t.Helper()
+// A page runs requests in a new module, and shows their views in a frame.
+type page struct {
+	t          *testing.T
+	frame      *frame
+	generation int
+}
+
+func newPage(t *testing.T) *page {
 	current = nil
-	var out []string
-	for _, r := range requests {
-		out = append(out, string(handle([]byte(r))))
+	resetView()
+	return &page{t: t, frame: newFrame()}
+}
+
+// run runs the request, and shows the view that it patches.
+func (p *page) run(req string) response {
+	p.t.Helper()
+	var res response
+	if err := json.Unmarshal(handle([]byte(req)), &res); err != nil {
+		p.t.Fatal(err)
 	}
-	return out
+	if res.Patch != nil {
+		p.frame.apply(p.t, res.Patch)
+		p.generation = res.Generation
+	}
+	return res
+}
+
+// event returns an event of the n-th element with the tag in the view
+// shown, with the input, if any.
+func (p *page) event(tag string, n int, event string, input ...string) string {
+	p.t.Helper()
+	e := fmt.Sprintf(`{"generation":%d,"node":%d,"event":%q`, p.generation, p.frame.find(p.t, tag, n), event)
+	if len(input) > 0 {
+		in, _ := json.Marshal(input[0])
+		e += `,"input":` + string(in)
+	}
+	return e + "}"
+}
+
+// send runs a request that sends the events.
+func (p *page) send(events ...string) response {
+	p.t.Helper()
+	return p.run(`{"op":"send","events":[` + strings.Join(events, ",") + `]}`)
 }
 
 // loadReq returns a request that loads the counter with the state.
@@ -55,75 +87,145 @@ func loadReq(state string) string {
 	return string(b)
 }
 
-func check(t *testing.T, got []string, want ...string) {
-	t.Helper()
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("response %d: expected\n%s\ngot\n%s", i, want[i], got[i])
-		}
+func (p *page) shows(want string) {
+	p.t.Helper()
+	if got := p.frame.html(); got != want {
+		p.t.Errorf("expected the page to show\n%s\ngot\n%s", want, got)
 	}
+}
+
+func (p *page) state(want string) {
+	p.t.Helper()
+	if got := p.run(`{"op":"state"}`).State; got != want {
+		p.t.Errorf("expected the state %s, got %s", want, got)
+	}
+}
+
+func steps(res response) string {
+	var s []string
+	for _, st := range res.Steps {
+		s = append(s, fmt.Sprintf("%d %s", st.Step, st.Message))
+	}
+	return strings.Join(s, ", ")
 }
 
 func TestHost(t *testing.T) {
 	t.Run("init", func(t *testing.T) {
-		check(t, run(t, loadReq(""), `{"op":"state"}`),
-			`{"view":`+view("0", "")+`,"generation":1}`,
-			`{"state":"{ count = 0, name = \"\" }"}`)
+		p := newPage(t)
+		res := p.run(loadReq(""))
+		if res.Generation != 1 || !strings.HasPrefix(string(res.Patch), "[0,1,0,0,") {
+			t.Errorf("expected generation 1 of a new view, got %+v", res)
+		}
+		p.shows(html("0", ""))
+		p.state(`{ count = 0, name = "" }`)
 	})
 	t.Run("state", func(t *testing.T) {
-		check(t, run(t, loadReq(`$"./state.scrap"`)), `{"view":`+view("5", "you")+`,"generation":1}`)
+		p := newPage(t)
+		p.run(loadReq(`$"./state.scrap"`))
+		p.shows(html("5", "you"))
 	})
 	t.Run("events", func(t *testing.T) {
-		check(t, run(t, loadReq(""),
-			`{"op":"send","events":[{"generation":1,"handler":1},{"generation":1,"handler":0,"input":"\"a\""},{"generation":1,"handler":1}]}`,
-			`{"op":"state"}`,
-		),
-			`{"view":`+view("0", "")+`,"generation":1}`,
-			`{"view":`+view("2", `\"a\"`)+`,"generation":2,"steps":[`+
-				`{"step":1,"message":"#inc"},{"step":2,"message":"#name \"\\\"a\\\"\""},{"step":3,"message":"#inc"}]}`,
-			`{"state":"{ count = 2, name = \"\\\"a\\\"\" }"}`)
+		p := newPage(t)
+		p.run(loadReq(""))
+		res := p.send(p.event("button", 0, "click"), p.event("input", 0, "input", `"a"`), p.event("button", 0, "click"))
+		if got, want := steps(res), `1 #inc, 2 #name "\"a\"", 3 #inc`; got != want {
+			t.Errorf("expected steps %s, got %s", want, got)
+		}
+		if res.Generation != 2 {
+			t.Errorf("expected generation 2, got %d", res.Generation)
+		}
+		p.shows(html("2", `"a"`))
+		p.state(`{ count = 2, name = "\"a\"" }`)
+	})
+	t.Run("a patch changes what changed", func(t *testing.T) {
+		p := newPage(t)
+		p.run(loadReq(""))
+		res := p.send(p.event("button", 0, "click"))
+		// The p is node 1, its text 2, the input 3, the button 4, and its
+		// text 5.
+		if got, want := string(res.Patch), `[4,5,"1"]`; got != want {
+			t.Errorf("expected the patch %s, got %s", want, got)
+		}
 	})
 	t.Run("events of an earlier view", func(t *testing.T) {
 		// As the page sends an event before it shows the last view.
-		check(t, run(t, loadReq(""),
-			`{"op":"send","events":[{"generation":1,"handler":1}]}`,
-			`{"op":"send","events":[{"generation":1,"handler":1},{"generation":2,"handler":1}]}`,
-		)[1:],
-			`{"view":`+view("1", "")+`,"generation":2,"steps":[{"step":1,"message":"#inc"}]}`,
-			`{"view":`+view("3", "")+`,"generation":3,"steps":[{"step":2,"message":"#inc"},{"step":3,"message":"#inc"}]}`)
+		p := newPage(t)
+		p.run(loadReq(""))
+		first := p.event("button", 0, "click")
+		p.send(first)
+		res := p.send(first, p.event("button", 0, "click"))
+		if got, want := steps(res), "2 #inc, 3 #inc"; got != want {
+			t.Errorf("expected steps %s, got %s", want, got)
+		}
+		p.shows(html("3", ""))
 	})
 	t.Run("events of views it no longer keeps", func(t *testing.T) {
-		reqs := []string{loadReq("")}
-		for g := 1; g <= maxViews; g++ {
-			reqs = append(reqs, fmt.Sprintf(`{"op":"send","events":[{"generation":%d,"handler":1}]}`, g))
+		p := newPage(t)
+		p.run(loadReq(""))
+		first := p.event("button", 0, "click")
+		for range maxViews {
+			p.send(p.event("button", 0, "click"))
 		}
-		reqs = append(reqs, `{"op":"send","events":[{"generation":1,"handler":1}]}`, `{"op":"send","events":[{"generation":2,"handler":1}]}`)
-		got := run(t, reqs...)
-		check(t, got[len(got)-2:], `{}`, `{"view":`+view(fmt.Sprint(maxViews+1), "")+`,"generation":18,"steps":[{"step":17,"message":"#inc"}]}`)
+		if res := p.send(first); res.Steps != nil || res.Error != "" {
+			t.Errorf("expected no steps, got %+v", res)
+		}
+		p.shows(html(fmt.Sprint(maxViews), ""))
 	})
 	t.Run("goto", func(t *testing.T) {
-		check(t, run(t, loadReq(""),
-			`{"op":"send","events":[{"generation":1,"handler":1},{"generation":1,"handler":1}]}`,
-			`{"op":"goto","step":1}`,
-			`{"op":"send","events":[{"generation":3,"handler":1}]}`,
-		)[2:],
-			`{"view":`+view("1", "")+`,"generation":3}`,
-			`{"view":`+view("2", "")+`,"generation":4,"steps":[{"step":3,"message":"#inc"}]}`)
+		p := newPage(t)
+		p.run(loadReq(""))
+		p.send(p.event("button", 0, "click"), p.event("button", 0, "click"))
+		p.run(`{"op":"goto","step":1}`)
+		p.shows(html("1", ""))
+		if res := p.send(p.event("button", 0, "click")); steps(res) != "3 #inc" {
+			t.Errorf("expected step 3, got %s", steps(res))
+		}
+		p.shows(html("2", ""))
+	})
+	t.Run("a new version of the app patches the view", func(t *testing.T) {
+		p := newPage(t)
+		p.run(loadReq(""))
+		drafts := map[string]string{"main.scrap": strings.Replace(counter["main.scrap"], `"hi "`, `"hello "`, 1)}
+		req, _ := json.Marshal(request{Op: "load", Source: `$"./main.scrap"`, Generation: 2, Scraps: wasmhost.Scraps{Drafts: drafts}})
+		if got, want := string(p.run(string(req)).Patch), `[4,2,"hello "]`; got != want {
+			t.Errorf("expected the patch %s, got %s", want, got)
+		}
+	})
+	t.Run("view", func(t *testing.T) {
+		p := newPage(t)
+		p.run(loadReq(""))
+		p.send(p.event("button", 0, "click"))
+		// As for a frame that reloaded.
+		p.frame = newFrame()
+		p.frame.apply(t, p.run(`{"op":"view"}`).Patch)
+		p.shows(html("1", ""))
+		if p.generation != 2 {
+			t.Errorf("expected generation 2, got %d", p.generation)
+		}
 	})
 	t.Run("generations go on", func(t *testing.T) {
+		p := newPage(t)
 		req, _ := json.Marshal(request{Op: "load", Source: `$"./main.scrap"`, Generation: 7, Scraps: wasmhost.Scraps{Drafts: counter}})
-		check(t, run(t, string(req)), `{"view":`+view("0", "")+`,"generation":7}`)
+		if res := p.run(string(req)); res.Generation != 7 {
+			t.Errorf("expected generation 7, got %d", res.Generation)
+		}
 	})
 	t.Run("unloaded", func(t *testing.T) {
-		check(t, run(t, `{"op":"state"}`), `{"unloaded":true}`)
+		p := newPage(t)
+		if res := p.run(`{"op":"state"}`); !res.Unloaded {
+			t.Errorf("expected unloaded, got %+v", res)
+		}
 	})
 	t.Run("a failed load keeps the app", func(t *testing.T) {
-		check(t, run(t, loadReq(""), loadReq(`$"./text-count.scrap"`), `{"op":"state"}`)[2:],
-			`{"state":"{ count = 0, name = \"\" }"}`)
+		p := newPage(t)
+		p.run(loadReq(""))
+		p.run(loadReq(`$"./text-count.scrap"`))
+		p.state(`{ count = 0, name = "" }`)
 	})
 }
 
 func TestHostErrors(t *testing.T) {
+	click := `{"op":"send","events":[{"generation":1,"node":1,"event":"click"}]}`
 	examples := []struct {
 		name     string
 		requests []string
@@ -133,17 +235,18 @@ func TestHostErrors(t *testing.T) {
 		{"state of another type", []string{loadReq(`$"./text-count.scrap"`)},
 			"the state is not a model of the app: cannot unify 'int' with 'text'"},
 		{"bad state", []string{loadReq(`1 + "a"`)}, "cannot unify 'text' with 'int'"},
-		{"no such handler", []string{loadReq(""), `{"op":"send","events":[{"generation":1,"handler":2}]}`}, "bad request: no handler 2"},
-		{"no input", []string{loadReq(""), `{"op":"send","events":[{"generation":1,"handler":0}]}`}, "bad request: handler 0 takes an input"},
+		{"no such handler", []string{loadReq(""), click}, "bad request: node 1 has no click handler"},
+		{"no input", []string{loadReq(""), `{"op":"send","events":[{"generation":1,"node":3,"event":"input"}]}`},
+			"bad request: the input handler of node 3 takes an input"},
 		{"no such step", []string{loadReq(""), `{"op":"goto","step":1}`}, "bad request: no step 1"},
 		{"unknown op", []string{loadReq(""), `{"op":"push"}`}, `bad request: unknown op "push"`},
 	}
 	for _, ex := range examples {
 		t.Run(ex.name, func(t *testing.T) {
-			got := run(t, ex.requests...)
+			p := newPage(t)
 			var res response
-			if err := json.Unmarshal([]byte(got[len(got)-1]), &res); err != nil {
-				t.Fatal(err)
+			for _, r := range ex.requests {
+				res = p.run(r)
 			}
 			if !strings.Contains(res.Error, ex.wantErr) {
 				t.Errorf("expected error %q, got %+v", ex.wantErr, res)
@@ -159,22 +262,21 @@ func TestFailingUpdate(t *testing.T) {
 		`| #inc -> m -> { ..m, count = m.count + 1 }`,
 		`| #inc -> m -> (list/repeat (m.count - 1) 0 |> _ -> { ..m, count = m.count + 1 })`, 1)}
 	req, _ := json.Marshal(request{Op: "load", Source: `$"./main.scrap"`, State: `{ count = 0, name = "" }`, Scraps: wasmhost.Scraps{Drafts: drafts}})
-	got := run(t, string(req), `{"op":"send","events":[{"generation":1,"handler":0,"input":"x"},{"generation":1,"handler":1},{"generation":1,"handler":1}]}`)
-	var res response
-	if err := json.Unmarshal([]byte(got[1]), &res); err != nil {
-		t.Fatal(err)
-	}
+	p := newPage(t)
+	p.run(string(req))
+	res := p.send(p.event("input", 0, "input", "x"), p.event("button", 0, "click"), p.event("button", 0, "click"))
 	if !strings.Contains(res.Error, "list/repeat: negative count -1") || len(res.Steps) != 1 || res.Generation != 2 {
-		t.Errorf("got %s", got[1])
+		t.Errorf("got %+v", res)
 	}
+	p.shows(html("0", "x"))
 }
 
 // The scraps that an app refers to by hash are missing, as for any scrap.
 func TestMissing(t *testing.T) {
 	inc := `x -> x + 1`
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(inc)))
-	got := run(t, loadReq(`$source:`+hash))
-	if want := `{"missing":["` + hash + `"]}`; got[0] != want {
-		t.Errorf("expected %s, got %s", want, got[0])
+	got := string(handle([]byte(loadReq(`$source:` + hash))))
+	if want := `{"missing":["` + hash + `"]}`; got != want {
+		t.Errorf("expected %s, got %s", want, got)
 	}
 }

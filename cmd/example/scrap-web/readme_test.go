@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/Victorystick/scrapscript/host/wasmhost"
@@ -17,11 +18,15 @@ func TestReadme(t *testing.T) {
 	}
 	app := regexp.MustCompile("(?s)```scrap\n(\\{ init = 0.*?)```").FindSubmatch(readme)
 	req, _ := json.Marshal(request{Op: "load", Source: `$"./main.scrap"`, Scraps: wasmhost.Scraps{Drafts: map[string]string{"main.scrap": string(app[1])}}})
-	got := run(t, string(req), `{"op":"send","events":[{"generation":1,"handler":1},{"generation":1,"handler":1},{"generation":1,"handler":0}]}`)
-	want := `{"view":{"tag":"p","children":[{"tag":"button","on":{"click":{"handler":0}},"children":["-"]},"1",` +
-		`{"tag":"button","on":{"click":{"handler":1}},"children":["+"]}]},"generation":2,` +
-		`"steps":[{"step":1,"message":"#inc"},{"step":2,"message":"#inc"},{"step":3,"message":"#dec"}]}`
-	if got[1] != want {
-		t.Errorf("expected\n%s\ngot\n%s", want, got[1])
+	p := newPage(t)
+	// The patch starts as README.md's example does.
+	example := regexp.MustCompile("```json\n\\s*(\\[0, 1, .*?), …\\]").FindSubmatch(readme)
+	if patch := p.run(string(req)).Patch; !strings.HasPrefix(string(patch), strings.ReplaceAll(string(example[1]), ", ", ",")) {
+		t.Errorf("expected the patch to start with %s, got %s", example[1], patch)
 	}
+	res := p.send(p.event("button", 1, "click"), p.event("button", 1, "click"), p.event("button", 0, "click"))
+	if got, want := steps(res), "1 #inc, 2 #inc, 3 #dec"; got != want {
+		t.Errorf("expected steps %s, got %s", want, got)
+	}
+	p.shows(`<p><button on:click>-</button>1<button on:click>+</button></p>`)
 }
