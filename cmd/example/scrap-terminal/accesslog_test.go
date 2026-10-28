@@ -90,7 +90,7 @@ func accessReport(log string) string {
 	return sb.String()
 }
 
-func loadAccessLog(tb testing.TB) Program {
+func loadAccessLog(tb testing.TB) ProgramRef {
 	tb.Helper()
 	source, err := os.ReadFile("testdata/access-log.scrap")
 	if err != nil {
@@ -110,7 +110,7 @@ func loadAccessLog(tb testing.TB) Program {
 
 // loadLibraryAccessLog loads the version of the program in lib/, which
 // imports the parser and avl libraries.
-func loadLibraryAccessLog(tb testing.TB) Program {
+func loadLibraryAccessLog(tb testing.TB) ProgramRef {
 	tb.Helper()
 	source, err := os.ReadFile("../../../lib/access-log.scrap")
 	if err != nil {
@@ -134,7 +134,7 @@ func TestAccessLog(t *testing.T) {
 	t.Run("lib", func(t *testing.T) { testAccessLog(t, loadLibraryAccessLog(t)) })
 }
 
-func testAccessLog(t *testing.T, p Program) {
+func testAccessLog(t *testing.T, p ProgramRef) {
 	for _, size := range []struct{ lines, paths int }{{0, 1}, {1, 1}, {100, 3}, {5000, 300}} {
 		log := accessLog(size.lines, size.paths)
 		var out strings.Builder
@@ -160,7 +160,7 @@ func BenchmarkAccessLogLib(b *testing.B) {
 	benchmarkAccessLog(b, loadLibraryAccessLog(b))
 }
 
-func benchmarkAccessLog(b *testing.B, p Program) {
+func benchmarkAccessLog(b *testing.B, p ProgramRef) {
 	log := accessLog(10000, 200)
 	b.SetBytes(int64(len(log)))
 	b.ReportAllocs()

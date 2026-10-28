@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"iter"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,3 +151,39 @@ func ListTo[T any](xs []T, to func(T) eval.Value) eval.Value {
 	}
 	return eval.NewList(elems...)
 }
+
+// A ListRef is a list as a script holds it, whose elements convert to T
+// only as they are read, and which goes back to a script as it is.
+type ListRef[T any] struct {
+	v     eval.Value
+	elems []eval.Value
+	at    func(eval.Value) T
+}
+
+// NewListRef returns the list value v, whose elements at converts.
+func NewListRef[T any](v eval.Value, at func(eval.Value) T) ListRef[T] {
+	return ListRef[T]{v, v.List().Elements(), at}
+}
+
+// Value returns the list as a value.
+func (x ListRef[T]) Value() eval.Value { return x.v }
+
+// Len returns the number of elements.
+func (x ListRef[T]) Len() int { return len(x.elems) }
+
+// At returns the ith element.
+func (x ListRef[T]) At(i int) T { return x.at(x.elems[i]) }
+
+// All returns the elements in order, with their indices.
+func (x ListRef[T]) All() iter.Seq2[int, T] {
+	return func(yield func(int, T) bool) {
+		for i, e := range x.elems {
+			if !yield(i, x.at(e)) {
+				return
+			}
+		}
+	}
+}
+
+// Load converts all the elements.
+func (x ListRef[T]) Load() []T { return ListFrom(x.v, x.at) }

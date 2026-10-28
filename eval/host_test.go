@@ -194,6 +194,26 @@ func TestShape(t *testing.T) {
 	e.Shape(e.Label("a"), e.Label("a"))
 }
 
+func TestShapeField(t *testing.T) {
+	e := environment()
+	s := e.Shape(e.Label("b"), e.Label("a"))
+	// A record that a scrap made has the shape too, so its fields are at
+	// the indices that Shape was given its labels in.
+	r, err := e.Eval(read(t, e, `{ a = "x", b = 1 }`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Field(r, 0).Int() != 1 || s.Field(r, 1).Text() != "x" {
+		t.Errorf("expected b = 1 and a = \"x\"")
+	}
+	defer func() {
+		if recover() == nil {
+			t.Errorf("expected a record of another shape to panic")
+		}
+	}()
+	e.Shape(e.Label("a")).Field(r, 0)
+}
+
 func TestCallFailure(t *testing.T) {
 	e := environment()
 	fn, err := e.Eval(read(t, e, `| #a -> 2`))

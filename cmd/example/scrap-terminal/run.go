@@ -11,44 +11,46 @@ import (
 	"strings"
 )
 
-func run(p Program, args []string) (int, error) {
+func run(p ProgramRef, args []string) (int, error) {
 	return Run(p, os.Stdin, os.Stdout)
 }
 
 // Run runs the program p, reading lines from r and writing its output to w,
 // until it asks to exit, and returns its status. Reads after the last line
 // keep returning #eof, as with POSIX read; a last line without a newline is
-// still a line.
-func Run(p Program, r io.Reader, w io.Writer) (int, error) {
+// still a line. The program's state passes from one step to the next as it
+// is, never converted.
+func Run(p ProgramRef, r io.Reader, w io.Writer) (int, error) {
+	b := p.Bindings()
 	in := bufio.NewReader(r)
 	eof := false
-	turn := p.Init
+	turn := p.Init()
 	for {
-		if _, err := io.WriteString(w, turn.Out); err != nil {
+		if _, err := io.WriteString(w, turn.Out()); err != nil {
 			return 0, err
 		}
-		if turn.Next.Tag() == NextActionExit {
-			return int(turn.Next.Exit()), nil
+		if next := turn.Next(); next.Tag() == NextActionExit {
+			return int(next.Exit()), nil
 		}
 
-		event := NewEventEof()
+		event := NewEventEof().Ref(b)
 		if !eof {
 			line, err := in.ReadString('\n')
 			switch {
 			case err == io.EOF:
 				eof = true
 				if line != "" {
-					event = NewEventLine(line)
+					event = NewEventLine(line).Ref(b)
 				}
 			case err != nil:
 				return 0, err
 			default:
-				event = NewEventLine(strings.TrimSuffix(line, "\n"))
+				event = NewEventLine(strings.TrimSuffix(line, "\n")).Ref(b)
 			}
 		}
 
 		var err error
-		if turn, err = p.Step(event, turn.State); err != nil {
+		if turn, err = p.Step(event, turn.State()); err != nil {
 			return 0, err
 		}
 	}
