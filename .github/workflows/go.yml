@@ -20,6 +20,9 @@ jobs:
       uses: actions/setup-go@v4
       with:
         go-version-file: 'go.mod'
+        # There is no go.sum to key the cache on, and the build cache
+        # (mostly the standard library) is what's worth keeping.
+        cache-dependency-path: go.mod
 
     - name: Build
       run: go build -v ./...
