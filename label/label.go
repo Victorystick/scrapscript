@@ -5,6 +5,7 @@
 package label
 
 import (
+	"slices"
 	"strings"
 	"sync"
 )
@@ -73,4 +74,14 @@ func (t *Table) Name(id ID) string {
 // same whatever order the names were interned in.
 func (t *Table) Compare(a, b ID) int {
 	return strings.Compare(t.Name(a), t.Name(b))
+}
+
+// Names returns the names that t has interned, by ID, from ID 1.
+func (t *Table) Names() []string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if len(t.names) == 0 {
+		return nil
+	}
+	return slices.Clone(t.names[1:])
 }

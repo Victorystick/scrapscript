@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 
 	"github.com/Victorystick/scrapscript/eval"
@@ -25,12 +29,16 @@ var commands = []Command{
 	{name: "test", desc: "runs the test cases it holds", fn: runTests},
 	{name: "push", desc: "pushes it to the server", fn: pushScrap},
 	{name: "hash", desc: "prints its sha256 hash", fn: hashScrap},
+	{name: "build", desc: "compiles it to a program that prints its value, with go build", fn: buildScrap},
 }
 
 var (
 	server = flag.String("server", "https://scraps.oseg.dev/", "The scrapyard server to use")
 	root   = flag.String("root", ".", "The directory the script reads drafts from, as if it were a file there")
 	cache  = flag.String("cache", "", "The directory to cache fetched scraps in (default: the user cache directory)")
+	output = flag.String("o", "scrap.out", "build: the program to write")
+	gen    = flag.String("gen", "", "build: the directory to write the Go module to, instead of a temporary one, which it keeps")
+	module = flag.String("module", "", "build: the directory of the scrapscript module to build against (default: found with go list)")
 )
 
 func main() {
@@ -148,4 +156,68 @@ func highlighter(f *os.File) token.Highlighter {
 		return highlight.ANSI
 	}
 	return nil
+}
+
+// buildScrap compiles the scrap to a Go program, which prints its value as
+// eval does, and builds it with go build. The scraps it refers to are
+// fetched now, and embedded in the program.
+func buildScrap(args []string) {
+	input := must(io.ReadAll(os.Stdin))
+	env := makeEnv()
+	scrap := must(env.Read(input))
+	src := must(env.GenerateGo(scrap, eval.GoConfig{Package: "main", Main: true}))
+
+	dir := *gen
+	if dir == "" {
+		dir = must(os.MkdirTemp("", "scrap-build-"))
+		defer os.RemoveAll(dir)
+	} else {
+		must(0, os.MkdirAll(dir, 0o755))
+	}
+	must(0, os.WriteFile(filepath.Join(dir, "main.go"), src, 0o644))
+	mod, tidy := goMod()
+	must(0, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644))
+
+	goCmd := func(args ...string) {
+		cmd := exec.Command("go", args...)
+		cmd.Dir, cmd.Stdout, cmd.Stderr = dir, os.Stdout, os.Stderr
+		must(0, cmd.Run())
+	}
+	if tidy {
+		goCmd("mod", "tidy")
+	}
+	goCmd("build", "-o", must(filepath.Abs(*output)), ".")
+}
+
+const modulePath = "github.com/Victorystick/scrapscript"
+
+// goMod returns the go.mod of a built program, which requires the
+// scrapscript module: in the directory that -module or go list names, or
+// else the version that this command was built from, in which case the
+// module needs go mod tidy to fetch it.
+func goMod() (mod string, tidy bool) {
+	// The go version of the toolchain that built this command, which is at
+	// least the module's.
+	version := strings.TrimPrefix(runtime.Version(), "go")
+	if !strings.HasPrefix(version, "1.") {
+		version = "1.24.2"
+	}
+	mod = "module scrapbuild\n\ngo " + version + "\n\n"
+	dir := *module
+	if dir == "" {
+		if out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", modulePath).Output(); err == nil {
+			dir = strings.TrimSpace(string(out))
+		}
+	}
+	if dir != "" {
+		dir = must(filepath.Abs(dir))
+		return mod + fmt.Sprintf("require %s v0.0.0\n\nreplace %s => %s\n", modulePath, modulePath, dir), false
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Path == modulePath {
+		if v := info.Main.Version; v != "" && v != "(devel)" && !strings.HasSuffix(v, "+dirty") {
+			return mod + fmt.Sprintf("require %s %s\n", modulePath, v), true
+		}
+	}
+	must(0, fmt.Errorf("cannot find the scrapscript module to build against; name its directory with -module"))
+	return "", false
 }

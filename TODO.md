@@ -1,9 +1,9 @@
 # TODO
 
 Architectural blemishes, most important first, then gaps in the language
-itself (9). Items 1–4 are one piece of work: lower the AST to a core IR
-after type checking, and evaluate that. Track the effect on performance in
-[BENCHMARK.md](BENCHMARK.md).
+itself (9) and native code (10). Items 1–4 are one piece of work: lower the
+AST to a core IR after type checking, and evaluate that. Track the effect
+on performance in [BENCHMARK.md](BENCHMARK.md).
 
 ## 1. No core IR
 
@@ -252,6 +252,31 @@ first. 1 and 2 change what the language promises.
         a tag that is built but that only wildcard arms match, which needs
         diagnostics with a severity (7) and is noisy: `| #some _ -> #true
         | _ -> #false` takes `#none` that way.
+
+## 10. Native code
+
+`scrap build` compiles the core to Go (eval/native_gen.go) and builds it
+with the runtime in eval/native.go. Each lambda is a Go function, its frame
+Go variables; calls to known lambdas are direct Go calls; calls to
+themselves in tail position loop; other tail calls that may cycle return a
+pending call in a `Tail` that the evaluation shares. TestNative checks it
+against the evaluator.
+
+- [ ] Platforms: link a script's native code into its host, which today
+      loads and checks scripts while it runs. The generated bindings
+      (gogen) would wrap the native program's value instead of an
+      `Environment`'s.
+- [ ] Know more callees. Only lambdas bound in where-groups, and captures
+      of them, are known; a call through a record field, such as
+      `avl.upsert` or `p.keep`, dispatches on the value even when the
+      field's static part says which lambda it is.
+- [ ] Builtins that call back into native code (list/map, list/fold,
+      list/sort) pass no `Tail`, so a callback that ends in a pending call
+      allocates one.
+- [ ] Runtime errors from native code have no source positions; only
+      builtins and host functions fail once a scrap checks.
+- [ ] Specialise on the checker's types (3): unboxed ints and floats in
+      Go variables, and records of closed types as Go structs.
 
 ## Accepted
 

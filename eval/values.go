@@ -23,10 +23,12 @@ const (
 	kindBuiltin
 	kindPartial
 	kindScript
+	kindNative // a function compiled to Go, native.go
+	kindTail   // a pending tail call of native code, never a value
 	numKinds
 )
 
-var kindNames = [numKinds]string{"no value", "()", "int", "float", "text", "byte", "bytes", "record", "list", "variant", "function", "function", "function"}
+var kindNames = [numKinds]string{"no value", "()", "int", "float", "text", "byte", "bytes", "record", "list", "variant", "function", "function", "function", "function", "pending call"}
 
 func (k kind) String() string {
 	return kindNames[k]

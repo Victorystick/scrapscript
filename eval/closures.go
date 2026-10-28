@@ -159,11 +159,11 @@ func (p *program) operands(ns []int32) []operand {
 }
 
 // builtin returns the builtin that n is a constant of, if it is.
-func (p *program) builtin(n cnode) (*builtinFunc, bool) {
-	if p.ops[n] != opConst {
+func (c *core) builtin(n cnode) (*builtinFunc, bool) {
+	if c.ops[n] != opConst {
 		return nil, false
 	}
-	if v := p.consts[p.data[n].a]; v.kind() == kindBuiltin {
+	if v := c.consts[c.data[n].a]; v.kind() == kindBuiltin {
 		return v.asBuiltin(), true
 	}
 	return nil, false

@@ -40,6 +40,13 @@ So far it supports
     1 failed, 0 passed
     ```
 
+* `scrap build` to compile a script passed over standard input to a program that prints its value, as `scrap eval` would. The scraps it refers to are resolved and fetched while building, and embedded in the program, which reads no files and fetches nothing. It needs Go, as it generates Go code and runs `go build`; `-o` names the program and `-gen dir` keeps the generated Go module in `dir`. Inside this repository it builds against the checkout; elsewhere, `-module dir` names a checkout to build against.
+
+    ```sh
+    $ echo 'list/map (n -> n * n) [1, 2, 3]' | scrap build -o squares && ./squares
+    [ 1, 4, 9 ]
+    ```
+
 * `--root dir` reads the script as if it were a file in `dir`, which relative imports such as `$"./test.scrap"` resolve from, and `--cache dir` keeps fetched scraps in `dir` instead of the user cache directory. Flags go before or after the command:
 
     ```sh

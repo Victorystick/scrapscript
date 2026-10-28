@@ -74,3 +74,38 @@ Medians of 10 runs, Apple M3 Pro, `-cpu 1`.
 | `49dc53f` | Since `c8012f4`: no equality of values (`9f5545c`), hosts' `eval.Value` a struct (`f109fb9`), both neutral, and values as two words, with scalars and payloadless tags unboxed and list tails unallocated (`49dc53f`). sum −35%, fields −27%, loop −23%, destructure-closed −23%, fold −22%, tree −20%, AccessLog −11% (allocs −18%), Eval allocs −45%. Interleaved against `f109fb9`: Eval −21% (geomean), allocs −50%; AccessLog −13% | 0.21 ms | 0.35 ms | 0.58 ms | 3.86k | 1.16 ms | 64.2 µs | 35.3 ms |
 | `1dcd351` | Records hold their shape's ID in the value instead of a header: values are one plain allocation, laid out as a list's. Interleaved against `0d8206c`: Eval −1.8% (geomean), bytes −15%, allocs unchanged; rows −7%, destructure −7%, destructure-closed −5%, tree −3%; AccessLog −2.7%, bytes −7.6% | 0.21 ms | 0.35 ms | 0.57 ms | 3.86k | 1.15 ms | 63.3 µs | 34.3 ms |
 | `159e64b` | Since `1dcd351`: partial applications of script functions take all a call's arguments at once (`7997ef5`) and are one allocation with their arguments (`159e64b`); adds `AccessLogLib`, 462 ms in this run (±14% at `-cpu 1`). Interleaved against `c1d5691`, the two together: AccessLogLib −12% time, −23% allocs; AccessLog −2% time, −9% allocs; Eval unchanged | 0.21 ms | 0.35 ms | 0.59 ms | 3.86k | 1.16 ms | 64.0 µs | 33.7 ms |
+
+## Native code
+
+`bench/native.sh` compiles `Eval`'s programs to native code, as `scrap build`
+does, and runs them as a `BenchmarkEval` of their own, saved as
+`bench/<date>-<commit>-native.txt`. Each run evaluates the program from its
+root, as `Eval` does.
+
+Against the evaluator on the same commit, medians of 5 interleaved runs,
+Intel Xeon @ 2.80 GHz (a cloud container, so slower than the M3 above),
+`-cpu 1`:
+
+| Program | Evaluator | Native | Speedup | Allocs (eval → native) |
+|---|---|---|---|---|
+| fib | 503 µs | 32.6 µs | 15.4× | 5188 → 20 |
+| loop | 1270 µs | 7.5 µs | 169× | 10004 → 2 |
+| sum | 151 µs | 23.0 µs | 6.6× | 1005 → 3 |
+| fold | 838 µs | 146 µs | 5.8× | 10001 → 2 |
+| records | 245 µs | 67.4 µs | 3.6× | 2005 → 1003 |
+| fields | 442 µs | 11.2 µs | 39.5× | 2004 → 2 |
+| rows | 656 µs | 271 µs | 2.4× | 6004 → 5002 |
+| destructure | 372 µs | 127 µs | 2.9× | 3004 → 2002 |
+| destructure-closed | 275 µs | 4.2 µs | 65.8× | 2004 → 2 |
+| tree | 536 µs | 107 µs | 5.0× | 6145 → 2049 |
+| text | 312 µs | 239 µs | 1.3× | 2001 → 1001 |
+| echo | 1413 µs | 1048 µs | 1.35× | 9024 → 6015 |
+
+Geomean 7.9×. Frames are Go variables, so calls allocate nothing, and the Go
+compiler inlines direct calls of known lambdas: in fields and
+destructure-closed, records that don't escape stay on the stack. Programs
+that allocate their values anyway, such as text's concatenation, or that
+call through closures they don't know, such as echo's step function, gain
+least. The `lib/` access-log, run on 10k lines by the reference semantics
+of `Eval/echo`, took 1.24 s with `scrap eval`, parsing and checking
+included, and 0.54 s as a program from `scrap build`.

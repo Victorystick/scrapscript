@@ -82,6 +82,10 @@ func call2(fn, a, b value) value {
 		if g := fn.asBuiltin(); g.two != nil {
 			return g.two(a, b)
 		}
+	case kindNative:
+		if nf := fn.asNative(); len(nf.args) == 0 && nf.code.Arity == 2 {
+			return (*Tail)(nil).settle(nf.code.F2(nil, toHost(nf.caps), Value{a}, Value{b}).v)
+		}
 	case kindScript:
 		if g := fn.asScript(); len(g.args) == 0 && !g.composition() {
 			if l := g.prog.lam(g.node); l.arity == 2 {
@@ -108,6 +112,8 @@ func enter(fn, arg value) (body tcode, f frame, v value) {
 				return nil, f, g.one(arg)
 			}
 			return nil, f, partialVal(&partial{g, []value{arg}})
+		case kindNative:
+			return nil, f, (*Tail)(nil).callNative(fn.asNative(), []value{arg})
 		case kindPartial:
 			// Each partial application has its own arguments.
 			g := fn.asPartial()
@@ -149,6 +155,8 @@ func enterN(fn value, args []value) (body tcode, f frame, v value) {
 		if g := fn.asBuiltin(); g.arity == len(args) && g.arity > 1 {
 			return nil, f, g.invoke(args)
 		}
+	case kindNative:
+		return nil, f, (*Tail)(nil).callNative(fn.asNative(), args)
 	case kindScript:
 		if g := fn.asScript(); len(args) > 1 && !g.composition() {
 			l := g.prog.lam(g.node)
