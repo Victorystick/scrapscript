@@ -147,6 +147,17 @@ builtins now return plain values and panic with a `runtimeError`, which
       or enum doesn't fit the width, variables named from `a` per field,
       and syntax highlighting on a terminal (as errors already colour
       only when stdout is one).
+- [ ] Host bindings convert values eagerly (gogen): records become
+      structs and lists slices, and bytes are copied, both ways, so a host
+      that only passes a list or tree back to the script still walks it
+      twice. Generate a `Ref` per type instead, which holds the
+      `eval.Value` as type parameters' wrappers already do, with typed
+      accessors (static field indices, since interface rows are closed)
+      and a `Load()` that converts eagerly for hosts that want plain
+      structs. Watch for: a Ref to one field keeps the whole value alive,
+      `bytes` must copy or stay read-only, and Go code builds values with
+      constructors instead of struct literals. Measure on the terminal
+      host (cmd/example/scrap-terminal) first.
 
 ## 8. Printing closures
 
@@ -220,15 +231,44 @@ first. 1 and 2 change what the language promises.
 - [ ] Later: record extension. Spreads only update, so `{ ..{ a = 1 }, b =
       2 }` is a type error; section 7.3 notes that lacks constraints make
       a separate extension construct possible.
-- [ ] Sketch how opaque types could fit into SPEC.md. Types are structural
-      and members transparent (section 7.7), so a library can't enforce an
-      invariant: anyone can build a `#node` that breaks avl's balance, and
-      smart constructors, validated values and newtypes are conventions
-      only. Section 7.7 leaves abstract members open because they need
-      nominal identity. Work out where that identity comes from (the
-      scrap's hash and the member's name?), how it stays erased at
-      runtime, how such values print (section 10, rule 6), and how hosts
-      see them (section 13).
+- [ ] Private labels, for opaque types. Types are structural and members
+      transparent (section 7.7), so a library can't enforce an invariant:
+      anyone can build a `#node` that breaks avl's balance, and smart
+      constructors, validated values and newtypes are conventions only.
+      Rather than nominal types, make privacy a property of labels, which
+      records and enums share (section 7.3): `@node` is a tag and
+      `@height` a field (`r.@height`) that only code in their scope can
+      build, match or read. A where-group mints the `@` labels that its
+      sort bindings mention, for its bindings and body, so scoping is
+      lexical and imports still inline; elsewhere `@x` is an unbound
+      label. A label is its minting site and name, distinct from `#node`
+      and from another scope's `@node`. Types stay structural: `avl.tree`
+      stays a transparent alias that outsiders can name but not open, and
+      rows, unification, exhaustiveness and evaluation are unchanged. For
+      avl, `#leaf` and `#node` become `@leaf` and `@node`. A newtype is a
+      one-tag union, `email : type = [@email text]`, and a record whose
+      invariant spans its fields is wrapped in a tag, `[@counter { items :
+      list a, size : int }]`, since a spread can update its public fields.
+      (Roc splits nominal `:=` and opaque `::` types instead, but for
+      static dispatch, which scrapscript doesn't have.) Open:
+  - Shadowing: whether an inner group that mentions `@node` mints a new
+    label, as names shadow, or reuses the outer one.
+  - Equality (the comparisons item above): values with private labels
+    compare only where their labels are in scope.
+  - Printing (section 10, rule 6): printed output can mint its own
+    `@node` and reads back the same, but can't name the library's without
+    allowing forgery, so it can't be passed back to the library. Perhaps
+    the formal semantics (section 12) settles it, treating minted labels
+    as name binders (as in Pitts and Stark's ν-calculus), so that rule 6
+    holds up to renaming them.
+  - Phantom types, for one generic API over a family of types (`key a`);
+    distinct labels already cover ids, units and typestate. Maybe
+    encodable as a private tag that is never built, `[@id int, @phantom
+    a]`, depending on presence in annotations (section 7.3).
+  - A wrapping tag costs a word per value. Unboxing a closed one-tag enum
+    needs the printer to get the tag back.
+  - Hosts see through private labels in their interface, so a platform
+    can give scripts handles they can't forge, `[@conn int]`.
 - [ ] Find out whether annotations on recursive types can go. An
       unannotated function that recurses on a recursive value fails the
       occurs check (section 7.5), so it must be annotated with the alias.
