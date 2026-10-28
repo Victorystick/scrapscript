@@ -1,0 +1,80 @@
+/* Each section sits on a card over a tinted page. */
+:root {
+  --bg: #f4f3ef; --card: #ffffff; --fg: #22211e; --muted: #6b6960; --line: #e2e0d8;
+  --code-bg: #f7f6f2; --link: #2f7d4f; --accent: #2f7d4f;
+  --hl-string: #9a5b13; --hl-number: #1d6fa5; --hl-tag: #8250a8;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141412; --card: #1c1c1a; --fg: #ebe9e3; --muted: #a3a097; --line: #2d2c29;
+    --code-bg: #232320; --link: #6cc58f; --accent: #6cc58f;
+    --hl-string: #e0b070; --hl-number: #7cb8e8; --hl-tag: #c9a0e8;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0 auto; max-width: 46rem; padding: 3rem 1rem 4rem;
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+a { color: var(--link); text-underline-offset: 2px; }
+header { padding: 0 .25rem 1.5rem; }
+h1 { font-size: 2.25rem; margin: 0 0 .25rem; letter-spacing: -.02em; }
+header p { color: var(--muted); margin: 0; }
+section {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 1.25rem 1.5rem; margin-bottom: 1rem;
+}
+h2 { font-size: 1.15rem; margin: 0 0 .5rem; }
+h3 { font-size: 1rem; margin: 1.25rem 0 .25rem; }
+.method { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); margin-right: .25rem; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .875em; }
+:not(pre) > code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+h2 code { background: none; padding: 0; font-size: 1em; }
+pre { background: var(--code-bg); border: 1px solid var(--line); padding: .9rem 1rem; border-radius: 6px; overflow-x: auto; line-height: 1.5; margin-bottom: 0; }
+samp { color: var(--muted); }
+
+/* The tutorial: a contents card, and examples with what running them prints. */
+nav { margin-bottom: 1rem; font-size: .9rem; }
+.contents ol { margin: 0; padding-left: 1.5rem; columns: 2; column-gap: 2rem; }
+@media (max-width: 30rem) { .contents ol { columns: 1; } }
+.example { margin: 1rem 0; }
+.example > * { margin: 0; border: 1px solid var(--line); border-radius: 0; }
+.example > * + * { border-top: none; }
+.example > :first-child { border-radius: 6px 6px 0 0; }
+.example > :last-child { border-radius: 0 0 6px 6px; }
+.out { background: var(--card); transition: opacity .15s; }
+.out.stale { opacity: .45; }
+.out:empty { display: none; }
+/* Highlighted scraps: repl.ts registers their ranges by tree-sitter capture
+   name. Highlights can't change the font, so keywords get the accent. */
+::highlight(comment), ::highlight(comment\.doc), ::highlight(operator),
+::highlight(punctuation\.delimiter), ::highlight(punctuation\.bracket) { color: var(--muted); }
+::highlight(string), ::highlight(string\.special) { color: var(--hl-string); }
+::highlight(number), ::highlight(constant\.builtin) { color: var(--hl-number); }
+::highlight(constructor) { color: var(--hl-tag); }
+::highlight(keyword) { color: var(--accent); }
+/* repl.ts makes examples editable and adds their actions. */
+[contenteditable] { display: block; outline: none; caret-color: var(--accent); }
+.example pre:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
+.actions {
+  display: flex; align-items: center; justify-content: flex-end; gap: .5rem;
+  padding: .3rem .5rem; background: var(--code-bg); font-size: .8rem; color: var(--muted);
+}
+.actions:last-child { border-radius: 0 0 6px 6px; }
+.actions button {
+  font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line);
+  border-radius: 4px; padding: .1rem .6rem; cursor: pointer;
+}
+.actions button:last-child { background: var(--accent); border-color: var(--accent); color: var(--card); font-weight: 600; }
+.actions button:disabled { opacity: .6; cursor: progress; }
+.playground [contenteditable] { min-height: 10rem; }
+.out samp { display: grid; grid-template-columns: 1.5em 1fr; }
+.out samp::before { color: var(--accent); }
+.out .value::before, .arrow { content: "⇒"; color: var(--accent); }
+.out .type::before, .colon { content: ":"; color: var(--accent); }
+.out .error { color: #b3261e; }
+@media (prefers-color-scheme: dark) { .out .error { color: #f2b8b5; } }
+.out .error::before { content: "✗"; }
+.out .output::before { content: "$"; }

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scrapyard</title>
+  <meta name="description" content="Stores scraps for scrap, keyed by the SHA-256 hash of their source.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Scrapyard">
+  <meta property="og:title" content="Scrapyard">
+  <meta property="og:description" content="Stores scraps for scrap, keyed by the SHA-256 hash of their source.">
+  <meta property="og:url" content="https://victorystick.github.io/scrapscript/">
+  <meta property="og:image" content="https://victorystick.github.io/scrapscript/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Scrapyard: stores scraps, keyed by the SHA-256 hash of their source.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header>
+    <h1>Scrapyard</h1>
+    <p>Stores scraps for <a href="https://github.com/Victorystick/scrapscript">scrap</a>, keyed by the SHA-256 hash of their source, at <code>https://scraps.oseg.dev</code>.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Install</h2>
+      <p>With <a href="https://go.dev/dl/">Go</a> installed:</p>
+      <pre><code>$ go install github.com/Victorystick/scrapscript/cmd/scrap@latest</code></pre>
+      <p><code>scrap</code> fetches scraps from this yard by default. New to the language? Start with the <a href="tutorial">tutorial</a>, or run scraps in your browser in the <a href="play">playground</a>.</p>
+    </section>
+
+    <section>
+      <h2><span class="method">GET</span> <code>/$sha256</code></h2>
+      <p>Retrieves a scrap by its SHA-256 hash.</p>
+      <p>Requested with <code>Accept: application/scrap</code>, that is its response type, otherwise <code>text/plain</code>.</p>
+
+      <h3>Example</h3>
+      <p><a href="https://scraps.oseg.dev/71d9fe524fc0ab11b9ee6e6cfa3bc3d410a4c1b3884bc1b0256c51699730b1eb">This scrap</a>
+      greets tagged data. Pipe a value into it and evaluate it:</p>
+      <pre><code>$ echo '#friend { name = "aaron", times = 2 }
+    |> $source:71d9fe524fc0ab11b9ee6e6cfa3bc3d410a4c1b3884bc1b0256c51699730b1eb' \
+    | scrap eval
+<samp>"yo aaron, yo aaron"</samp></code></pre>
+    </section>
+
+    <section>
+      <h2><span class="method">POST</span> <code>/</code></h2>
+      <p>Stores the scrap in the request body and returns its SHA-256 hash.</p>
+      <p>Uploads are only accepted with the <code>Content-Type: application/scrap</code> header.</p>
+      <pre><code>$ scrap push &lt; greet.scrap
+<samp>71d9fe524fc0ab11b9ee6e6cfa3bc3d410a4c1b3884bc1b0256c51699730b1eb</samp></code></pre>
+    </section>
+  </main>
+</body>
+</html>

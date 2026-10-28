@@ -20,4 +20,7 @@ against the base commit with interleaved runs and benchstat.
 - Try programs with `go run ./cmd/scrap type < file.scrap` (or `eval`). The
   CLI reads stdin, and paths resolve from the current directory by
   default; override with `--root <dir>`.
+- web/ holds the tutorial and playground, deployed to GitHub Pages; see
+  web/AGENTS.md. Its tests run the tutorial's examples with cmd/scrap, so
+  run `npm test` there when changing what the CLI prints.
 - Discuss design changes before implementing them; make one change at a time.

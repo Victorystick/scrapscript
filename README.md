@@ -6,6 +6,8 @@ A exploration (read: very incomplete implementation) of [Scrapscript](https://sc
 
 With Go installed, run `go install github.com/Victorystick/scrapscript/cmd/scrap`.
 
+Learn the language in the [tutorial](https://victorystick.github.io/scrapscript/tutorial), or run scraps in your browser in the [playground](https://victorystick.github.io/scrapscript/play).
+
 ## Overview
 
 The aim is to implement Scrapscript along with the `scrap` CLI as documented on https://scrapscript.org/guide.

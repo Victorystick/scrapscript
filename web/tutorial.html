@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tutorial · Scrapyard</title>
+  <meta name="description" content="Learn the language of scrap one piece at a time, from numbers to publishing scraps of your own.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Scrapyard">
+  <meta property="og:title" content="Tutorial · Scrapyard">
+  <meta property="og:description" content="Learn the language of scrap one piece at a time, from numbers to publishing scraps of your own.">
+  <meta property="og:url" content="https://victorystick.github.io/scrapscript/tutorial">
+  <meta property="og:image" content="https://victorystick.github.io/scrapscript/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Scrapyard: stores scraps, keyed by the SHA-256 hash of their source.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./repl.ts"></script>
+</head>
+<body>
+  <header>
+    <nav><a href="./">Scrapyard</a></nav>
+    <h1>Tutorial</h1>
+    <p>Learn the language of <a href="https://github.com/Victorystick/scrapscript">scrap</a> one piece at a time, from numbers to publishing scraps of your own.</p>
+  </header>
+
+  <main>
+    <section class="contents">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#start">Getting started</a></li>
+        <li><a href="#values">Numbers, text and bytes</a></li>
+        <li><a href="#names">Names</a></li>
+        <li><a href="#functions">Functions</a></li>
+        <li><a href="#pipes">Pipes</a></li>
+        <li><a href="#lists">Lists</a></li>
+        <li><a href="#records">Records</a></li>
+        <li><a href="#tags">Tags</a></li>
+        <li><a href="#matching">Matching</a></li>
+        <li><a href="#recursion">Recursion</a></li>
+        <li><a href="#types">Types</a></li>
+        <li><a href="#tests">Tests</a></li>
+        <li><a href="#scraps">Scraps and the yard</a></li>
+      </ol>
+    </section>
+
+    <section id="start">
+      <h2>1. Getting started</h2>
+      <p>A <em>scrap</em> is a program: one expression, which evaluates to a value. With <a href="https://go.dev/dl/">Go</a> installed, install the <code>scrap</code> tool:</p>
+      <pre><code>$ go install github.com/Victorystick/scrapscript/cmd/scrap@latest</code></pre>
+      <p>It reads a scrap from standard input. <code>scrap eval</code> prints its value, and <code>scrap type</code> its type:</p>
+      <pre><code>$ echo '1 + 2' | scrap eval
+<samp>3</samp>
+$ echo '1 + 2' | scrap type
+<samp>int</samp></code></pre>
+      <p>Every example on this page is a scrap, followed by what <code>scrap eval</code> prints (after <span class="arrow">⇒</span>) and what <code>scrap type</code> prints (after <span class="colon">:</span>):</p>
+      <div class="example">
+<pre><code>1 + 2</code></pre>
+<pre class="out"><samp class="value">3</samp><samp class="type">int</samp></pre>
+      </div>
+      <p>The examples are editable: change one and press <em>Run</em> to run it in your browser, or try your own scraps in the <a href="play">playground</a>. To run one with <code>scrap</code>, save it to a file and run <code>scrap eval &lt; file.scrap</code>.</p>
+    </section>
+
+    <section id="values">
+      <h2>2. Numbers, text and bytes</h2>
+      <p>Arithmetic has the usual precedence. Whole numbers are <code>int</code>s, and numbers with a decimal point are <code>float</code>s:</p>
+      <div class="example">
+<pre><code>1 + 2 * 3</code></pre>
+<pre class="out"><samp class="value">7</samp><samp class="type">int</samp></pre>
+      </div>
+      <div class="example">
+<pre><code>1.5 * 4.0</code></pre>
+<pre class="out"><samp class="value">6.0</samp><samp class="type">float</samp></pre>
+      </div>
+      <p>The two never mix. Mixing them is a type error, which <code>scrap</code> reports before running anything:</p>
+      <div class="example">
+<pre><code>1 + 1.5</code></pre>
+<pre class="out"><samp class="error">error: cannot unify 'int' with 'float'
+
+    1: 1 + 1.5
+       ~~~~~~~</samp></pre>
+      </div>
+      <p>Convert explicitly with <code>to-float</code>, and back with <code>round</code>, <code>floor</code> or <code>ceil</code>:</p>
+      <div class="example">
+<pre><code>to-float 1 + 1.5</code></pre>
+<pre class="out"><samp class="value">2.5</samp><samp class="type">float</samp></pre>
+      </div>
+      <p>An operator needs spaces on both sides. Without them, <code>a-b</code> is one name, as names may contain dashes, and <code>-1</code> is a negative number. There is no division operator yet; <a href="#tags">tags</a> show how to divide.</p>
+      <p>Text goes in double quotes, and <code>++</code> joins it:</p>
+      <div class="example">
+<pre><code>"hello" ++ ", " ++ "world"</code></pre>
+<pre class="out"><samp class="value">"hello, world"</samp><samp class="type">text</samp></pre>
+      </div>
+      <p>Built-in functions come in namespaces, such as <code>text/</code> and <code>int/</code>. You call a function by writing its argument after it, with a space between:</p>
+      <div class="example">
+<pre><code>int/to-text 42 ++ " is " ++ "the answer"</code></pre>
+<pre class="out"><samp class="value">"42 is the answer"</samp><samp class="type">text</samp></pre>
+      </div>
+      <p>A byte is <code>~</code> and two hex digits, such as <code>~ff</code>, and <code>~~</code> starts base64-encoded bytes:</p>
+      <div class="example">
+<pre><code>bytes/to-utf8-text ~~aGVsbG8=</code></pre>
+<pre class="out"><samp class="value">"hello"</samp><samp class="type">text</samp></pre>
+      </div>
+      <p>Finally, <code>()</code> is the <em>hole</em>, a value that carries nothing.</p>
+    </section>
+
+    <section id="names">
+      <h2>3. Names</h2>
+      <p>A <em>where-clause</em> names values for the expression before it. Each binding starts with <code>;</code>:</p>
+      <div class="example">
+<pre><code>greeting ++ ", " ++ name
+; greeting = "hello"
+; name = "world"</code></pre>
+<pre class="out"><samp class="value">"hello, world"</samp><samp class="type">text</samp></pre>
+      </div>
+      <p>The bindings of a where-clause may refer to each other, in any order:</p>
+      <div class="example">
+<pre><code>total
+; total = price * count
+; price = 3
+; count = 4</code></pre>
+<pre class="out"><samp class="value">12</samp><samp class="type">int</samp></pre>
+      </div>
+      <p>A scrap has no names it doesn't bind itself, apart from the built-in functions, so it means the same thing wherever it runs:</p>
+      <div class="example">
+<pre><code>x + 1</code></pre>
+<pre class="out"><samp class="error">error: unbound variable: x
+
+    1: x + 1
+       ~</samp></pre>
+      </div>
+      <p>Comments start with <code>--</code> and a space, and run to the end of the line.</p>
+    </section>
+
+    <section id="functions">
+      <h2>4. Functions</h2>
+      <p>A function is a parameter, an arrow and a body. It is a value like any other, so it prints as itself:</p>
+      <div class="example">
+<pre><code>x -> x + 1</code></pre>
+<pre class="out"><samp class="value">x -> x + 1</samp><samp class="type">int -> int</samp></pre>
+      </div>
+      <p>Apply it by writing an argument after it:</p>
+      <div class="example">
+<pre><code>shout "hi"
+; shout = s -> s ++ "!"</code></pre>
+<pre class="out"><samp class="value">"hi!"</samp><samp class="type">text</samp></pre>
+      </div>
+      <p>A function takes one argument, so a function of two takes the first and returns a function of the second:</p>
+      <div class="example">
+<pre><code>add 2 3
+; add = a -> b -> a + b</code></pre>
+<pre class="out"><samp class="value">5</samp><samp class="type">int</samp></pre>
+      </div>
+      <p>Give it fewer arguments, and you get a function that waits for the rest. It prints with the bindings it needs:</p>
+      <div class="example">
+<pre><code>add 1
+; add = a -> b -> a + b</code></pre>
+<pre class="out"><samp class="value">add 1
+; add = a -> b -> a + b</samp><samp class="type">int -> int</samp></pre>
+      </div>
+      <p>Functions can take functions. In the type of <code>twice</code>, <code>a</code> is a type variable: it works for any type, as long as each <code>a</code> is the same one.</p>
+      <div class="example">
+<pre><code>twice
+; twice = f -> x -> f (f x)</code></pre>
+<pre class="out"><samp class="value">twice
+; twice = f -> x -> f (f x)</samp><samp class="type">(a -> a) -> a -> a</samp></pre>
+      </div>
+      <div class="example">
+<pre><code>twice (x -> x * 10) 5
+; twice = f -> x -> f (f x)</code></pre>
+<pre class="out"><samp class="value">500</samp><samp class="type">int</samp></pre>
+      </div>
+      <p>A function that ignores its argument names it <code>_</code>, as in <code>_ -> 0</code>.</p>
+    </section>
+
+    <section id="pipes">
+      <h2>5. Pipes</h2>
+      <p><code>x |> f</code> is <code>f x</code>. Pipes read left to right, so a chain of steps reads in the order it runs:</p>
+      <div class="example">
+<pre><code>"a,b,c" |> text/split "," |> list/length</code></pre>
+<pre class="out"><samp class="value">3</samp><samp class="type">int</samp></pre>
+      </div>
+      <p><code>f &lt;| x</code> is <code>f x</code> too, which saves parentheses around a long argument:</p>
+      <div class="example">
+<pre><code>list/length &lt;| text/split "," "a,b,c"</code></pre>
+<pre class="out"><samp class="value">3</samp><samp class="type">int</samp></pre>
+      </div>
+      <p><code>f >> g</code> composes two functions into one that applies <code>f</code> and then <code>g</code>. <code>g &lt;&lt; f</code> is the same function.</p>
+      <div class="example">
+<pre><code>count "a,b,c"
+; count = text/split "," >> list/length</code></pre>
+<pre class="out"><samp class="value">3</samp><samp class="type">int</samp></pre>
+      </div>
+      <p>The last step of a pipe may be a function written in place:</p>
+      <div class="example">
+<pre><code>3 |> x -> x * x</code></pre>
+<pre class="out"><samp class="value">9</samp><samp class="type">int</samp></pre>
+      </div>
+    </section>
+
+    <section id="lists">
+      <h2>6. Lists</h2>
+      <p>A list holds any number of values of one type:</p>
+      <div class="example">
+<pre><code>[1, 2, 3]</code></pre>
+<pre class="out"><samp class="value">[ 1, 2, 3 ]</samp><samp class="type">list int</samp></pre>
+      </div>
+      <div class="example">
+<pre><code>[1, "two"]</code></pre>
+<pre class="out"><samp class="error">error: cannot unify 'int' with 'text'
+
+    1: [1, "two"]
+           ~~~~~</samp></pre>
+      </div>
+      <p><code>>+</code> adds an item to the front, <code>+&lt;</code> to the back, and <code>++</code> joins two lists. The arrow points at the list.</p>
+      <div class="example">
+<pre><code>0 >+ [1, 2] +&lt; 3</code></pre>
+<pre class="out"><samp class="value">[ 0, 1, 2, 3 ]</samp><samp class="type">list int</samp></pre>
+      </div>
+      <div class="example">
+<pre><code>[1, 2] ++ [3]</code></pre>
+<pre class="out"><samp class="value">[ 1, 2, 3 ]</samp><samp class="type">list int</samp></pre>
+      </div>
+      <p><code>list/map</code> applies a function to each item:</p>
+      <div class="example">
+<pre><code>[1, 2, 3] |> list/map (x -> x * x)</code></pre>
+<pre class="out"><samp class="value">[ 1, 4, 9 ]</samp><samp class="type">list int</samp></pre>
+      </div>
+      <p><code>list/fold</code> combines the items into one value, starting from its first argument:</p>
+      <div class="example">
+<pre><code>[1, 2, 3, 4] |> list/fold 0 (sum -> x -> sum + x)</code></pre>
+<pre class="out"><samp class="value">10</samp><samp class="type">int</samp></pre>
+      </div>
+      <p>There are others, such as <code>list/length</code>, <code>list/sort</code>, <code>list/repeat</code> and <code>text/join</code>:</p>
+      <div class="example">
+<pre><code>list/repeat 3 "ho" |> text/join " "</code></pre>
+<pre class="out"><samp class="value">"ho ho ho"</samp><samp class="type">text</samp></pre>
+      </div>
+      <div class="example">
+<pre><code>list/sort int/cmp [3, 1, 2]</code></pre>
+<pre class="out"><samp class="value">[ 1, 2, 3 ]</samp><samp class="type">list int</samp></pre>
+      </div>
+    </section>
+
+    <section id="records">
+      <h2>7. Records</h2>
+      <p>A record holds values by name. Its fields print in alphabetical order:</p>
+      <div class="example">
+<pre><code>{ name = "Ada", born = 1815 }</code></pre>
+<pre class="out"><samp class="value">{ born = 1815, name = "Ada" }</samp><samp class="type">{ born : int, name : text }</samp></pre>
+      </div>
+      <p>A field named like the value it holds needs no <code>=</code>: <code>{ name }</code> is short for <code>{ name = name }</code>.</p>
+      <div class="example">
+<pre><code>person "Ada" 1815
+; person = name -> born -> { name, born }</code></pre>
+<pre class="out"><samp class="value">{ born = 1815, name = "Ada" }</samp><samp class="type">{ born : int, name : text }</samp></pre>
+      </div>
+      <p>Read a field with a dot, with no space before it:</p>
+      <div class="example">
+<pre><code>ada.name
+; ada = { name = "Ada", born = 1815 }</code></pre>
+<pre class="out"><samp class="value">"Ada"</samp><samp class="type">text</samp></pre>
+      </div>
+      <p>A function that reads a field takes any record that has it. In its type, <code>..b</code> stands for the other fields, whatever they are:</p>
+      <div class="example">
+<pre><code>person -> person.name</code></pre>
+<pre class="out"><samp class="value">person -> person.name</samp><samp class="type">{ name : a, ..b } -> a</samp></pre>
+      </div>
+      <p>Records never change, but <code>..</code> makes a copy with some fields replaced. It must come first:</p>
+      <div class="example">
+<pre><code>{ ..ada, name = "Ada Lovelace" }
+; ada = { name = "Ada", born = 1815 }</code></pre>
+<pre class="out"><samp class="value">{ born = 1815, name = "Ada Lovelace" }</samp><samp class="type">{ born : int, name : text }</samp></pre>
+      </div>
+      <p>A copy has the same fields as the original, of the same types, so it can't add one:</p>
+      <div class="example">
+<pre><code>{ ..ada, died = 1852 }
+; ada = { name = "Ada", born = 1815 }</code></pre>
+<pre class="out"><samp class="error">error: cannot unify '{ born : int, name : text }' with '{ died : int, ..a }'
+
+    1: { ..ada, died = 1852 }
+       ~~~~~~~~~~~~~~~~~~~~~~</samp></pre>
+      </div>
+    </section>
+
+    <section id="tags">
+      <h2>8. Tags</h2>
+      <p>A tag is a name that starts with <code>#</code>. It needs no declaring: you just use it.</p>
+      <div class="example">
+<pre><code>#true</code></pre>
+<pre class="out"><samp class="value">#true</samp><samp class="type">[ #true, ..a ]</samp></pre>
+      </div>
+      <p>Its type lists the tags it may be, here only <code>#true</code>, and <code>..a</code> leaves room for others. So tags of one list may differ:</p>
+      <div class="example">
+<pre><code>[#red, #green, #blue]</code></pre>
+<pre class="out"><samp class="value">[ #red, #green, #blue ]</samp><samp class="type">list [ #blue, #green, #red, ..a ]</samp></pre>
+      </div>
+      <p>A tag may carry one value, its <em>payload</em>:</p>
+      <div class="example">
+<pre><code>[#square 2, #rect { w = 2, h = 3 }]</code></pre>
+<pre class="out"><samp class="value">[ #square 2, #rect { h = 3, w = 2 } ]</samp><samp class="type">list [ #rect { h : int, w : int }, #square int, ..a ]</samp></pre>
+      </div>
+      <p>Tags stand in for booleans, <code>#true</code> and <code>#false</code>, and for missing values. <code>int/div</code> divides, unless you divide by zero:</p>
+      <div class="example">
+<pre><code>int/div 7 2</code></pre>
+<pre class="out"><samp class="value">#some 3</samp><samp class="type">[ #none, #some int ]</samp></pre>
+      </div>
+      <div class="example">
+<pre><code>int/div 7 0</code></pre>
+<pre class="out"><samp class="value">#none</samp><samp class="type">[ #none, #some int ]</samp></pre>
+      </div>
+      <p>And comparisons return <code>#lt</code>, <code>#eq</code> or <code>#gt</code>:</p>
+      <div class="example">
+<pre><code>int/cmp 1 2</code></pre>
+<pre class="out"><samp class="value">#lt</samp><samp class="type">[ #eq, #gt, #lt ]</samp></pre>
+      </div>
+      <p>To get at a payload, or do something different for each tag, you match on it.</p>
+    </section>
+
+    <section id="matching">
+      <h2>9. Matching</h2>
+      <p>A <em>match function</em> is a list of arms, each <code>|</code>, a pattern, an arrow and a body. Applied to a value, it takes the first arm whose pattern fits. <code>_</code> fits anything.</p>
+      <div class="example">
+<pre><code>describe 2
+; describe =
+  | 0 -> "none"
+  | 1 -> "one"
+  | _ -> "many"</code></pre>
+<pre class="out"><samp class="value">"many"</samp><samp class="type">text</samp></pre>
+      </div>
+      <p>Matching is how a scrap makes choices: there is no <code>if</code>. A pattern names the parts it takes apart, such as the payload of a tag or the fields of a record. As in a record, <code>{ w, h }</code> is short for <code>{ w = w, h = h }</code>, naming each field's value after the field:</p>
+      <div class="example">
+<pre><code>area
+; area =
+  | #square side -> side * side
+  | #rect { w, h } -> w * h</code></pre>
+<pre class="out"><samp class="value">area
+; area =
+  | #square side -> side * side
+  | #rect { w, h } -> w * h</samp><samp class="type">[ #rect { h : int, w : int }, #square int ] -> int</samp></pre>
+      </div>
+      <div class="example">
+<pre><code>[#square 2, #rect { w = 2, h = 3 }] |> list/map area
+; area =
+  | #square side -> side * side
+  | #rect { w, h } -> w * h</code></pre>
+<pre class="out"><samp class="value">[ 4, 6 ]</samp><samp class="type">list int</samp></pre>
+      </div>
+      <p>The type of <code>area</code> has no <code>..a</code>: it takes those two tags only. Give it another, and the type checker stops you before the scrap runs:</p>
+      <div class="example">
+<pre><code>area (#circle 1)
+; area =
+  | #square side -> side * side
+  | #rect { w, h } -> w * h</code></pre>
+<pre class="out"><samp class="error">error: cannot unify '[ #rect { h : int, w : int }, #square int ]' with '[ #circle int, ..a ]'
+
+    1: area (#circle 1)
+       ~~~~~~~~~~~~~~~</samp></pre>
+      </div>
+      <p>The other way round holds too: a match must have an arm for every value it can be given, so a scrap that type checks never fails to match.</p>
+      <div class="example">
+<pre><code>| 0 -> "none"
+| 1 -> "one"</code></pre>
+<pre class="out"><samp class="error">error: match is not exhaustive: no arm matches _
+
+    1: | 0 -> "none"
+       ~~~~~~~~~~~~~</samp></pre>
+      </div>
+      <p>Pipe a value into a match function to choose on it in place:</p>
+      <div class="example">
+<pre><code>int/div 7 0 |>
+  | #some n -> n
+  | #none -> 0</code></pre>
+<pre class="out"><samp class="value">0</samp><samp class="type">int</samp></pre>
+      </div>
+      <p>Patterns take lists apart too: <code>[]</code> fits the empty list, <code>[x]</code> a list of one item, and <code>first >+ rest</code> any other, naming its first item and the rest.</p>
+      <div class="example">
+<pre><code>| [] -> "empty"
+| [x] -> "one"
+| first >+ rest -> "more"</code></pre>
+<pre class="out"><samp class="value">| [] -> "empty" | [ x ] -> "one" | first >+ rest -> "more"</samp><samp class="type">list a -> text</samp></pre>
+      </div>
+      <p>An arm can match several arguments, one pattern per argument. This is how to combine booleans:</p>
+      <div class="example">
+<pre><code>both #true #false
+; both =
+  | #true -> #true -> #true
+  | _     -> _     -> #false</code></pre>
+<pre class="out"><samp class="value">#false</samp><samp class="type">[ #false, #true, ..a ]</samp></pre>
+      </div>
+    </section>
+
+    <section id="recursion">
+      <h2>10. Recursion</h2>
+      <p>Bindings can refer to themselves, so a function can call itself. Together with matching, that is how a scrap loops:</p>
+      <div class="example">
+<pre><code>sum [1, 2, 3]
+; sum =
+  | [] -> 0
+  | x >+ rest -> x + sum rest</code></pre>
+<pre class="out"><samp class="value">6</samp><samp class="type">int</samp></pre>
+      </div>
+      <div class="example">
+<pre><code>factorial 10
+; factorial =
+  | 0 -> 1
+  | n -> n * factorial (n - 1)</code></pre>
+<pre class="out"><samp class="value">3628800</samp><samp class="type">int</samp></pre>
+      </div>
+      <p>The bindings of a where-clause can call each other, too:</p>
+      <div class="example">
+<pre><code>is-even 10
+; is-even =
+  | 0 -> #true
+  | n -> is-odd (n - 1)
+; is-odd =
+  | 0 -> #false
+  | n -> is-even (n - 1)</code></pre>
+<pre class="out"><samp class="value">#true</samp><samp class="type">[ #false, #true, ..a ]</samp></pre>
+      </div>
+      <p>Only functions may be recursive. A scrap evaluates each value before using it, so a value made from itself would never be done:</p>
+      <div class="example">
+<pre><code>ones
+; ones = 1 >+ ones</code></pre>
+<pre class="out"><samp class="error">error: 'ones' is recursive, so it must be a function
+
+    1: ones
+       ~~~~</samp></pre>
+      </div>
+    </section>
+
+    <section id="types">
+      <h2>11. Types</h2>
+      <p>The type checker works out the type of every scrap, so you rarely write types. You may annotate a binding with one, between its name and <code>=</code>, and the checker holds the value to it:</p>
+      <div class="example">
+<pre><code>inc 1
+; inc : int -> text = x -> x + 1</code></pre>
+<pre class="out"><samp class="error">error: cannot unify 'int' with 'text'
+
+    2: ; inc : int -> text = x -> x + 1
+                                  ~~~~~</samp></pre>
+      </div>
+      <p>Annotations choose too: <code>+</code>, <code>-</code> and <code>*</code> work on <code>int</code>s unless something says <code>float</code>.</p>
+      <div class="example">
+<pre><code>add
+; add : float -> float -> float = a -> b -> a + b</code></pre>
+<pre class="out"><samp class="value">add
+; add : float -> float -> float = a -> b -> a + b</samp><samp class="type">float -> float -> float</samp></pre>
+      </div>
+      <p>Type variables are introduced with <code>=></code>, before the type that uses them:</p>
+      <div class="example">
+<pre><code>first [3, 2, 1]
+; first : a => list a -> [#some a, #none] =
+  | [] -> #none
+  | x >+ _ -> #some x</code></pre>
+<pre class="out"><samp class="value">#some 3</samp><samp class="type">[ #none, #some int ]</samp></pre>
+      </div>
+      <p>A binding can name a type, too. A type that takes a type is a function of types, written with <code>=></code>, and the checker prints types with the names you gave them:</p>
+      <div class="example">
+<pre><code>half 7
+; half : int -> option int = n -> int/div n 2
+; option = a => [#some a, #none]</code></pre>
+<pre class="out"><samp class="value">#some 3</samp><samp class="type">option int
+; option = a => [ #none, #some a ]</samp></pre>
+      </div>
+      <p>A binding annotated with <code>type</code> names a type that takes none. A type may refer to itself through a tag's payload, as a tree does. The checker doesn't guess such types, so a function over one needs its annotation:</p>
+      <div class="example">
+<pre><code>size (#node { left = #leaf, right = #node { left = #leaf, right = #leaf } })
+; size : tree -> int =
+  | #leaf -> 0
+  | #node n -> 1 + size n.left + size n.right
+; tree : type = [#leaf, #node { left : tree, right : tree }]</code></pre>
+<pre class="out"><samp class="value">2</samp><samp class="type">int</samp></pre>
+      </div>
+    </section>
+
+    <section id="tests">
+      <h2>12. Tests</h2>
+      <p><code>scrap test</code> runs the test cases in a scrap's value, in records and lists. A case is a tag: <code>#pass</code>, <code>#fail</code> with the reason, or <code>#eq</code> with a value that you got and one that you want:</p>
+      <div class="example" data-run="test">
+<pre><code>{ adds = eq (1 + 1) 2
+, joins = eq ("a" ++ "b") "abc"
+}
+; eq = got -> want -> #eq { got, want }</code></pre>
+<pre class="out"><samp class="output">FAIL joins
+    got  "ab"
+    want "abc"
+1 failed, 1 passed</samp></pre>
+      </div>
+      <p>It exits with status 1 if any case failed, so it fits in scripts.</p>
+    </section>
+
+    <section id="scraps">
+      <h2>13. Scraps and the yard</h2>
+      <p>Every scrap is known by its <em>hash</em>, the SHA-256 of its source, which <code>scrap hash</code> prints. A scrap refers to another by its hash, as <code>$source:</code> and 64 hex digits. The <a href="./">yard</a> stores scraps by hash, and <code>scrap</code> fetches them from it. <a href="https://scraps.oseg.dev/71d9fe524fc0ab11b9ee6e6cfa3bc3d410a4c1b3884bc1b0256c51699730b1eb">This scrap</a> greets people. Its value is a function, which prints as the reference, and <code>scrap type</code> fetches it to work out its type:</p>
+      <div class="example">
+<pre><code>$source:71d9fe524fc0ab11b9ee6e6cfa3bc3d410a4c1b3884bc1b0256c51699730b1eb</code></pre>
+<pre class="out"><samp class="value">$source:71d9fe524fc0ab11b9ee6e6cfa3bc3d410a4c1b3884bc1b0256c51699730b1eb</samp><samp class="type">[ #cowboy, #friend { name : text, times : int }, #ron int, #stranger text ] -> text</samp></pre>
+      </div>
+      <p>A hash refers to that scrap and no other: change a byte, and the hash changes too. So a reference means the same thing forever, and you use it like the value it refers to:</p>
+      <div class="example">
+<pre><code>#ron 3 |> $source:71d9fe524fc0ab11b9ee6e6cfa3bc3d410a4c1b3884bc1b0256c51699730b1eb</code></pre>
+<pre class="out"><samp class="value">"hi aaaron"</samp><samp class="type">text</samp></pre>
+      </div>
+
+      <h3>Drafts</h3>
+      <p>While you work on scraps, refer to them by path instead, relative to the scrap that refers to them. With <code>double.scrap</code> holding <code>x -> x * 2</code>:</p>
+      <pre><code>$ echo '$"./double.scrap" 21' | scrap eval
+<samp>42</samp></code></pre>
+      <p>A scrap with paths is a draft, which only you can run. Paths resolve from the current directory, or the directory that <code>--root</code> names.</p>
+
+      <h3>Publishing</h3>
+      <p><code>scrap push</code> stores a scrap in the yard, which type checks it first, and prints its hash:</p>
+      <pre><code>$ scrap push &lt; double.scrap
+<samp>19ec0ec5d05c7010e3d32d79465bb7e2ac947025821e52cc9235485d4587376f</samp></code></pre>
+      <p>Push the scraps that a draft refers to first, then replace each path with <code>$source:</code> and its hash, and push the draft. Anyone can then run it by its hash.</p>
+
+      <h3>Results are scraps</h3>
+      <p>What <code>scrap eval</code> prints is itself a scrap, which evaluates to the same value. <code>scrap eval apply</code> evaluates its input, and passes the result to the function you give it, so evaluations chain:</p>
+      <pre><code>$ echo '[1, 2, 3]' \
+    | scrap eval apply 'list/map (x -> x * 10)' \
+    | scrap eval apply 'list/fold 0 (sum -> x -> sum + x)'
+<samp>60</samp></code></pre>
+    </section>
+
+    <section>
+      <h2>Where next</h2>
+      <p>The <a href="https://github.com/Victorystick/scrapscript/blob/main/SPEC.md">specification</a> covers the whole language, though not all of it works yet. <a href="https://github.com/Victorystick/scrapscript/blob/main/lib/avl.scrap"><code>lib/avl.scrap</code></a> is a larger scrap to read: a map from keys to values, which exports its types next to its functions.</p>
+    </section>
+  </main>
+</body>
+</html>

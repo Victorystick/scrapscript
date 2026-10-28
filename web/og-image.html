@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<!-- The link preview image, public/og.png, that the pages' Open Graph tags
+     name. Not a page of the site, so vite.config.ts doesn't list it. After
+     changing it, render it again with:
+     npx playwright screenshot --viewport-size=1200,630 og-image.html public/og.png -->
+<title>Link preview · Scrapyard</title><style>
+html,body{margin:0;width:1200px;height:630px;background:#f4f3ef;color:#22211e;
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
+.card{position:absolute;inset:56px;background:#fff;border:2px solid #e2e0d8;border-radius:20px;
+  padding:64px 72px;display:flex;flex-direction:column;justify-content:space-between}
+h1{font-size:104px;letter-spacing:-.03em;margin:0;line-height:1}
+p{font-size:36px;text-wrap:balance;color:#6b6960;margin:22px 0 0;line-height:1.3}
+pre{font:30px/1.5 ui-monospace,"DejaVu Sans Mono",monospace;background:#f7f6f2;border:2px solid #e2e0d8;
+  border-radius:12px;padding:22px 28px;margin:0;white-space:pre}
+.k{color:#1d6fa5}.t{color:#8250a8}.s{color:#9a5b13}.m{color:#6b6960}
+</style></head><body><div class="card">
+<div><h1>Scrapyard</h1><p>Stores scraps, keyed by the SHA&#8209;256 hash of their source.</p></div>
+<pre><span class="t">#friend</span> <span class="m">{</span> name <span class="m">=</span> <span class="s">"aaron"</span><span class="m">,</span> times <span class="m">=</span> <span class="k">2</span> <span class="m">}</span>
+  <span class="m">|></span> $source:71d9fe524fc0ab11b9ee6e6cfa3bc3d4…</pre>
+</div></body></html>
