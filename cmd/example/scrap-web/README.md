@@ -117,10 +117,28 @@ The page runs the module where it likes. Elm runs on the page's thread,
 which an app that loops forever freezes; a page that runs apps as they are
 being written, such as a playground, runs the module in a Web Worker
 instead, which it can stop, and loads the app again with the messages that
-it kept, but the last. https://scraps.oseg.dev/web is such a playground;
-its source, in
-[cloudflare-scrapyard](https://github.com/Victorystick/cloudflare-scrapyard),
-has the page's side, with just enough of WASI to run the module.
+it kept, but the last. [play](play) is such a playground.
+
+## The playground
+
+```sh
+$ go run ./cmd/example/scrap-web/play
+```
+
+serves a playground on http://localhost:8080: a page of drafts of an app,
+which it runs as a page runs the module, with just enough of WASI. It builds
+`scrap-web.wasm` from the source each time the page loads it, and serves the
+page's files, in `play`, as they are, so that reloading the page runs what
+was edited, of the host or the page, and shows what `go build` printed if it
+failed. It fetches the scraps that drafts refer to by hash from a scrapyard,
+https://scraps.oseg.dev/ unless `-server` says otherwise.
+
+- `play.js` is the page: it edits the drafts, runs the module in a worker,
+  `worker.js`, which it stops if a request runs too long, shows the view in
+  a sandboxed frame, and keeps the messages, which it loads a changed app
+  with.
+- `index.html` has the drafts that the page starts with, which
+  `play_test.go` runs as the page does.
 
 ## Hosting another platform
 
