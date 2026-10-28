@@ -90,6 +90,13 @@ builtins now return plain values and panic with a `runtimeError`, which
       and 10% on Eval, even on fib and the higher-order lib/access-log,
       and recurse 2-2.6x deeper on the same Go stack (~0.6-0.8 KB per
       level against `run`'s ~1.6 KB frame). Allocation is the same.
+- [x] Calls in tail position reuse their caller's frame, when the callee
+      is a lambda that the compiler knows (bound in a where-group, or a
+      capture of one) and the frame is large enough, as it always is for a
+      lambda calling itself. No closure refers to a frame, since closures
+      copy what they capture. Calls of known lambdas skip checking the
+      closure too. Unknown callees, such as a platform's step function,
+      and calls not in tail position still get frames of their own.
 - [ ] Explore lambda set inference (as in Roc): the checker tracks which
       closures can reach each function type, so calls compile to a switch
       over known closures instead of an indirect call. Likely a lot of work.

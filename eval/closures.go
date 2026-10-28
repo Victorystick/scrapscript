@@ -59,7 +59,7 @@ func (p *program) lam(n cnode) *lambdaCode {
 		for i := 0; i < len(arms); i += arity + 1 {
 			l.arms = append(l.arms, armCode{
 				pats: p.patterns(arms[i : i+arity]),
-				body: p.body(cnode(arms[i+arity])),
+				body: p.body(cnode(arms[i+arity]), true),
 			})
 		}
 		p.lambdas[n] = l
@@ -74,9 +74,15 @@ func (l *lambdaCode) enter1(sf *scriptFunc, arg value) (tcode, frame) {
 	if l.size > 0 {
 		g.slots = make([]value, l.size)
 	}
+	return l.match1(sf, arg, g), g
+}
+
+// match1 matches arg, the argument of a call of the lambda l of sf, which
+// takes one, in its frame g, returning the body of the arm that matches.
+func (l *lambdaCode) match1(sf *scriptFunc, arg value, g frame) tcode {
 	for _, a := range l.arms {
 		if a.pats[0](arg, g.slots) {
-			return a.body, g
+			return a.body
 		}
 	}
 	panic(sf.prog.errorf(sf.node, "no arm matches %s", printValue(sf.prog.table, arg)))
@@ -105,14 +111,15 @@ func trampoline(c tcode, f frame) value {
 	}
 }
 
-// body returns the compiled body n, compiling it if it is the first time.
-func (p *program) body(n cnode) tcode {
+// body returns the compiled body n, of a lambda or else of the root,
+// compiling it if it is the first time.
+func (p *program) body(n cnode, lambda bool) tcode {
 	if p.bodies == nil {
 		p.bodies = make([]tcode, len(p.ops))
 	}
 	c := p.bodies[n]
 	if c == nil {
-		c = p.tail(n)
+		c = p.tail(n, lambda)
 		p.bodies[n] = c
 	}
 	return c
@@ -169,6 +176,21 @@ func (p *program) builtin(n cnode) (*builtinFunc, bool) {
 	return nil, false
 }
 
+// known returns the lambda whose closure the expression n holds, if the
+// compiler knows it and it takes arity arguments; otherwise none. A call
+// of it needn't check the closure, which has no arguments yet.
+func (p *program) known(n cnode, arity int) cnode {
+	switch p.ops[n] {
+	case opLocal, opCapture:
+		if l := cnode(p.data[n].b); l != none {
+			if _, _, a, _ := p.lambda(l); a == arity {
+				return l
+			}
+		}
+	}
+	return none
+}
+
 // expr compiles the expression n, not in tail position.
 func (p *program) expr(n cnode) code {
 	d := p.data[n]
@@ -179,6 +201,12 @@ func (p *program) expr(n cnode) code {
 			return func(f frame) value { return g.one(ac.get(f)) }
 		}
 		fc := p.operand(cnode(d.a))
+		if ln := p.known(cnode(d.a), 1); ln != none {
+			return func(f frame) value {
+				sf := fc.get(f).asScript()
+				return trampoline(p.lam(ln).enter1(sf, ac.get(f)))
+			}
+		}
 		return func(f frame) value {
 			fn := fc.get(f)
 			arg := ac.get(f)
@@ -216,6 +244,17 @@ func (p *program) expr(n cnode) code {
 			}
 		}
 		fc := p.operand(cnode(r[0]))
+		if ln := p.known(cnode(r[0]), k); ln != none {
+			return func(f frame) value {
+				sf := fc.get(f).asScript()
+				l := p.lam(ln)
+				g := sf.frame(l.size)
+				for i, c := range acs {
+					g.slots[i] = c.get(f)
+				}
+				return trampoline(l.enterN(sf, g), g)
+			}
+		}
 		return func(f frame) value {
 			fn := fc.get(f)
 			if g, ok := fn.builtin(); ok && g.arity == k {
@@ -508,8 +547,9 @@ func done(v value) (value, tcode, frame) {
 	return v, nil, frame{}
 }
 
-// tail compiles the expression n in tail position.
-func (p *program) tail(n cnode) tcode {
+// tail compiles the expression n in tail position, in the body of a
+// lambda or else of the root.
+func (p *program) tail(n cnode, lambda bool) tcode {
 	d := p.data[n]
 	switch p.ops[n] {
 	case opCall:
@@ -518,6 +558,15 @@ func (p *program) tail(n cnode) tcode {
 			return func(f frame) (value, tcode, frame) { return done(g.one(ac.get(f))) }
 		}
 		fc := p.operand(cnode(d.a))
+		if ln := p.known(cnode(d.a), 1); ln != none {
+			return func(f frame) (value, tcode, frame) {
+				sf := fc.get(f).asScript()
+				arg := ac.get(f)
+				l := p.lam(ln)
+				g := callee(f, lambda, l.size, sf.caps)
+				return value{}, l.match1(sf, arg, g), g
+			}
+		}
 		return func(f frame) (value, tcode, frame) {
 			fn := fc.get(f)
 			arg := ac.get(f)
@@ -556,6 +605,21 @@ func (p *program) tail(n cnode) tcode {
 			}
 		}
 		fc := p.operand(cnode(r[0]))
+		if ln := p.known(cnode(r[0]), k); ln != none {
+			return func(f frame) (value, tcode, frame) {
+				sf := fc.get(f).asScript()
+				// The arguments may read the frame that the call reuses.
+				var buf [8]value
+				args := buf[:0]
+				for _, c := range acs {
+					args = append(args, c.get(f))
+				}
+				l := p.lam(ln)
+				g := callee(f, lambda, l.size, sf.caps)
+				copy(g.slots, args)
+				return value{}, l.enterN(sf, g), g
+			}
+		}
 		return func(f frame) (value, tcode, frame) {
 			fn := fc.get(f)
 			if g, ok := fn.builtin(); ok && g.arity == k {
@@ -606,7 +670,7 @@ func (p *program) tail(n cnode) tcode {
 		bodies := make([]tcode, len(arms)/2)
 		for i := range pats {
 			pats[i] = p.pattern(cnode(arms[2*i]))
-			bodies[i] = p.tail(cnode(arms[2*i+1]))
+			bodies[i] = p.tail(cnode(arms[2*i+1]), lambda)
 		}
 		return func(f frame) (value, tcode, frame) {
 			v := vc.get(f)
@@ -624,7 +688,7 @@ func (p *program) tail(n cnode) tcode {
 		vcs := p.operands(r[2 : 2+k])
 		var arms []armCode
 		for a := r[2+k:]; len(a) > 0; a = a[k+1:] {
-			arms = append(arms, armCode{pats: p.patterns(a[:k]), body: p.tail(cnode(a[k]))})
+			arms = append(arms, armCode{pats: p.patterns(a[:k]), body: p.tail(cnode(a[k]), lambda)})
 		}
 		return func(f frame) (value, tcode, frame) {
 			args := f.slots[s : int(s)+k]
@@ -641,7 +705,7 @@ func (p *program) tail(n cnode) tcode {
 
 	case opWhere:
 		body, binds := p.where(n)
-		bind, bc := p.binds(binds), p.tail(body)
+		bind, bc := p.binds(binds), p.tail(body, lambda)
 		return func(f frame) (value, tcode, frame) {
 			bind(f)
 			return bc(f)
@@ -649,6 +713,26 @@ func (p *program) tail(n cnode) tcode {
 	}
 	c := p.expr(n)
 	return func(f frame) (value, tcode, frame) { return done(c(f)) }
+}
+
+// callee returns the frame of size slots, with the captures caps, for a
+// call in tail position from the frame f. If reuse is set and f is large
+// enough, it is f's slots: no closure refers to them, since closures copy
+// what they capture, and f's call ends with this one. A lambda calling
+// itself always reuses its frame. Only lambdas' frames are reused, not
+// the root's, which is made once.
+func callee(f frame, reuse bool, size int, caps []value) frame {
+	if reuse && cap(f.slots) >= size {
+		// Slots past the callee's would keep their values alive for as
+		// long as the frame is reused.
+		clear(f.slots[size:cap(f.slots)])
+		return frame{slots: f.slots[:size], caps: caps}
+	}
+	g := frame{caps: caps}
+	if size > 0 {
+		g.slots = make([]value, size)
+	}
+	return g
 }
 
 // binds compiles a where's bindings, as pairs of slot and value, into

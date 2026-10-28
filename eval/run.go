@@ -52,7 +52,7 @@ func (f frame) capture(caps []value, from []int32) {
 // eval runs the program in a new top frame.
 func (p *program) eval() (v value, err error) {
 	defer catch(&err)
-	return trampoline(p.body(p.root), frame{slots: make([]value, p.top)}), nil
+	return trampoline(p.body(p.root, false), frame{slots: make([]value, p.top)}), nil
 }
 
 // apply calls the function fn with arg.

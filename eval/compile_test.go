@@ -534,3 +534,41 @@ func TestCompileErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestKnowCallees checks which reads of names the compiler knows to hold a
+// lambda's closure: each as the name read, = and the binding of the lambda,
+// in the order of their nodes.
+func TestKnowCallees(t *testing.T) {
+	cases := []struct{ source, known string }{
+		{`f 3 ; f = | 0 -> 0 | n -> f (n - 1)`, `f=f f=f`},
+		{`even 3
+; even = | 0 -> #t | n -> odd (n - 1)
+; odd = | 0 -> #f | n -> even (n - 1)`, `odd=odd even=even even=even`},
+		// A parameter shadows the binding.
+		{`list/map g [f] ; g = f -> f 2 ; f = x -> x`, `g=g f=f`},
+		// A name that a pattern binds isn't known, nor a composition.
+		{`(| h -> h 1) (x -> x)`, ``},
+		{`f 1 ; f = (x -> x) >> (y -> y)`, ``},
+		// Captures are known through each lambda that they pass through.
+		{`f 1 ; f = x -> (y -> f y) x`, `f=f f=f`},
+	}
+	for _, c := range cases {
+		core := compileString(t, c.source)
+		if core == nil {
+			continue
+		}
+		var known []string
+		for n := range core.ops {
+			l := cnode(core.data[n].b)
+			if op := core.ops[n]; op != opLocal && op != opCapture || l == none {
+				continue
+			}
+			_, u, _, _ := core.lambda(l)
+			home := core.binders[core.uses[u].home].name
+			known = append(known, core.source(cnode(n)).NodeText(core.at[n])+"="+home)
+		}
+		if got := strings.Join(known, " "); got != c.known {
+			t.Errorf("%s\ngot  %s\nwant %s", c.source, got, c.known)
+		}
+	}
+}

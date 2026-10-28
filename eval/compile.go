@@ -50,8 +50,8 @@ const (
 
 	// Expressions.
 	opConst   // A: the index of a literal or builtin in consts.
-	opLocal   // A: the slot in the current frame.
-	opCapture // A: the index of the capture of the running function.
+	opLocal   // A: the slot in the current frame. B: the lambda whose closure it holds, if known, or none.
+	opCapture // A: the index of the capture of the running function. B: as opLocal's.
 	opCall    // A: the function. B: the argument.
 	opCallN   // A..B: the function, then two or more arguments.
 
@@ -380,7 +380,179 @@ func compile(units []unit, reg *types.Registry, globals variables, shapes *shape
 		return nil, c.err
 	}
 	c.top = c.size
+	c.knowCallees()
 	return &c.core, nil
+}
+
+// knowCallees notes in each Local and Capture node the lambda whose closure
+// it holds, if a where-group binds it to one, so that a call through it
+// needn't look at the closure to find its code, and a call of the running
+// lambda in tail position can reuse its frame.
+func (c *core) knowCallees() {
+	k := knower{core: c, slots: make([]cnode, c.top)}
+	k.expr(c.root)
+}
+
+// A knower knows the lambdas that a frame's slots, and the captures of the
+// function that it is the frame of, hold.
+type knower struct {
+	*core
+	slots, caps []cnode
+}
+
+func (k *knower) exprs(ns []int32) {
+	for _, n := range ns {
+		k.expr(cnode(n))
+	}
+}
+
+func (k *knower) expr(n cnode) {
+	d := &k.data[n]
+	switch k.ops[n] {
+	case opConst:
+	case opLocal:
+		d.b = int32(k.slots[d.a])
+	case opCapture:
+		d.b = int32(k.caps[d.a])
+	case opCallN, opList:
+		k.exprs(k.range_(n))
+	case opCompose:
+		first, second, _ := k.compose(n)
+		k.expr(first)
+		k.expr(second)
+	case opLambda:
+		k.lambda(n)
+	case opFill:
+		k.lambda(cnode(d.a))
+	case opMatch:
+		r := k.range_(n)
+		k.expr(cnode(r[0]))
+		k.arms(r[1:], 1)
+	case opMatchN:
+		r := k.range_(n)
+		s, n := r[0], int(r[1])
+		k.exprs(r[2 : 2+n])
+		for i := range n {
+			k.slots[int(s)+i] = none
+		}
+		k.arms(r[2+n:], n)
+	case opWhere:
+		body, binds := k.where(n)
+		saved := make([]cnode, 0, len(binds)/2)
+		for i := 0; i < len(binds); i += 2 {
+			s, x := binds[i], cnode(binds[i+1])
+			if s < 0 {
+				// The closure of a recursive lambda, which opFill completes.
+				saved = append(saved, k.slots[-1-s])
+				k.slots[-1-s] = x
+				continue
+			}
+			k.expr(x)
+			if k.ops[x] == opLambda {
+				saved = append(saved, k.slots[s])
+				k.slots[s] = x
+			}
+		}
+		k.expr(body)
+		for i := len(binds) - 2; i >= 0; i -= 2 {
+			s, x := binds[i], binds[i+1]
+			switch {
+			case s < 0:
+				s = -1 - s
+			case k.ops[x] != opLambda:
+				continue
+			}
+			saved, k.slots[s] = saved[:len(saved)-1], saved[len(saved)-1]
+		}
+	case opRecord:
+		base, _, fields := k.record(n)
+		if base != none {
+			k.expr(base)
+		}
+		for i := 1; i < len(fields); i += 2 {
+			k.expr(cnode(fields[i]))
+		}
+	case opVariant:
+		if cnode(d.b) != none {
+			k.expr(cnode(d.b))
+		}
+	default:
+		// opCall, operators, opAccess and opField: A, and B unless it is a
+		// label or index.
+		k.expr(cnode(d.a))
+		if op := k.ops[n]; op != opAccess && op != opField {
+			k.expr(cnode(d.b))
+		}
+	}
+}
+
+// lambda knows the code of the lambda n, in a frame of its own, with what
+// its captures hold.
+func (k *knower) lambda(n cnode) {
+	from := k.captures(n)
+	caps := make([]cnode, len(from))
+	for i, x := range from {
+		if x >= 0 {
+			caps[i] = k.slots[x]
+		} else {
+			caps[i] = k.caps[-1-x]
+		}
+	}
+	size, _, arity, arms := k.core.lambda(n)
+	outer := *k
+	k.slots, k.caps = make([]cnode, size), caps
+	k.arms(arms, arity)
+	*k = outer
+}
+
+// arms knows the patterns and bodies of arms of n patterns each.
+func (k *knower) arms(arms []int32, n int) {
+	for ; len(arms) > 0; arms = arms[n+1:] {
+		for _, p := range arms[:n] {
+			k.pattern(cnode(p))
+		}
+		k.expr(cnode(arms[n]))
+	}
+}
+
+// pattern forgets what the slots that the pattern n binds held.
+func (k *knower) pattern(n cnode) {
+	d := k.data[n]
+	switch k.ops[n] {
+	case patBind:
+		k.slots[d.a] = none
+	case patVariant:
+		if cnode(d.b) != none {
+			k.pattern(cnode(d.b))
+		}
+	case patRecord, patSplit:
+		var rest cnode
+		var fields []int32
+		if k.ops[n] == patRecord {
+			rest, _, fields = k.record(n)
+		} else {
+			rest, _, _, _, fields = k.split(n)
+		}
+		if rest != none {
+			k.pattern(rest)
+		}
+		for i := 1; i < len(fields); i += 2 {
+			k.pattern(cnode(fields[i]))
+		}
+	case patList:
+		for _, p := range k.range_(n) {
+			k.pattern(cnode(p))
+		}
+	case patCons, patSnoc:
+		k.pattern(cnode(d.a))
+		k.pattern(cnode(d.b))
+	case patPrefix, patSuffix:
+		rest, elems := k.elems(n)
+		k.pattern(rest)
+		for _, p := range elems {
+			k.pattern(cnode(p))
+		}
+	}
 }
 
 // scrap compiles the expression of the current source, and resolves its

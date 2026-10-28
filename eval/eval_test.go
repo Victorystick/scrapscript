@@ -352,6 +352,28 @@ var tailCalls = []struct{ source, result string }{
 	{`loop 1000000 0 ; loop = | 0 -> acc -> acc | n -> acc -> loop (n - 1) (acc + 1)`, `1000000`},
 	{`loop 0 1000000 ; loop = acc -> | 0 -> acc | n -> loop (acc + 1) (n - 1)`, `1000000`},
 	{`loop 1000000 0 ; loop = n -> (step ; step = | acc -> (| 0 -> acc | _ -> loop (n - 1) (acc + 1)) n)`, `1000000`},
+	// Functions that call each other, with frames of different sizes,
+	// which the larger one's calls reuse.
+	{`ping 1000000
+; ping = | 0 -> "done" | n -> pong n 1 2
+; pong = n -> a -> b -> (ping m ; m = n - a - b + 2)`, `"done"`},
+}
+
+// A call in tail position reuses its caller's frame: arguments that read
+// the slots it overwrites see their old values, and closures keep what
+// they captured.
+var frameReuse = []struct{ source, result string }{
+	{`f 1 2 3 ; f = a -> b -> | 0 -> [a, b] | n -> f b a (n - 1)`, `[ 2, 1 ]`},
+	{`list/map (g -> g ()) (go [] 3) ; go = acc -> | 0 -> acc | n -> go (acc +< (_ -> n)) (n - 1)`, `[ 3, 2, 1 ]`},
+	{`f 2 [] ; f = | 0 -> acc -> acc | n -> acc -> g n (acc +< n) ; g = n -> acc -> (h ; h = f (n - 1) (acc +< (n * 10)))`, `[ 2, 20, 1, 10 ]`},
+	// A call of itself that isn't in tail position has a frame of its own.
+	{`f 3 ; f = | 0 -> [] | n -> (| xs -> xs +< n) (f (n - 1))`, `[ 1, 2, 3 ]`},
+}
+
+func TestFrameReuse(t *testing.T) {
+	for _, ex := range frameReuse {
+		evalString(t, ex.source, ex.result)
+	}
 }
 
 func TestTailCalls(t *testing.T) {
