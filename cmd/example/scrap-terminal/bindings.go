@@ -33,11 +33,20 @@ func Load(env *eval.Environment, app *eval.Scrap) (ProgramRef, error) {
 		return zero, err
 	}
 	l := newBindings(env)
-	return ProgramRef{l, v}, nil
+	return ProgramRef{ref{l, v}}, nil
 }
 
 // S is a value of the type parameter s, which only scripts can inspect.
 type S struct{ v eval.Value }
+
+// ref is a value of the environment of b, which the Refs embed.
+type ref struct {
+	b *Bindings
+	v eval.Value
+}
+
+// Bindings returns the bindings of the environment that x is a value of.
+func (x ref) Bindings() *Bindings { return x.b }
 
 type Program struct {
 	Init Turn
@@ -75,24 +84,18 @@ func (x Program) toValue(l *Bindings) eval.Value {
 }
 
 // Ref returns x as a value of the environment of l.
-func (x Program) Ref(l *Bindings) ProgramRef { return ProgramRef{l, x.toValue(l)} }
+func (x Program) Ref(l *Bindings) ProgramRef { return ProgramRef{ref{l, x.toValue(l)}} }
 
 // ProgramRef is a Program as a script holds it. It converts only the fields
 // that are read, and goes back to a script as it is.
-type ProgramRef struct {
-	b *Bindings
-	v eval.Value
-}
-
-// Bindings returns the bindings of the environment that x is a value of.
-func (x ProgramRef) Bindings() *Bindings { return x.b }
+type ProgramRef struct{ ref }
 
 // Load converts all of x.
 func (x ProgramRef) Load() Program { return programFromValue(x.b, x.v) }
 
 func (x ProgramRef) Init() TurnRef {
 	l := x.b
-	return TurnRef{l, l.programShape.Field(x.v, 0)}
+	return TurnRef{ref{l, l.programShape.Field(x.v, 0)}}
 }
 
 func (x ProgramRef) Step(a0 EventRef, a1 S) (TurnRef, error) {
@@ -102,18 +105,7 @@ func (x ProgramRef) Step(a0 EventRef, a1 S) (TurnRef, error) {
 		var zero TurnRef
 		return zero, err
 	}
-	return TurnRef{l, v}, nil
-}
-
-// NewProgram returns a Program of the fields.
-func (l *Bindings) NewProgram(init TurnRef, step func(EventRef, S) (TurnRef, error)) ProgramRef {
-	return ProgramRef{l, l.programShape.New(init.v, eval.NewFunc("programStep", 2, func(args []eval.Value) (eval.Value, error) {
-		r, err := step(EventRef{l, args[0]}, S{args[1]})
-		if err != nil {
-			return eval.Value{}, err
-		}
-		return r.v, nil
-	}))}
+	return TurnRef{ref{l, v}}, nil
 }
 
 type Turn struct {
@@ -140,24 +132,18 @@ func (x Turn) toValue(l *Bindings) eval.Value {
 }
 
 // Ref returns x as a value of the environment of l.
-func (x Turn) Ref(l *Bindings) TurnRef { return TurnRef{l, x.toValue(l)} }
+func (x Turn) Ref(l *Bindings) TurnRef { return TurnRef{ref{l, x.toValue(l)}} }
 
 // TurnRef is a Turn as a script holds it. It converts only the fields
 // that are read, and goes back to a script as it is.
-type TurnRef struct {
-	b *Bindings
-	v eval.Value
-}
-
-// Bindings returns the bindings of the environment that x is a value of.
-func (x TurnRef) Bindings() *Bindings { return x.b }
+type TurnRef struct{ ref }
 
 // Load converts all of x.
 func (x TurnRef) Load() Turn { return turnFromValue(x.b, x.v) }
 
 func (x TurnRef) Next() NextActionRef {
 	l := x.b
-	return NextActionRef{l, l.turnShape.Field(x.v, 0)}
+	return NextActionRef{ref{l, l.turnShape.Field(x.v, 0)}}
 }
 
 func (x TurnRef) Out() string {
@@ -168,11 +154,6 @@ func (x TurnRef) Out() string {
 func (x TurnRef) State() S {
 	l := x.b
 	return S{l.turnShape.Field(x.v, 2)}
-}
-
-// NewTurn returns a Turn of the fields.
-func (l *Bindings) NewTurn(next NextActionRef, out string, state S) TurnRef {
-	return TurnRef{l, l.turnShape.New(next.v, eval.Text(out), state.v)}
 }
 
 type NextActionTag uint8
@@ -234,17 +215,11 @@ func (x NextAction) toValue(l *Bindings) eval.Value {
 }
 
 // Ref returns x as a value of the environment of l.
-func (x NextAction) Ref(l *Bindings) NextActionRef { return NextActionRef{l, x.toValue(l)} }
+func (x NextAction) Ref(l *Bindings) NextActionRef { return NextActionRef{ref{l, x.toValue(l)}} }
 
 // NextActionRef is a NextAction as a script holds it. It converts only the payloads
 // that are read, and goes back to a script as it is.
-type NextActionRef struct {
-	b *Bindings
-	v eval.Value
-}
-
-// Bindings returns the bindings of the environment that x is a value of.
-func (x NextActionRef) Bindings() *Bindings { return x.b }
+type NextActionRef struct{ ref }
 
 // Load converts all of x.
 func (x NextActionRef) Load() NextAction { return nextActionFromValue(x.b, x.v) }
@@ -260,10 +235,6 @@ func (x NextActionRef) Tag() NextActionTag {
 	panic("NextActionRef: unknown tag")
 }
 
-func (l *Bindings) NewNextActionExit(x int64) NextActionRef {
-	return NextActionRef{l, eval.NewVariant(l.exit, eval.Int(x))}
-}
-
 // Exit returns the payload of #exit, and panics on another tag.
 func (x NextActionRef) Exit() int64 {
 	l := x.b
@@ -272,10 +243,6 @@ func (x NextActionRef) Exit() int64 {
 		panic("NextActionRef: #exit of " + x.Tag().String())
 	}
 	return t.Payload().Int()
-}
-
-func (l *Bindings) NewNextActionReadLine() NextActionRef {
-	return NextActionRef{l, eval.NewVariant(l.readLine, eval.Value{})}
 }
 
 type EventTag uint8
@@ -337,17 +304,11 @@ func (x Event) toValue(l *Bindings) eval.Value {
 }
 
 // Ref returns x as a value of the environment of l.
-func (x Event) Ref(l *Bindings) EventRef { return EventRef{l, x.toValue(l)} }
+func (x Event) Ref(l *Bindings) EventRef { return EventRef{ref{l, x.toValue(l)}} }
 
 // EventRef is a Event as a script holds it. It converts only the payloads
 // that are read, and goes back to a script as it is.
-type EventRef struct {
-	b *Bindings
-	v eval.Value
-}
-
-// Bindings returns the bindings of the environment that x is a value of.
-func (x EventRef) Bindings() *Bindings { return x.b }
+type EventRef struct{ ref }
 
 // Load converts all of x.
 func (x EventRef) Load() Event { return eventFromValue(x.b, x.v) }
@@ -361,14 +322,6 @@ func (x EventRef) Tag() EventTag {
 		return EventLine
 	}
 	panic("EventRef: unknown tag")
-}
-
-func (l *Bindings) NewEventEof() EventRef {
-	return EventRef{l, eval.NewVariant(l.eof, eval.Value{})}
-}
-
-func (l *Bindings) NewEventLine(x string) EventRef {
-	return EventRef{l, eval.NewVariant(l.line, eval.Text(x))}
 }
 
 // Line returns the payload of #line, and panics on another tag.

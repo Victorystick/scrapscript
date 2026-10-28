@@ -846,7 +846,8 @@ a database.
 
 A Ref holds the value, converts only the parts that the host reads, and
 passes back to a script as it is; its `Load` converts all of it to the
-struct, for hosts that want plain Go values. Aliases name the Go types.
+struct, for hosts that want plain Go values, and the struct's `Ref` converts
+it back, which is how a host makes values. Aliases name the Go types.
 
 Open: cancelling a running evaluation (a `context.Context`, checked on each
 call, without counting steps); whether host resources such as connections can

@@ -56,11 +56,20 @@ func Load(env *eval.Environment, app *eval.Scrap) (ApiRef, error) {
 		return zero, err
 	}
 	l := newBindings(env)
-	return ApiRef{l, v}, nil
+	return ApiRef{ref{l, v}}, nil
 }
 
 // C is a value of the type parameter c, which only scripts can inspect.
 type C struct{ v eval.Value }
+
+// ref is a value of the environment of b, which the Refs embed.
+type ref struct {
+	b *Bindings
+	v eval.Value
+}
+
+// Bindings returns the bindings of the environment that x is a value of.
+func (x ref) Bindings() *Bindings { return x.b }
 
 type Api struct {
 	Data   []byte
@@ -149,17 +158,11 @@ func (x Api) toValue(l *Bindings) eval.Value {
 }
 
 // Ref returns x as a value of the environment of l.
-func (x Api) Ref(l *Bindings) ApiRef { return ApiRef{l, x.toValue(l)} }
+func (x Api) Ref(l *Bindings) ApiRef { return ApiRef{ref{l, x.toValue(l)}} }
 
 // ApiRef is a Api as a script holds it. It converts only the fields
 // that are read, and goes back to a script as it is.
-type ApiRef struct {
-	b *Bindings
-	v eval.Value
-}
-
-// Bindings returns the bindings of the environment that x is a value of.
-func (x ApiRef) Bindings() *Bindings { return x.b }
+type ApiRef struct{ ref }
 
 // Load converts all of x.
 func (x ApiRef) Load() Api { return apiFromValue(x.b, x.v) }
@@ -181,7 +184,7 @@ func (x ApiRef) Handle(a0 C, a1 string) (ReplyRef, error) {
 		var zero ReplyRef
 		return zero, err
 	}
-	return ReplyRef{l, v}, nil
+	return ReplyRef{ref{l, v}}, nil
 }
 
 func (x ApiRef) Helper(a0 func(int64, int64) (int64, error)) (int64, error) {
@@ -217,36 +220,10 @@ func (x ApiRef) Tags() host.ListRef[string] {
 
 func (x ApiRef) Tree() TreeRef {
 	l := x.b
-	return TreeRef{l, l.apiShape.Field(x.v, 7)}
+	return TreeRef{ref{l, l.apiShape.Field(x.v, 7)}}
 }
 
 func (x ApiRef) Unit() struct{} { return struct{}{} }
-
-// NewApi returns a Api of the fields.
-func (l *Bindings) NewApi(data []byte, flag byte, handle func(C, string) (ReplyRef, error), helper func(func(int64, int64) (int64, error)) (int64, error), init C, ratio float64, tags host.ListRef[string], tree TreeRef, unit struct{}) ApiRef {
-	return ApiRef{l, l.apiShape.New(eval.Bytes(bytes.Clone(data)), eval.Byte(flag), eval.NewFunc("apiHandle", 2, func(args []eval.Value) (eval.Value, error) {
-		r, err := handle(C{args[0]}, args[1].Text())
-		if err != nil {
-			return eval.Value{}, err
-		}
-		return r.v, nil
-	}), eval.NewFunc("apiHelper", 1, func(args []eval.Value) (eval.Value, error) {
-		r, err := helper(func(fn eval.Value) func(int64, int64) (int64, error) {
-			return func(a0 int64, a1 int64) (int64, error) {
-				v, err := eval.Call(fn, eval.Int(a0), eval.Int(a1))
-				if err != nil {
-					var zero int64
-					return zero, err
-				}
-				return v.Int(), nil
-			}
-		}(args[0]))
-		if err != nil {
-			return eval.Value{}, err
-		}
-		return eval.Int(r), nil
-	}), init.v, eval.Float(ratio), tags.Value(), tree.v, eval.Hole())}
-}
 
 type ReplyTag uint8
 
@@ -329,17 +306,11 @@ func (x Reply) toValue(l *Bindings) eval.Value {
 }
 
 // Ref returns x as a value of the environment of l.
-func (x Reply) Ref(l *Bindings) ReplyRef { return ReplyRef{l, x.toValue(l)} }
+func (x Reply) Ref(l *Bindings) ReplyRef { return ReplyRef{ref{l, x.toValue(l)}} }
 
 // ReplyRef is a Reply as a script holds it. It converts only the payloads
 // that are read, and goes back to a script as it is.
-type ReplyRef struct {
-	b *Bindings
-	v eval.Value
-}
-
-// Bindings returns the bindings of the environment that x is a value of.
-func (x ReplyRef) Bindings() *Bindings { return x.b }
+type ReplyRef struct{ ref }
 
 // Load converts all of x.
 func (x ReplyRef) Load() Reply { return replyFromValue(x.b, x.v) }
@@ -357,10 +328,6 @@ func (x ReplyRef) Tag() ReplyTag {
 	panic("ReplyRef: unknown tag")
 }
 
-func (l *Bindings) NewReplyFetch(x ReplyFetchPayloadRef) ReplyRef {
-	return ReplyRef{l, eval.NewVariant(l.fetch, x.v)}
-}
-
 // Fetch returns the payload of #fetch, and panics on another tag.
 func (x ReplyRef) Fetch() ReplyFetchPayloadRef {
 	l := x.b
@@ -368,11 +335,7 @@ func (x ReplyRef) Fetch() ReplyFetchPayloadRef {
 	if t.Tag() != l.fetch {
 		panic("ReplyRef: #fetch of " + x.Tag().String())
 	}
-	return ReplyFetchPayloadRef{l, t.Payload()}
-}
-
-func (l *Bindings) NewReplyRange(x string) ReplyRef {
-	return ReplyRef{l, eval.NewVariant(l.range_, eval.Text(x))}
+	return ReplyFetchPayloadRef{ref{l, t.Payload()}}
 }
 
 // Range returns the payload of #range, and panics on another tag.
@@ -385,10 +348,6 @@ func (x ReplyRef) Range() string {
 	return t.Payload().Text()
 }
 
-func (l *Bindings) NewReplyRespond(x ReplyRespondPayloadRef) ReplyRef {
-	return ReplyRef{l, eval.NewVariant(l.respond, x.v)}
-}
-
 // Respond returns the payload of #respond, and panics on another tag.
 func (x ReplyRef) Respond() ReplyRespondPayloadRef {
 	l := x.b
@@ -396,7 +355,7 @@ func (x ReplyRef) Respond() ReplyRespondPayloadRef {
 	if t.Tag() != l.respond {
 		panic("ReplyRef: #respond of " + x.Tag().String())
 	}
-	return ReplyRespondPayloadRef{l, t.Payload()}
+	return ReplyRespondPayloadRef{ref{l, t.Payload()}}
 }
 
 type ReplyFetchPayload struct {
@@ -436,18 +395,12 @@ func (x ReplyFetchPayload) toValue(l *Bindings) eval.Value {
 
 // Ref returns x as a value of the environment of l.
 func (x ReplyFetchPayload) Ref(l *Bindings) ReplyFetchPayloadRef {
-	return ReplyFetchPayloadRef{l, x.toValue(l)}
+	return ReplyFetchPayloadRef{ref{l, x.toValue(l)}}
 }
 
 // ReplyFetchPayloadRef is a ReplyFetchPayload as a script holds it. It converts only the fields
 // that are read, and goes back to a script as it is.
-type ReplyFetchPayloadRef struct {
-	b *Bindings
-	v eval.Value
-}
-
-// Bindings returns the bindings of the environment that x is a value of.
-func (x ReplyFetchPayloadRef) Bindings() *Bindings { return x.b }
+type ReplyFetchPayloadRef struct{ ref }
 
 // Load converts all of x.
 func (x ReplyFetchPayloadRef) Load() ReplyFetchPayload { return replyFetchPayloadFromValue(x.b, x.v) }
@@ -459,23 +412,12 @@ func (x ReplyFetchPayloadRef) Then(a0 string) (ReplyRef, error) {
 		var zero ReplyRef
 		return zero, err
 	}
-	return ReplyRef{l, v}, nil
+	return ReplyRef{ref{l, v}}, nil
 }
 
 func (x ReplyFetchPayloadRef) Url() string {
 	l := x.b
 	return l.replyFetchPayloadShape.Field(x.v, 1).Text()
-}
-
-// NewReplyFetchPayload returns a ReplyFetchPayload of the fields.
-func (l *Bindings) NewReplyFetchPayload(then func(string) (ReplyRef, error), url string) ReplyFetchPayloadRef {
-	return ReplyFetchPayloadRef{l, l.replyFetchPayloadShape.New(eval.NewFunc("replyFetchPayloadThen", 1, func(args []eval.Value) (eval.Value, error) {
-		r, err := then(args[0].Text())
-		if err != nil {
-			return eval.Value{}, err
-		}
-		return r.v, nil
-	}), eval.Text(url))}
 }
 
 type ReplyRespondPayload struct {
@@ -500,18 +442,12 @@ func (x ReplyRespondPayload) toValue(l *Bindings) eval.Value {
 
 // Ref returns x as a value of the environment of l.
 func (x ReplyRespondPayload) Ref(l *Bindings) ReplyRespondPayloadRef {
-	return ReplyRespondPayloadRef{l, x.toValue(l)}
+	return ReplyRespondPayloadRef{ref{l, x.toValue(l)}}
 }
 
 // ReplyRespondPayloadRef is a ReplyRespondPayload as a script holds it. It converts only the fields
 // that are read, and goes back to a script as it is.
-type ReplyRespondPayloadRef struct {
-	b *Bindings
-	v eval.Value
-}
-
-// Bindings returns the bindings of the environment that x is a value of.
-func (x ReplyRespondPayloadRef) Bindings() *Bindings { return x.b }
+type ReplyRespondPayloadRef struct{ ref }
 
 // Load converts all of x.
 func (x ReplyRespondPayloadRef) Load() ReplyRespondPayload {
@@ -526,11 +462,6 @@ func (x ReplyRespondPayloadRef) Body() []byte {
 func (x ReplyRespondPayloadRef) Status() int64 {
 	l := x.b
 	return l.replyRespondPayloadShape.Field(x.v, 1).Int()
-}
-
-// NewReplyRespondPayload returns a ReplyRespondPayload of the fields.
-func (l *Bindings) NewReplyRespondPayload(body []byte, status int64) ReplyRespondPayloadRef {
-	return ReplyRespondPayloadRef{l, l.replyRespondPayloadShape.New(eval.Bytes(bytes.Clone(body)), eval.Int(status))}
 }
 
 type TreeTag uint8
@@ -592,17 +523,11 @@ func (x Tree) toValue(l *Bindings) eval.Value {
 }
 
 // Ref returns x as a value of the environment of l.
-func (x Tree) Ref(l *Bindings) TreeRef { return TreeRef{l, x.toValue(l)} }
+func (x Tree) Ref(l *Bindings) TreeRef { return TreeRef{ref{l, x.toValue(l)}} }
 
 // TreeRef is a Tree as a script holds it. It converts only the payloads
 // that are read, and goes back to a script as it is.
-type TreeRef struct {
-	b *Bindings
-	v eval.Value
-}
-
-// Bindings returns the bindings of the environment that x is a value of.
-func (x TreeRef) Bindings() *Bindings { return x.b }
+type TreeRef struct{ ref }
 
 // Load converts all of x.
 func (x TreeRef) Load() Tree { return treeFromValue(x.b, x.v) }
@@ -618,14 +543,6 @@ func (x TreeRef) Tag() TreeTag {
 	panic("TreeRef: unknown tag")
 }
 
-func (l *Bindings) NewTreeLeaf() TreeRef {
-	return TreeRef{l, eval.NewVariant(l.leaf, eval.Value{})}
-}
-
-func (l *Bindings) NewTreeNode(x TreeNodePayloadRef) TreeRef {
-	return TreeRef{l, eval.NewVariant(l.node, x.v)}
-}
-
 // Node returns the payload of #node, and panics on another tag.
 func (x TreeRef) Node() TreeNodePayloadRef {
 	l := x.b
@@ -633,7 +550,7 @@ func (x TreeRef) Node() TreeNodePayloadRef {
 	if t.Tag() != l.node {
 		panic("TreeRef: #node of " + x.Tag().String())
 	}
-	return TreeNodePayloadRef{l, t.Payload()}
+	return TreeNodePayloadRef{ref{l, t.Payload()}}
 }
 
 type TreeNodePayload struct {
@@ -661,40 +578,29 @@ func (x TreeNodePayload) toValue(l *Bindings) eval.Value {
 
 // Ref returns x as a value of the environment of l.
 func (x TreeNodePayload) Ref(l *Bindings) TreeNodePayloadRef {
-	return TreeNodePayloadRef{l, x.toValue(l)}
+	return TreeNodePayloadRef{ref{l, x.toValue(l)}}
 }
 
 // TreeNodePayloadRef is a TreeNodePayload as a script holds it. It converts only the fields
 // that are read, and goes back to a script as it is.
-type TreeNodePayloadRef struct {
-	b *Bindings
-	v eval.Value
-}
-
-// Bindings returns the bindings of the environment that x is a value of.
-func (x TreeNodePayloadRef) Bindings() *Bindings { return x.b }
+type TreeNodePayloadRef struct{ ref }
 
 // Load converts all of x.
 func (x TreeNodePayloadRef) Load() TreeNodePayload { return treeNodePayloadFromValue(x.b, x.v) }
 
 func (x TreeNodePayloadRef) Left() TreeRef {
 	l := x.b
-	return TreeRef{l, l.treeNodePayloadShape.Field(x.v, 0)}
+	return TreeRef{ref{l, l.treeNodePayloadShape.Field(x.v, 0)}}
 }
 
 func (x TreeNodePayloadRef) Right() TreeRef {
 	l := x.b
-	return TreeRef{l, l.treeNodePayloadShape.Field(x.v, 1)}
+	return TreeRef{ref{l, l.treeNodePayloadShape.Field(x.v, 1)}}
 }
 
 func (x TreeNodePayloadRef) Value() int64 {
 	l := x.b
 	return l.treeNodePayloadShape.Field(x.v, 2).Int()
-}
-
-// NewTreeNodePayload returns a TreeNodePayload of the fields.
-func (l *Bindings) NewTreeNodePayload(left TreeRef, right TreeRef, value int64) TreeNodePayloadRef {
-	return TreeNodePayloadRef{l, l.treeNodePayloadShape.New(left.v, right.v, eval.Int(value))}
 }
 
 // Bindings make and read the values of the interface's types in the

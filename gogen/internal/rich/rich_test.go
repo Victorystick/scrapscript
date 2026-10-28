@@ -119,10 +119,9 @@ func TestRefs(t *testing.T) {
 		t.Errorf("expected 42, got %d, %v", sum, err)
 	}
 
-	// A Ref goes back to the script as it is.
-	b := api.Bindings()
-	rebuilt := b.NewApi(api.Data(), api.Flag(), nil, nil, api.Init(), api.Ratio(), api.Tags(), api.Tree(), struct{}{})
-	if got := rebuilt.Tree().Node().Right().Node().Value(); got != 3 {
+	// A struct goes back to the script through its Ref method.
+	rebuilt := api.Tree().Load().Ref(api.Bindings())
+	if got := rebuilt.Node().Right().Node().Value(); got != 3 {
 		t.Errorf("expected the same tree, got %d", got)
 	}
 }
@@ -143,16 +142,15 @@ func TestToValue(t *testing.T) {
 		t.Errorf("unexpected value: %s", r)
 	}
 
-	// The constructors of Refs make the same values, and so do the structs'
-	// Ref methods.
-	ref := l.NewTreeNode(l.NewTreeNodePayload(l.NewTreeLeaf(), l.NewTreeLeaf(), 7))
+	// The structs' Ref methods make the same values.
+	ref := tree.Ref(l)
 	if got := env.Print(ref.v); got != `#node { left = #leaf, right = #leaf, value = 7 }` {
 		t.Errorf("unexpected value: %s", got)
 	}
-	if got := tree.Ref(l).Node().Value(); got != 7 {
+	if got := ref.Node().Value(); got != 7 {
 		t.Errorf("expected 7, got %d", got)
 	}
-	if got := env.Print(l.NewReplyRange("x").v); got != `#range "x"` {
+	if got := env.Print(NewReplyRange("x").Ref(l).v); got != `#range "x"` {
 		t.Errorf("unexpected value: %s", got)
 	}
 }
@@ -172,7 +170,7 @@ func TestWrongTagRef(t *testing.T) {
 			t.Errorf("expected a panic for the wrong tag, got %v", r)
 		}
 	}()
-	newBindings(eval.NewEnvironment()).NewTreeLeaf().Node()
+	NewTreeLeaf().Ref(newBindings(eval.NewEnvironment())).Node()
 }
 
 func TestLoadRejects(t *testing.T) {

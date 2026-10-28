@@ -152,8 +152,11 @@ builtins now return plain values and panic with a `runtimeError`, which
       list or tree back to the script still walked it twice. `Load` now
       returns Refs, which hold the `eval.Value` as type parameters'
       wrappers do, with typed accessors that read fields at static indices
-      (`eval.Shape.Field`, since interface rows are closed), constructors
-      on `Bindings`, and a `Load()` that converts to the structs. AccessLog
+      (`eval.Shape.Field`, since interface rows are closed), and a `Load()`
+      that converts to the structs, whose `Ref(*Bindings)` converts back
+      and is the one way to make values: positional constructors on
+      `Bindings` were dropped, as same-typed fields could swap silently,
+      and a Ref inside a new value converts out and back. AccessLog
       is unchanged, as its interface converts only a small record per
       step; reading a tree of 65535 nodes (BenchmarkTree in
       gogen/internal/rich) is 21 ns for its root instead of 6 ms, and 2.7

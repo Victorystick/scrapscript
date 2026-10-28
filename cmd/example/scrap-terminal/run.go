@@ -33,19 +33,19 @@ func Run(p ProgramRef, r io.Reader, w io.Writer) (int, error) {
 			return int(next.Exit()), nil
 		}
 
-		event := b.NewEventEof()
+		event := NewEventEof().Ref(b)
 		if !eof {
 			line, err := in.ReadString('\n')
 			switch {
 			case err == io.EOF:
 				eof = true
 				if line != "" {
-					event = b.NewEventLine(line)
+					event = NewEventLine(line).Ref(b)
 				}
 			case err != nil:
 				return 0, err
 			default:
-				event = b.NewEventLine(strings.TrimSuffix(line, "\n"))
+				event = NewEventLine(strings.TrimSuffix(line, "\n")).Ref(b)
 			}
 		}
 

@@ -280,11 +280,6 @@ func (g *generator) named(s types.Shape, hint string) (*gotype, error) {
 			return nil, err
 		}
 	}
-	if s.Kind != types.ShapeEnum {
-		if err := g.claim("New" + name); err != nil {
-			return nil, err
-		}
-	}
 	d := &decl{name: name, enum: s.Kind == types.ShapeEnum}
 	g.byRef[s.Ref] = d
 	if key != "" {
@@ -395,7 +390,7 @@ func (g *generator) from(t *gotype, v string, ref bool) string {
 	case t.elem != nil:
 		return fmt.Sprintf("host.ListFrom(%s, func(v eval.Value) %s { return %s })", v, t.elem.expr, g.from(t.elem, "v", false))
 	case t.decl != nil && ref:
-		return fmt.Sprintf("%sRef{l, %s}", t.decl.name, v)
+		return fmt.Sprintf("%sRef{ref{l, %s}}", t.decl.name, v)
 	case t.decl != nil:
 		return fmt.Sprintf("%sFromValue(l, %s)", lower(t.decl.name), v)
 	}
@@ -500,6 +495,13 @@ func (g *generator) bindings(pkg, hash string, sources map[string]string, top *g
 		name := g.params[g.reg.Resolve(p.Var)]
 		w("\n// %s is a value of the type parameter %s, which only scripts can inspect.\n", name, p.Name)
 		w("type %s struct{ v eval.Value }\n", name)
+	}
+
+	if len(g.decls) > 0 {
+		w("\n// ref is a value of the environment of b, which the Refs embed.\n")
+		w("type ref struct {\n\tb *Bindings\n\tv eval.Value\n}\n")
+		w("\n// Bindings returns the bindings of the environment that x is a value of.\n")
+		w("func (x ref) Bindings() *Bindings { return x.b }\n")
 	}
 
 	for _, d := range g.decls {
@@ -608,28 +610,16 @@ func (g *generator) record(w func(string, ...any), d *decl) {
 		}
 		w("\nfunc (x %sRef) %s() %s {\n\tl := x.b\n\treturn %s\n}\n", d.name, f.name, expr(f.typ, true), g.from(f.typ, field, true))
 	}
-
-	var params, values []string
-	for _, f := range d.fields {
-		name := param(f)
-		params = append(params, name+" "+expr(f.typ, true))
-		values = append(values, g.to(f.typ, name, true))
-	}
-	w("\n// New%s returns a %s of the fields.\n", d.name, d.name)
-	w("func (l *Bindings) New%s(%s) %sRef {\n\treturn %sRef{l, %s.New(%s)}\n}\n",
-		d.name, strings.Join(params, ", "), d.name, d.name, g.shape(d), strings.Join(values, ", "))
 }
 
 // ref writes the declarations of the Ref of d that records and enums share,
 // whose parts are fields or payloads, and the Ref method of d's struct.
 func (g *generator) ref(w func(string, ...any), d *decl, parts string) {
 	w("\n// Ref returns x as a value of the environment of l.\n")
-	w("func (x %s) Ref(l *Bindings) %sRef { return %sRef{l, x.toValue(l)} }\n", d.name, d.name, d.name)
+	w("func (x %s) Ref(l *Bindings) %sRef { return %sRef{ref{l, x.toValue(l)}} }\n", d.name, d.name, d.name)
 	w("\n// %sRef is a %s as a script holds it. It converts only the %s\n", d.name, d.name, parts)
 	w("// that are read, and goes back to a script as it is.\n")
-	w("type %sRef struct {\n\tb *Bindings\n\tv eval.Value\n}\n", d.name)
-	w("\n// Bindings returns the bindings of the environment that x is a value of.\n")
-	w("func (x %sRef) Bindings() *Bindings { return x.b }\n", d.name)
+	w("type %sRef struct{ ref }\n", d.name)
 	w("\n// Load converts all of x.\n")
 	w("func (x %sRef) Load() %s { return %sFromValue(x.b, x.v) }\n", d.name, d.name, lower(d.name))
 }
@@ -707,14 +697,9 @@ func (g *generator) enum(w func(string, ...any), d *decl) {
 	}
 	w("\t}\n\tpanic(\"%sRef: unknown tag\")\n}\n", d.name)
 	for _, f := range d.fields {
-		const_ := d.name + f.name
 		if f.typ == nil {
-			w("\nfunc (l *Bindings) New%s() %sRef {\n\treturn %sRef{l, eval.NewVariant(%s, eval.Value{})}\n}\n",
-				const_, d.name, d.name, g.label(f.label))
 			continue
 		}
-		w("\nfunc (l *Bindings) New%s(x %s) %sRef {\n\treturn %sRef{l, eval.NewVariant(%s, %s)}\n}\n",
-			const_, expr(f.typ, true), d.name, d.name, g.label(f.label), g.to(f.typ, "x", true))
 		w("\n// %s returns the payload of #%s, and panics on another tag.\n", f.name, f.label)
 		w("func (x %sRef) %s() %s {\n\tl := x.b\n\tt := x.v.Variant()\n\tif t.Tag() != %s {\n", d.name, f.name, expr(f.typ, true), g.label(f.label))
 		w("\t\tpanic(\"%sRef: #%s of \" + x.Tag().String())\n\t}\n", d.name, f.label)
@@ -725,21 +710,6 @@ func (g *generator) enum(w func(string, ...any), d *decl) {
 // isFunc reports whether t is a function's type.
 func isFunc(t *gotype) bool {
 	return t.prim == "" && !t.param && t.elem == nil && t.decl == nil
-}
-
-// param returns the name of the parameter of a record's constructor that
-// gives the field f. The constructor's receiver is l, and the conversions
-// of functions declare args, r, v, err and fn.
-func param(f field) string {
-	name := lower(f.name)
-	switch name {
-	case "l", "args", "r", "v", "err", "fn":
-		return name + "_"
-	}
-	if token.IsKeyword(name) {
-		name += "_"
-	}
-	return name
 }
 
 func isDecl(t *gotype) bool { return t.decl != nil }
