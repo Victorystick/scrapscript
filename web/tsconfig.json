@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "sourceMap": true
+  },
+  "exclude": [
+    "node_modules",
+    "**/node_modules/*",
+    // A Web Worker, which has its own globals.
+    "repl-worker.ts"
+  ]
+}

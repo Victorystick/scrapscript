@@ -1,0 +1,65 @@
+# Tests the site in web/, and on main deploys it to GitHub Pages.
+
+name: Pages
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        # There is no go.sum to key the cache on, and the build cache
+        # (mostly the standard library) is what's worth keeping.
+        cache-dependency-path: go.mod
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+
+    - run: npm ci
+
+    - name: Test
+      run: npm test
+
+    - name: Build
+      run: npm run build
+
+    - uses: actions/upload-pages-artifact@v3
+      if: github.event_name == 'push'
+      with:
+        path: web/dist
+
+  deploy:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - id: deployment
+      uses: actions/deploy-pages@v4

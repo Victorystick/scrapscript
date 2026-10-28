@@ -1,0 +1,19 @@
+{
+  "name": "scrapscript-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run build:wasm && vite dev",
+    "build": "npm run build:wasm && vite build",
+    "build:wasm": "GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -trimpath -ldflags=\"-s -w\" -o scrap-wasm.wasm ../cmd/scrap-wasm",
+    "preview": "npm run build && vite preview",
+    "build:scrap": "go build -o build/scrap ../cmd/scrap",
+    "test": "npm run build:wasm && npm run build:scrap && vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.18",
+    "vite": "^6.3.5",
+    "vitest": "3.2.4"
+  }
+}
