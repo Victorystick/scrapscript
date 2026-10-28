@@ -838,13 +838,15 @@ a database.
 | Type | Go |
 |---|---|
 | `()`, `int`, `float`, `text`, `byte`, `bytes` | `struct{}`, `int64`, `float64`, `string`, `byte`, `[]byte` (copied) |
-| `list a` | `[]A` |
-| record | struct, labels in CamelCase |
-| enum | struct of a tag, constants dense per enum, and a typed accessor and constructor per tag |
-| function | Go func, uncurried; it returns an error if evaluation fails |
+| `list a` | `host.ListRef[A]`, or `[]A` |
+| record | a Ref with an accessor per label, in CamelCase, or a struct |
+| enum | a Ref with a tag, constants dense per enum, and a typed accessor and constructor per tag, or a struct of the same |
+| function | Go func, uncurried; it returns an error if evaluation fails. A function in a record's Ref is a method |
 | type parameter | an opaque wrapper of the value, which the host can only pass back |
 
-Values convert eagerly at the boundary. Aliases name the Go types.
+A Ref holds the value, converts only the parts that the host reads, and
+passes back to a script as it is; its `Load` converts all of it to the
+struct, for hosts that want plain Go values. Aliases name the Go types.
 
 Open: cancelling a running evaluation (a `context.Context`, checked on each
 call, without counting steps); whether host resources such as connections can

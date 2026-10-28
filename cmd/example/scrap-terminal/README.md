@@ -78,11 +78,12 @@ the interface isn't published.
    refers to by hash are looked up among the embedded scraps first, and then
    in the scrapyard.
 2. `Load` checks the script against the interface, once, then evaluates it and
-   converts its value to a `Program`. A script that doesn't fit the interface,
-   such as one whose `step` has no arm for `#eof`, fails here.
-3. `run` calls `Run`, which feeds lines to `Program.Step` and writes each
-   `Turn.Out`. The state passes through as an opaque `S`, and calls into the
-   script are no longer type-checked.
+   returns its value as a `ProgramRef`, which converts only what the host
+   reads of it. A script that doesn't fit the interface, such as one whose
+   `step` has no arm for `#eof`, fails here.
+3. `run` calls `Run`, which feeds lines to `ProgramRef.Step` and writes each
+   turn's `Out()`. The state passes through as an opaque `S`, never
+   converted, and calls into the script are no longer type-checked.
 
 `run_test.go` runs several programs on several inputs both through `Run` and
 through `simulate.scrap`, the platform's reference semantics written in

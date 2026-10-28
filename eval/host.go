@@ -65,6 +65,21 @@ func (s *Shape) New(values ...Value) Value {
 	return Value{recordVal(s.shape, r)}
 }
 
+// Field returns the value of the record v for the ith label that Shape was
+// given. The record must have the shape, as a record of a closed type that
+// the shape's labels describe does, so that, unlike Record.Get, it needs no
+// search by label.
+func (s *Shape) Field(v Value, i int) Value {
+	r := v.as(kindRecord)
+	if r.shapeID() != s.shape.id {
+		panic("eval.Shape.Field: a record of another shape")
+	}
+	if s.order != nil {
+		i = s.order[i]
+	}
+	return Value{r.fields()[i]}
+}
+
 // A Value is a value of a scrap, as a host sees it. The host knows its type
 // from the interface it checked the scrap against, and reads it as that
 // type; reading it as another panics. The zero Value is no value.

@@ -2,6 +2,11 @@
 // for the interface's types, conversions between them and values, a loader
 // that checks scripts against the interface, and the interface itself,
 // embedded with the scraps it refers to.
+//
+// Each record and enum binds to two Go types: a Ref, which holds the value
+// and converts only what the host reads of it, and a plain struct, which
+// converts all of it at once. Load returns Refs; their Load methods give
+// the structs, and the structs' Ref methods give them back.
 package gogen
 
 import (
@@ -56,7 +61,7 @@ func Generate(env *eval.Environment, iface *eval.Scrap, cfg Config) (map[string]
 		labels:     make(map[string]string),
 		labelNames: map[string]bool{"env": true},
 	}
-	for _, name := range []string{"Interface", "Load"} {
+	for _, name := range []string{"Interface", "Load", "Bindings"} {
 		g.names[name] = true
 	}
 	for i, p := range res.Params {
@@ -109,11 +114,11 @@ type generator struct {
 	decls []*decl
 	byRef map[types.TypeRef]*decl
 	byKey map[string]*decl
-	// The fields of the labels struct, by the label or tag they hold the ID
-	// of, and the field names taken, env among them.
+	// The fields of the Bindings struct, by the label or tag they hold the
+	// ID of, and the field names taken, env among them.
 	labels     map[string]string
 	labelNames map[string]bool
-	// The fields of the labels struct that hold the shapes of records, in
+	// The fields of the Bindings struct that hold the shapes of records, in
 	// the order of the records' declarations.
 	shapes []shapeField
 	// Whether the bindings use the bytes package.
@@ -121,7 +126,7 @@ type generator struct {
 }
 
 // label returns an expression of the ID of a record label or tag, a field
-// of the labels struct l, which the bindings resolve once per environment.
+// of the Bindings l, which resolve them once per environment.
 func (g *generator) label(name string) string {
 	if f, ok := g.labels[name]; ok {
 		return "l." + f
@@ -138,7 +143,7 @@ func (g *generator) label(name string) string {
 	return "l." + f
 }
 
-// A shapeField is a field of the labels struct that holds the shape of a
+// A shapeField is a field of the Bindings struct that holds the shape of a
 // record declaration.
 type shapeField struct {
 	name string
@@ -146,14 +151,17 @@ type shapeField struct {
 }
 
 // shape returns an expression of the shape of the record d, a field of the
-// labels struct l.
+// Bindings l.
 func (g *generator) shape(d *decl) string {
-	f := g.labelsField(lower(d.name) + "Shape")
-	g.shapes = append(g.shapes, shapeField{f, d})
-	return "l." + f
+	if d.shape == "" {
+		d.shape = g.labelsField(lower(d.name) + "Shape")
+		g.shapes = append(g.shapes, shapeField{d.shape, d})
+	}
+	return "l." + d.shape
 }
 
-// labelsField claims a field name of the labels struct, starting from base.
+// labelsField claims a field name of the Bindings struct, starting from
+// base.
 func (g *generator) labelsField(base string) string {
 	f := base
 	for i := 2; g.labelNames[f]; i++ {
@@ -180,6 +188,7 @@ type decl struct {
 	name   string
 	enum   bool
 	fields []field
+	shape  string // a record's field of the Bindings struct, once used
 }
 
 // A field is a record's field or an enum's tag.
@@ -266,8 +275,15 @@ func (g *generator) named(s types.Shape, hint string) (*gotype, error) {
 	if s.Open {
 		return nil, fmt.Errorf("cannot bind %s: its row is open", g.reg.String(s.Ref))
 	}
-	if err := g.claim(name); err != nil {
-		return nil, err
+	for _, n := range []string{name, name + "Ref"} {
+		if err := g.claim(n); err != nil {
+			return nil, err
+		}
+	}
+	if s.Kind != types.ShapeEnum {
+		if err := g.claim("New" + name); err != nil {
+			return nil, err
+		}
 	}
 	d := &decl{name: name, enum: s.Kind == types.ShapeEnum}
 	g.byRef[s.Ref] = d
@@ -276,7 +292,9 @@ func (g *generator) named(s types.Shape, hint string) (*gotype, error) {
 	}
 	g.decls = append(g.decls, d)
 
-	seen := map[string]bool{"Tag": d.enum}
+	// The names of the types' methods, besides a record's fields and an
+	// enum's tags.
+	seen := map[string]bool{"Tag": d.enum, "Ref": true, "Load": true, "Bindings": true}
 	for _, l := range s.Labels {
 		f := field{label: l.Name, name: camel(l.Name)}
 		if f.name == "" || seen[f.name] {
@@ -332,8 +350,27 @@ func primitive(name string) (*gotype, error) {
 	return &gotype{expr: expr, prim: name}, nil
 }
 
-// from returns a Go expression that converts the value v to t.
-func (g *generator) from(t *gotype, v string) string {
+// expr returns the Go type of t, or with ref, the type that holds a value
+// of it: a record's or an enum's Ref, and a list's host.ListRef.
+func expr(t *gotype, ref bool) string {
+	switch {
+	case !ref || t.prim != "" || t.param:
+		return t.expr
+	case t.elem != nil:
+		return "host.ListRef[" + expr(t.elem, true) + "]"
+	case t.decl != nil:
+		return t.decl.name + "Ref"
+	}
+	var args []string
+	for _, a := range t.args {
+		args = append(args, expr(a, true))
+	}
+	return fmt.Sprintf("func(%s) (%s, error)", strings.Join(args, ", "), expr(t.result, true))
+}
+
+// from returns a Go expression that converts the value v to t, or with ref,
+// that holds it as t's Ref.
+func (g *generator) from(t *gotype, v string, ref bool) string {
 	switch {
 	case t.prim != "":
 		switch t.prim {
@@ -353,31 +390,45 @@ func (g *generator) from(t *gotype, v string) string {
 		}
 	case t.param:
 		return fmt.Sprintf("%s{%s}", t.expr, v)
+	case t.elem != nil && ref:
+		return fmt.Sprintf("host.NewListRef(%s, func(v eval.Value) %s { return %s })", v, expr(t.elem, true), g.from(t.elem, "v", true))
 	case t.elem != nil:
-		return fmt.Sprintf("host.ListFrom(%s, func(v eval.Value) %s { return %s })", v, t.elem.expr, g.from(t.elem, "v"))
+		return fmt.Sprintf("host.ListFrom(%s, func(v eval.Value) %s { return %s })", v, t.elem.expr, g.from(t.elem, "v", false))
+	case t.decl != nil && ref:
+		return fmt.Sprintf("%sRef{l, %s}", t.decl.name, v)
 	case t.decl != nil:
 		return fmt.Sprintf("%sFromValue(l, %s)", lower(t.decl.name), v)
 	}
 	// A function, which calls the value with its arguments converted.
-	var params, args []string
-	for i, a := range t.args {
-		params = append(params, fmt.Sprintf("a%d %s", i, a.expr))
-		args = append(args, g.to(a, fmt.Sprintf("a%d", i)))
-	}
+	params, call := g.call(t, "fn", ref)
 	return fmt.Sprintf(`func(fn eval.Value) %s {
 	return func(%s) (%s, error) {
-		v, err := eval.Call(fn, %s)
-		if err != nil {
-			var zero %s
-			return zero, err
-		}
-		return %s, nil
+%s
 	}
-}(%s)`, t.expr, strings.Join(params, ", "), t.result.expr, strings.Join(args, ", "), t.result.expr, g.from(t.result, "v"), v)
+}(%s)`, expr(t, ref), params, expr(t.result, ref), call, v)
 }
 
-// to returns a Go expression that converts x, of type t, to a value.
-func (g *generator) to(t *gotype, x string) string {
+// call returns the parameters of a Go function of the type of the function
+// t, and its body, which calls the value fn with them, converted, and
+// converts its result.
+func (g *generator) call(t *gotype, fn string, ref bool) (params, body string) {
+	var ps, args []string
+	for i, a := range t.args {
+		ps = append(ps, fmt.Sprintf("a%d %s", i, expr(a, ref)))
+		args = append(args, g.to(a, fmt.Sprintf("a%d", i), ref))
+	}
+	result := expr(t.result, ref)
+	return strings.Join(ps, ", "), fmt.Sprintf(`	v, err := eval.Call(%s, %s)
+	if err != nil {
+		var zero %s
+		return zero, err
+	}
+	return %s, nil`, fn, strings.Join(args, ", "), result, g.from(t.result, "v", ref))
+}
+
+// to returns a Go expression that converts x, of type t, or with ref, of
+// t's Ref, to a value.
+func (g *generator) to(t *gotype, x string, ref bool) string {
 	switch {
 	case t.prim != "":
 		switch t.prim {
@@ -397,15 +448,19 @@ func (g *generator) to(t *gotype, x string) string {
 		}
 	case t.param:
 		return x + ".v"
+	case t.elem != nil && ref:
+		return x + ".Value()"
 	case t.elem != nil:
-		return fmt.Sprintf("host.ListTo(%s, func(x %s) eval.Value { return %s })", x, t.elem.expr, g.to(t.elem, "x"))
+		return fmt.Sprintf("host.ListTo(%s, func(x %s) eval.Value { return %s })", x, t.elem.expr, g.to(t.elem, "x", false))
+	case t.decl != nil && ref:
+		return x + ".v"
 	case t.decl != nil:
 		return x + ".toValue(l)"
 	}
 	// A function of the host, which takes its arguments at once.
 	var args []string
 	for i, a := range t.args {
-		args = append(args, g.from(a, fmt.Sprintf("args[%d]", i)))
+		args = append(args, g.from(a, fmt.Sprintf("args[%d]", i), ref))
 	}
 	return fmt.Sprintf(`eval.NewFunc(%q, %d, func(args []eval.Value) (eval.Value, error) {
 	r, err := %s(%s)
@@ -413,7 +468,7 @@ func (g *generator) to(t *gotype, x string) string {
 		return eval.Value{}, err
 	}
 	return %s, nil
-})`, lower(t.hint), len(t.args), x, strings.Join(args, ", "), g.to(t.result, "r"))
+})`, lower(t.hint), len(t.args), x, strings.Join(args, ", "), g.to(t.result, "r", ref))
 }
 
 func (g *generator) bindings(pkg, hash string, sources map[string]string, top *gotype) ([]byte, error) {
@@ -430,16 +485,16 @@ func (g *generator) bindings(pkg, hash string, sources map[string]string, top *g
 	w("// Load checks that the scrap app implements the interface, and returns its\n")
 	w("// value. The environment must find the scraps that the interface refers to,\n")
 	w("// as with Interface.Fetcher.\n")
-	w("func Load(env *eval.Environment, app *eval.Scrap) (%s, error) {\n", top.expr)
-	w("\tvar zero %s\n", top.expr)
+	w("func Load(env *eval.Environment, app *eval.Scrap) (%s, error) {\n", expr(top, true))
+	w("\tvar zero %s\n", expr(top, true))
 	w("\tiface, err := env.Read([]byte(Interface.Source()))\n\tif err != nil {\n\t\treturn zero, err\n\t}\n")
 	w("\tif err := env.Check(app, iface); err != nil {\n\t\treturn zero, err\n\t}\n")
 	w("\tv, err := env.Eval(app)\n\tif err != nil {\n\t\treturn zero, err\n\t}\n")
 	// Records and enums, the only types with labels, convert through l.
 	if len(g.decls) > 0 {
-		w("\tl := newLabels(env)\n")
+		w("\tl := newBindings(env)\n")
 	}
-	w("\treturn %s, nil\n}\n", g.from(top, "v"))
+	w("\treturn %s, nil\n}\n", g.from(top, "v", true))
 
 	for _, p := range g.paramOrder {
 		name := g.params[g.reg.Resolve(p.Var)]
@@ -479,23 +534,23 @@ func (g *generator) bindings(pkg, hash string, sources map[string]string, top *g
 	return src, nil
 }
 
-// labelsType writes the labels struct, of the IDs of the labels and tags
+// labelsType writes the Bindings struct, of the IDs of the labels and tags
 // that the conversions use and the shapes of the records they make, and
-// newLabels, which resolves them in an environment.
+// newBindings, which resolves them in an environment.
 func (g *generator) labelsType(w func(string, ...any)) {
 	names := slices.Sorted(maps.Keys(g.labels))
-	w("\n// labels are the IDs of the interface's record labels and tags in the\n")
-	w("// environment that Load checked the script in, which values hold, and\n")
-	w("// the shapes of its records there, and the environment, which reads\n")
-	w("// records.\n")
-	w("type labels struct {\n\tenv *eval.Environment\n")
+	w("\n// Bindings make and read the values of the interface's types in the\n")
+	w("// environment that Load checked the script in: they hold the IDs of\n")
+	w("// the interface's record labels and tags there, which values hold, the\n")
+	w("// shapes of its records, and the environment, which reads records.\n")
+	w("type Bindings struct {\n\tenv *eval.Environment\n")
 	for _, name := range names {
 		w("\t%s label.ID\n", g.labels[name])
 	}
 	for _, s := range g.shapes {
 		w("\t%s *eval.Shape\n", s.name)
 	}
-	w("}\n\nfunc newLabels(env *eval.Environment) *labels {\n\tl := &labels{\n\t\tenv: env,\n")
+	w("}\n\nfunc newBindings(env *eval.Environment) *Bindings {\n\tl := &Bindings{\n\t\tenv: env,\n")
 	for _, name := range names {
 		w("\t\t%s: env.Label(%q),\n", g.labels[name], name)
 	}
@@ -520,23 +575,63 @@ func (g *generator) record(w func(string, ...any), d *decl) {
 	}
 	w("}\n")
 
-	w("\nfunc %sFromValue(l *labels, v eval.Value) %s {\n", lower(d.name), d.name)
+	w("\nfunc %sFromValue(l *Bindings, v eval.Value) %s {\n", lower(d.name), d.name)
 	if len(d.fields) == 0 {
 		w("\treturn %s{}\n}\n", d.name)
 	} else {
 		w("\tr := l.env.Record(v)\n\treturn %s{\n", d.name)
 		for _, f := range d.fields {
-			w("\t\t%s: %s,\n", f.name, g.from(f.typ, fmt.Sprintf("r.Get(%s)", g.label(f.label))))
+			w("\t\t%s: %s,\n", f.name, g.from(f.typ, fmt.Sprintf("r.Get(%s)", g.label(f.label)), false))
 		}
 		w("\t}\n}\n")
 	}
 
-	w("\nfunc (x %s) toValue(l *labels) eval.Value {\n\treturn %s.New(\n", d.name, g.shape(d))
+	w("\nfunc (x %s) toValue(l *Bindings) eval.Value {\n\treturn %s.New(\n", d.name, g.shape(d))
 	for _, f := range d.fields {
 		g.label(f.label)
-		w("\t\t%s,\n", g.to(f.typ, "x."+f.name))
+		w("\t\t%s,\n", g.to(f.typ, "x."+f.name, false))
 	}
 	w("\t)\n}\n")
+
+	g.ref(w, d, "fields")
+	for i, f := range d.fields {
+		field := fmt.Sprintf("%s.Field(x.v, %d)", g.shape(d), i)
+		if isFunc(f.typ) {
+			// A function field is a method that calls it.
+			params, body := g.call(f.typ, field, true)
+			w("\nfunc (x %sRef) %s(%s) (%s, error) {\n\tl := x.b\n%s\n}\n", d.name, f.name, params, expr(f.typ.result, true), body)
+			continue
+		}
+		if f.typ.prim == "()" {
+			w("\nfunc (x %sRef) %s() struct{} { return struct{}{} }\n", d.name, f.name)
+			continue
+		}
+		w("\nfunc (x %sRef) %s() %s {\n\tl := x.b\n\treturn %s\n}\n", d.name, f.name, expr(f.typ, true), g.from(f.typ, field, true))
+	}
+
+	var params, values []string
+	for _, f := range d.fields {
+		name := param(f)
+		params = append(params, name+" "+expr(f.typ, true))
+		values = append(values, g.to(f.typ, name, true))
+	}
+	w("\n// New%s returns a %s of the fields.\n", d.name, d.name)
+	w("func (l *Bindings) New%s(%s) %sRef {\n\treturn %sRef{l, %s.New(%s)}\n}\n",
+		d.name, strings.Join(params, ", "), d.name, d.name, g.shape(d), strings.Join(values, ", "))
+}
+
+// ref writes the declarations of the Ref of d that records and enums share,
+// whose parts are fields or payloads, and the Ref method of d's struct.
+func (g *generator) ref(w func(string, ...any), d *decl, parts string) {
+	w("\n// Ref returns x as a value of the environment of l.\n")
+	w("func (x %s) Ref(l *Bindings) %sRef { return %sRef{l, x.toValue(l)} }\n", d.name, d.name, d.name)
+	w("\n// %sRef is a %s as a script holds it. It converts only the %s\n", d.name, d.name, parts)
+	w("// that are read, and goes back to a script as it is.\n")
+	w("type %sRef struct {\n\tb *Bindings\n\tv eval.Value\n}\n", d.name)
+	w("\n// Bindings returns the bindings of the environment that x is a value of.\n")
+	w("func (x %sRef) Bindings() *Bindings { return x.b }\n", d.name)
+	w("\n// Load converts all of x.\n")
+	w("func (x %sRef) Load() %s { return %sFromValue(x.b, x.v) }\n", d.name, d.name, lower(d.name))
 }
 
 // enum writes an enum's declarations: a struct of its tag and the payload
@@ -585,25 +680,66 @@ func (g *generator) enum(w func(string, ...any), d *decl) {
 		w("func (x %s) %s() %s {\n\tx.must(%s)\n\treturn %sx.%s\n}\n", d.name, f.name, f.typ.expr, const_, deref(f.typ), storage(f))
 	}
 
-	w("\nfunc %sFromValue(l *labels, v eval.Value) %s {\n\tt := v.Variant()\n\tswitch t.Tag() {\n", lower(d.name), d.name)
+	w("\nfunc %sFromValue(l *Bindings, v eval.Value) %s {\n\tt := v.Variant()\n\tswitch t.Tag() {\n", lower(d.name), d.name)
 	for _, f := range d.fields {
 		if f.typ == nil {
 			w("\tcase %s:\n\t\treturn New%s%s()\n", g.label(f.label), d.name, f.name)
 		} else {
-			w("\tcase %s:\n\t\treturn New%s%s(%s)\n", g.label(f.label), d.name, f.name, g.from(f.typ, "t.Payload()"))
+			w("\tcase %s:\n\t\treturn New%s%s(%s)\n", g.label(f.label), d.name, f.name, g.from(f.typ, "t.Payload()", false))
 		}
 	}
 	w("\t}\n\tpanic(\"%s: unknown tag\")\n}\n", d.name)
 
-	w("\nfunc (x %s) toValue(l *labels) eval.Value {\n\tswitch x.tag {\n", d.name)
+	w("\nfunc (x %s) toValue(l *Bindings) eval.Value {\n\tswitch x.tag {\n", d.name)
 	for _, f := range d.fields {
 		if f.typ != nil {
-			w("\tcase %s%s:\n\t\treturn eval.NewVariant(%s, %s)\n", d.name, f.name, g.label(f.label), g.to(f.typ, payload(f)))
+			w("\tcase %s%s:\n\t\treturn eval.NewVariant(%s, %s)\n", d.name, f.name, g.label(f.label), g.to(f.typ, payload(f), false))
 		} else {
 			w("\tcase %s%s:\n\t\treturn eval.NewVariant(%s, eval.Value{})\n", d.name, f.name, g.label(f.label))
 		}
 	}
 	w("\t}\n\tpanic(\"%s: invalid tag\")\n}\n", d.name)
+
+	g.ref(w, d, "payloads")
+	w("\nfunc (x %sRef) Tag() %s {\n\tl := x.b\n\tswitch x.v.Variant().Tag() {\n", d.name, tag)
+	for _, f := range d.fields {
+		w("\tcase %s:\n\t\treturn %s%s\n", g.label(f.label), d.name, f.name)
+	}
+	w("\t}\n\tpanic(\"%sRef: unknown tag\")\n}\n", d.name)
+	for _, f := range d.fields {
+		const_ := d.name + f.name
+		if f.typ == nil {
+			w("\nfunc (l *Bindings) New%s() %sRef {\n\treturn %sRef{l, eval.NewVariant(%s, eval.Value{})}\n}\n",
+				const_, d.name, d.name, g.label(f.label))
+			continue
+		}
+		w("\nfunc (l *Bindings) New%s(x %s) %sRef {\n\treturn %sRef{l, eval.NewVariant(%s, %s)}\n}\n",
+			const_, expr(f.typ, true), d.name, d.name, g.label(f.label), g.to(f.typ, "x", true))
+		w("\n// %s returns the payload of #%s, and panics on another tag.\n", f.name, f.label)
+		w("func (x %sRef) %s() %s {\n\tl := x.b\n\tt := x.v.Variant()\n\tif t.Tag() != %s {\n", d.name, f.name, expr(f.typ, true), g.label(f.label))
+		w("\t\tpanic(\"%sRef: #%s of \" + x.Tag().String())\n\t}\n", d.name, f.label)
+		w("\treturn %s\n}\n", g.from(f.typ, "t.Payload()", true))
+	}
+}
+
+// isFunc reports whether t is a function's type.
+func isFunc(t *gotype) bool {
+	return t.prim == "" && !t.param && t.elem == nil && t.decl == nil
+}
+
+// param returns the name of the parameter of a record's constructor that
+// gives the field f. The constructor's receiver is l, and the conversions
+// of functions declare args, r, v, err and fn.
+func param(f field) string {
+	name := lower(f.name)
+	switch name {
+	case "l", "args", "r", "v", "err", "fn":
+		return name + "_"
+	}
+	if token.IsKeyword(name) {
+		name += "_"
+	}
+	return name
 }
 
 func isDecl(t *gotype) bool { return t.decl != nil }

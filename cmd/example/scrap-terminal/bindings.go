@@ -19,8 +19,8 @@ var Interface = host.Interface{
 // Load checks that the scrap app implements the interface, and returns its
 // value. The environment must find the scraps that the interface refers to,
 // as with Interface.Fetcher.
-func Load(env *eval.Environment, app *eval.Scrap) (Program, error) {
-	var zero Program
+func Load(env *eval.Environment, app *eval.Scrap) (ProgramRef, error) {
+	var zero ProgramRef
 	iface, err := env.Read([]byte(Interface.Source()))
 	if err != nil {
 		return zero, err
@@ -32,8 +32,8 @@ func Load(env *eval.Environment, app *eval.Scrap) (Program, error) {
 	if err != nil {
 		return zero, err
 	}
-	l := newLabels(env)
-	return programFromValue(l, v), nil
+	l := newBindings(env)
+	return ProgramRef{l, v}, nil
 }
 
 // S is a value of the type parameter s, which only scripts can inspect.
@@ -44,7 +44,7 @@ type Program struct {
 	Step func(Event, S) (Turn, error)
 }
 
-func programFromValue(l *labels, v eval.Value) Program {
+func programFromValue(l *Bindings, v eval.Value) Program {
 	r := l.env.Record(v)
 	return Program{
 		Init: turnFromValue(l, r.Get(l.init)),
@@ -61,7 +61,7 @@ func programFromValue(l *labels, v eval.Value) Program {
 	}
 }
 
-func (x Program) toValue(l *labels) eval.Value {
+func (x Program) toValue(l *Bindings) eval.Value {
 	return l.programShape.New(
 		x.Init.toValue(l),
 		eval.NewFunc("programStep", 2, func(args []eval.Value) (eval.Value, error) {
@@ -74,13 +74,55 @@ func (x Program) toValue(l *labels) eval.Value {
 	)
 }
 
+// Ref returns x as a value of the environment of l.
+func (x Program) Ref(l *Bindings) ProgramRef { return ProgramRef{l, x.toValue(l)} }
+
+// ProgramRef is a Program as a script holds it. It converts only the fields
+// that are read, and goes back to a script as it is.
+type ProgramRef struct {
+	b *Bindings
+	v eval.Value
+}
+
+// Bindings returns the bindings of the environment that x is a value of.
+func (x ProgramRef) Bindings() *Bindings { return x.b }
+
+// Load converts all of x.
+func (x ProgramRef) Load() Program { return programFromValue(x.b, x.v) }
+
+func (x ProgramRef) Init() TurnRef {
+	l := x.b
+	return TurnRef{l, l.programShape.Field(x.v, 0)}
+}
+
+func (x ProgramRef) Step(a0 EventRef, a1 S) (TurnRef, error) {
+	l := x.b
+	v, err := eval.Call(l.programShape.Field(x.v, 1), a0.v, a1.v)
+	if err != nil {
+		var zero TurnRef
+		return zero, err
+	}
+	return TurnRef{l, v}, nil
+}
+
+// NewProgram returns a Program of the fields.
+func (l *Bindings) NewProgram(init TurnRef, step func(EventRef, S) (TurnRef, error)) ProgramRef {
+	return ProgramRef{l, l.programShape.New(init.v, eval.NewFunc("programStep", 2, func(args []eval.Value) (eval.Value, error) {
+		r, err := step(EventRef{l, args[0]}, S{args[1]})
+		if err != nil {
+			return eval.Value{}, err
+		}
+		return r.v, nil
+	}))}
+}
+
 type Turn struct {
 	Next  NextAction
 	Out   string
 	State S
 }
 
-func turnFromValue(l *labels, v eval.Value) Turn {
+func turnFromValue(l *Bindings, v eval.Value) Turn {
 	r := l.env.Record(v)
 	return Turn{
 		Next:  nextActionFromValue(l, r.Get(l.next)),
@@ -89,12 +131,48 @@ func turnFromValue(l *labels, v eval.Value) Turn {
 	}
 }
 
-func (x Turn) toValue(l *labels) eval.Value {
+func (x Turn) toValue(l *Bindings) eval.Value {
 	return l.turnShape.New(
 		x.Next.toValue(l),
 		eval.Text(x.Out),
 		x.State.v,
 	)
+}
+
+// Ref returns x as a value of the environment of l.
+func (x Turn) Ref(l *Bindings) TurnRef { return TurnRef{l, x.toValue(l)} }
+
+// TurnRef is a Turn as a script holds it. It converts only the fields
+// that are read, and goes back to a script as it is.
+type TurnRef struct {
+	b *Bindings
+	v eval.Value
+}
+
+// Bindings returns the bindings of the environment that x is a value of.
+func (x TurnRef) Bindings() *Bindings { return x.b }
+
+// Load converts all of x.
+func (x TurnRef) Load() Turn { return turnFromValue(x.b, x.v) }
+
+func (x TurnRef) Next() NextActionRef {
+	l := x.b
+	return NextActionRef{l, l.turnShape.Field(x.v, 0)}
+}
+
+func (x TurnRef) Out() string {
+	l := x.b
+	return l.turnShape.Field(x.v, 1).Text()
+}
+
+func (x TurnRef) State() S {
+	l := x.b
+	return S{l.turnShape.Field(x.v, 2)}
+}
+
+// NewTurn returns a Turn of the fields.
+func (l *Bindings) NewTurn(next NextActionRef, out string, state S) TurnRef {
+	return TurnRef{l, l.turnShape.New(next.v, eval.Text(out), state.v)}
 }
 
 type NextActionTag uint8
@@ -134,7 +212,7 @@ func (x NextAction) Exit() int64 {
 
 func NewNextActionReadLine() NextAction { return NextAction{tag: NextActionReadLine} }
 
-func nextActionFromValue(l *labels, v eval.Value) NextAction {
+func nextActionFromValue(l *Bindings, v eval.Value) NextAction {
 	t := v.Variant()
 	switch t.Tag() {
 	case l.exit:
@@ -145,7 +223,7 @@ func nextActionFromValue(l *labels, v eval.Value) NextAction {
 	panic("NextAction: unknown tag")
 }
 
-func (x NextAction) toValue(l *labels) eval.Value {
+func (x NextAction) toValue(l *Bindings) eval.Value {
 	switch x.tag {
 	case NextActionExit:
 		return eval.NewVariant(l.exit, eval.Int(x.exit))
@@ -153,6 +231,51 @@ func (x NextAction) toValue(l *labels) eval.Value {
 		return eval.NewVariant(l.readLine, eval.Value{})
 	}
 	panic("NextAction: invalid tag")
+}
+
+// Ref returns x as a value of the environment of l.
+func (x NextAction) Ref(l *Bindings) NextActionRef { return NextActionRef{l, x.toValue(l)} }
+
+// NextActionRef is a NextAction as a script holds it. It converts only the payloads
+// that are read, and goes back to a script as it is.
+type NextActionRef struct {
+	b *Bindings
+	v eval.Value
+}
+
+// Bindings returns the bindings of the environment that x is a value of.
+func (x NextActionRef) Bindings() *Bindings { return x.b }
+
+// Load converts all of x.
+func (x NextActionRef) Load() NextAction { return nextActionFromValue(x.b, x.v) }
+
+func (x NextActionRef) Tag() NextActionTag {
+	l := x.b
+	switch x.v.Variant().Tag() {
+	case l.exit:
+		return NextActionExit
+	case l.readLine:
+		return NextActionReadLine
+	}
+	panic("NextActionRef: unknown tag")
+}
+
+func (l *Bindings) NewNextActionExit(x int64) NextActionRef {
+	return NextActionRef{l, eval.NewVariant(l.exit, eval.Int(x))}
+}
+
+// Exit returns the payload of #exit, and panics on another tag.
+func (x NextActionRef) Exit() int64 {
+	l := x.b
+	t := x.v.Variant()
+	if t.Tag() != l.exit {
+		panic("NextActionRef: #exit of " + x.Tag().String())
+	}
+	return t.Payload().Int()
+}
+
+func (l *Bindings) NewNextActionReadLine() NextActionRef {
+	return NextActionRef{l, eval.NewVariant(l.readLine, eval.Value{})}
 }
 
 type EventTag uint8
@@ -192,7 +315,7 @@ func (x Event) Line() string {
 	return x.line
 }
 
-func eventFromValue(l *labels, v eval.Value) Event {
+func eventFromValue(l *Bindings, v eval.Value) Event {
 	t := v.Variant()
 	switch t.Tag() {
 	case l.eof:
@@ -203,7 +326,7 @@ func eventFromValue(l *labels, v eval.Value) Event {
 	panic("Event: unknown tag")
 }
 
-func (x Event) toValue(l *labels) eval.Value {
+func (x Event) toValue(l *Bindings) eval.Value {
 	switch x.tag {
 	case EventEof:
 		return eval.NewVariant(l.eof, eval.Value{})
@@ -213,11 +336,56 @@ func (x Event) toValue(l *labels) eval.Value {
 	panic("Event: invalid tag")
 }
 
-// labels are the IDs of the interface's record labels and tags in the
-// environment that Load checked the script in, which values hold, and
-// the shapes of its records there, and the environment, which reads
-// records.
-type labels struct {
+// Ref returns x as a value of the environment of l.
+func (x Event) Ref(l *Bindings) EventRef { return EventRef{l, x.toValue(l)} }
+
+// EventRef is a Event as a script holds it. It converts only the payloads
+// that are read, and goes back to a script as it is.
+type EventRef struct {
+	b *Bindings
+	v eval.Value
+}
+
+// Bindings returns the bindings of the environment that x is a value of.
+func (x EventRef) Bindings() *Bindings { return x.b }
+
+// Load converts all of x.
+func (x EventRef) Load() Event { return eventFromValue(x.b, x.v) }
+
+func (x EventRef) Tag() EventTag {
+	l := x.b
+	switch x.v.Variant().Tag() {
+	case l.eof:
+		return EventEof
+	case l.line:
+		return EventLine
+	}
+	panic("EventRef: unknown tag")
+}
+
+func (l *Bindings) NewEventEof() EventRef {
+	return EventRef{l, eval.NewVariant(l.eof, eval.Value{})}
+}
+
+func (l *Bindings) NewEventLine(x string) EventRef {
+	return EventRef{l, eval.NewVariant(l.line, eval.Text(x))}
+}
+
+// Line returns the payload of #line, and panics on another tag.
+func (x EventRef) Line() string {
+	l := x.b
+	t := x.v.Variant()
+	if t.Tag() != l.line {
+		panic("EventRef: #line of " + x.Tag().String())
+	}
+	return t.Payload().Text()
+}
+
+// Bindings make and read the values of the interface's types in the
+// environment that Load checked the script in: they hold the IDs of
+// the interface's record labels and tags there, which values hold, the
+// shapes of its records, and the environment, which reads records.
+type Bindings struct {
 	env          *eval.Environment
 	eof          label.ID
 	exit         label.ID
@@ -232,8 +400,8 @@ type labels struct {
 	turnShape    *eval.Shape
 }
 
-func newLabels(env *eval.Environment) *labels {
-	l := &labels{
+func newBindings(env *eval.Environment) *Bindings {
+	l := &Bindings{
 		env:      env,
 		eof:      env.Label("eof"),
 		exit:     env.Label("exit"),

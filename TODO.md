@@ -147,17 +147,20 @@ builtins now return plain values and panic with a `runtimeError`, which
       or enum doesn't fit the width, variables named from `a` per field,
       and syntax highlighting on a terminal (as errors already colour
       only when stdout is one).
-- [ ] Host bindings convert values eagerly (gogen): records become
-      structs and lists slices, and bytes are copied, both ways, so a host
-      that only passes a list or tree back to the script still walks it
-      twice. Generate a `Ref` per type instead, which holds the
-      `eval.Value` as type parameters' wrappers already do, with typed
-      accessors (static field indices, since interface rows are closed)
-      and a `Load()` that converts eagerly for hosts that want plain
-      structs. Watch for: a Ref to one field keeps the whole value alive,
-      `bytes` must copy or stay read-only, and Go code builds values with
-      constructors instead of struct literals. Measure on the terminal
-      host (cmd/example/scrap-terminal) first.
+- [x] Host bindings converted values eagerly (gogen): records became
+      structs and lists slices, both ways, so a host that only passed a
+      list or tree back to the script still walked it twice. `Load` now
+      returns Refs, which hold the `eval.Value` as type parameters'
+      wrappers do, with typed accessors that read fields at static indices
+      (`eval.Shape.Field`, since interface rows are closed), constructors
+      on `Bindings`, and a `Load()` that converts to the structs. AccessLog
+      is unchanged, as its interface converts only a small record per
+      step; reading a tree of 65535 nodes (BenchmarkTree in
+      gogen/internal/rich) is 21 ns for its root instead of 6 ms, and 2.7
+      ms instead of 6.1 ms and no allocations for all of it. Accepted: a
+      Ref to one field keeps the whole value alive, `bytes` are copied
+      when read, and Go code builds values with constructors instead of
+      struct literals.
 
 ## 8. Printing closures
 
