@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import {
@@ -9,8 +9,8 @@ import {
 } from './scrap-wasm.ts';
 import { highlightExamples } from './vite.config.ts';
 
-// The scrap CLI, built from this repository, which runs each example in
-// tutorial.html as a reader would.
+// The scrap CLI, built from this repository by npm test, which runs each
+// example in tutorial.html as a reader would.
 const scrap = './build/scrap';
 
 interface Example {
@@ -73,16 +73,6 @@ async function runInBrowser(
 }
 
 describe('tutorial', () => {
-  beforeAll(() => {
-    const build = spawnSync(
-      'go build -o build/scrap ../cmd/scrap',
-      { shell: true, stdio: 'pipe' }
-    );
-    if (build.status !== 0) {
-      throw new Error('go build failed:\n' + build.stderr);
-    }
-  });
-
   const all = examples(readFileSync('./tutorial.html', 'utf8'));
 
   test('has examples', () => {
