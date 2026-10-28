@@ -15,10 +15,8 @@ it to GitHub Pages (`.github/workflows/pages.yml`).
   `cmd/scrap-wasm` by `npm run build`, so building needs Go.
   `scrap-wasm.ts` runs it, with just enough of WASI for Go, in the browser
   and tests.
-- The pages (`index.html`, `tutorial.html`, `play.html`), `style.css`, the
-  link preview image `public/og.png` that their Open Graph tags name,
-  rendered from `og-image.html`, and the browser's copy of
-  `scrap-wasm.wasm` are built by Vite under the base path `/scrapscript/`,
+- The pages (`index.html`, `tutorial.html`, `play.html`), `style.css` and
+  the browser's copy of `scrap-wasm.wasm` are built by Vite under the base path `/scrapscript/`,
   so links between pages are relative. A new page must be listed in
   `vite.config.ts`.
 - `repl.ts` makes the `.example`s of a page editable and runs them in the
