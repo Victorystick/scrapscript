@@ -24,5 +24,5 @@ against the base commit with interleaved runs and benchstat.
   web/AGENTS.md. Its tests run the tutorial's examples with cmd/scrap, so
   run `npm test` there when changing what the CLI prints.
 - Never put links to agentic coding sessions (such as claude.ai/code
-  session URLs) in PR descriptions.
+  session URLs) in PR descriptions or commit messages.
 - Discuss design changes before implementing them; make one change at a time.
