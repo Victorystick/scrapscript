@@ -142,7 +142,7 @@ Useful on their own, so they land first:
    terminal host and the tutorial's REPL as much as for the web.
 5. [ ] **Generic aliases in bindings:** `scrap-gen-go` rejects an alias used
    at more than one type, such as `response text` and `response json`. Name
-   each use by its arguments instead. (Undecided.)
+   each use by its arguments instead: `ResponseText`, `ResponseJson` (#25).
 6. [ ] **`js/` workspace:** move the wasm loader and its WASI shim,
    `scrap-wasm.ts`, out of `web/` into an npm workspace that `web/` uses.
    No change in behaviour.
