@@ -56,7 +56,8 @@ func (h httpFetcher) PushScrap(data []byte) (key string, err error) {
 	if err != nil {
 		return "", err
 	}
-	if resp.StatusCode != 200 {
+	// The yard answers 201 when it stores a scrap, 200 when it had it.
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
 		return "", fmt.Errorf("http post failed with %s: %s", resp.Status, bytes.TrimSpace(body))
 	}
 	return string(body), nil
