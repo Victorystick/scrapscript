@@ -126,25 +126,46 @@ app
 
 ## PRs
 
+Useful on their own, so they land first:
+
 1. [x] **Checker:** let a sort binding name a type scrap that takes
    arguments, as `web : type -> type -> type = $"./web.scrap"` (#23).
-   Follow-up: without the annotation, `web = $"./web.scrap"` (#24).
-2. [ ] **Evaluator deadline:** cancel an evaluation that runs past a
+2. [ ] **Checker:** let a binding without an annotation name a type, as
+   `web = $"./web.scrap"` (#24).
+3. [ ] **Hosts without the network:** bindings from `scrap-gen-go
+   -main=false` import `host`, which imports `yards` and so `net/http`, into
+   every WebAssembly host. Move the command line into its own package, which
+   only the generated `main.go` imports.
+4. [ ] **Evaluator deadline:** cancel an evaluation that runs past a
    deadline, polling the clock every so many calls; measure with benchstat.
-   Settles the open question in SPEC.md section 13.
-3. [ ] **Interface and session:** `web.scrap`, its generated bindings, and
+   Settles the open question in SPEC.md section 13, for `scrap eval`, the
+   terminal host and the tutorial's REPL as much as for the web.
+5. [ ] **Generic aliases in bindings:** `scrap-gen-go` rejects an alias used
+   at more than one type, such as `response text` and `response json`. Name
+   each use by its arguments instead. (Undecided.)
+6. [ ] **`js/` workspace:** move the wasm loader and its WASI shim,
+   `scrap-wasm.ts`, out of `web/` into an npm workspace that `web/` uses.
+   No change in behaviour.
+
+The web platform:
+
+7. [ ] **Interface and session:** `web.scrap`, its generated bindings, and
    a Go session that runs `init` and `update` and collects commands and
    subscriptions. Tested in Go. Sketch the platform in SPEC.md section 13.
-4. [ ] **Diff:** views to binary patches, unkeyed, with the opcode format
+8. [ ] **Diff:** views to binary patches, unkeyed, with the opcode format
    documented and the handler table. Tested against a mock DOM in Go:
    applying `diff(a, b)` to the DOM of `a` gives the DOM of `b`.
-5. [ ] **Keyed children** in the diff.
-6. [ ] **JS package:** the `js/` workspace with the wasm loader (the WASI
-   shim moves out of `web/`), the patch interpreter, event delegation, and
-   `mount(element, { source, flags, fetchScrap })`. Tested in Chromium.
-7. [ ] **HTTP**, and `json` both ways.
-8. [ ] **Time, animation frames and random**, with subscriptions diffed.
-9. [ ] **Playground** page in `web/`: an editor and the running app,
-   errors, scraps fetched from the yard, and the deadline.
-10. [ ] **Hot reload** that keeps the model if its type is unchanged.
-11. [ ] **Publish** to npm, with a README for embedders.
+9. [ ] **Keyed children** in the diff.
+10. [ ] **Runtime:** in the `js/` workspace, the patch interpreter, event
+    delegation, and `mount(element, { source, flags, fetchScrap })`.
+    Tested in Chromium.
+11. [ ] **HTTP**, and `json` both ways.
+12. [ ] **Time, animation frames and random**, with subscriptions diffed.
+13. [ ] **Playground** page in `web/`: an editor and the running app,
+    errors, scraps fetched from the yard, and the deadline.
+14. [ ] **Hot reload** that keeps the model if its type is unchanged.
+15. [ ] **Publish** to npm, with a README for embedders.
+
+To check on the way: an earlier attempt measured building a list with `+<`
+in a fold as growing faster than linearly, which views built that way would
+feel. Unconfirmed.
