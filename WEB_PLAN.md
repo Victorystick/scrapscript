@@ -135,7 +135,7 @@ Useful on their own, so they land first:
 3. [ ] **Hosts without the network:** bindings from `scrap-gen-go
    -main=false` import `host`, which imports `yards` and so `net/http`, into
    every WebAssembly host. Move the command line into its own package, which
-   only the generated `main.go` imports.
+   only the generated `main.go` imports (#26).
 4. [ ] **Evaluator deadline:** cancel an evaluation that runs past a
    deadline, polling the clock every so many calls; measure with benchstat.
    Settles the open question in SPEC.md section 13, for `scrap eval`, the
