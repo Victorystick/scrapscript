@@ -36,8 +36,7 @@ as a series of small PRs; tick them off here as they land.
 
 ## Interface
 
-A draft. The counter after it checks and runs against it, once PR 1 lets
-it name the interface `web`; until then it writes `$"./web.scrap" int msg`.
+A draft. The counter after it checks and runs against it.
 
 ```scrap
 app
@@ -127,9 +126,9 @@ app
 
 ## PRs
 
-1. [ ] **Checker:** let a sort binding name a type scrap that takes
-   arguments. `web : type -> type -> type = $"./web.scrap"` fails with two
-   contradictory errors, while the reference works inline.
+1. [x] **Checker:** let a sort binding name a type scrap that takes
+   arguments, as `web : type -> type -> type = $"./web.scrap"` (#23).
+   Follow-up: without the annotation, `web = $"./web.scrap"` (#24).
 2. [ ] **Evaluator deadline:** cancel an evaluation that runs past a
    deadline, polling the clock every so many calls; measure with benchstat.
    Settles the open question in SPEC.md section 13.
