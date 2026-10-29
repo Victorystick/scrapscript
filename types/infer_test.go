@@ -124,6 +124,15 @@ func TestInfer(t *testing.T) {
 		{`{ a = (q 1 ; q = f ; f = x -> x) } ; f : type = int`, `{ a : int }`},
 		// A type constructor's parameters may be rows.
 		{`1 ; t : type -> row -> type = a => r => { a : a, ..r } ; u = r => [#u (t int r), ..r]`, `int`},
+		// A sort binding takes the parameters that its body still takes.
+		{`p ; p : type -> type = pair ; pair = a => { x : a, y : a }`, `type -> type = a => { x : a, y : a }`},
+		{`v ; v : q text = #left 1 ; q : type -> type = either int ; either = a => b => [#left a, #right b]`,
+			"either int text\n; either = a => b => [ #left a, #right b ]"},
+		{`v ; v : q int text = #right "" ; q = a => either a ; either = a => b => [#left a, #right b]`,
+			"either int text\n; either = a => b => [ #left a, #right b ]"},
+		{`v ; v : l int = [1] ; l : type -> type = list`, "l int\n; l = a => list a"},
+		{`get-a ; get-a : r => h int r -> int = x -> x.a ; h : type -> row -> type = has-a ; has-a = t => r => { a : t, ..r }`,
+			"has-a int a -> int\n; has-a = a => b => { a : a, ..b }"},
 		// Annotated bindings are checked against, and used with, their schemes.
 		{`id ; id : a => a -> a = x -> x`, `a -> a`},
 		{`{ a = id 1, b = id "" } ; id : a => a -> a = x -> x`, `{ a : int, b : text }`},
@@ -399,6 +408,9 @@ func TestInferFailure(t *testing.T) {
 		// Kinds.
 		{`1 ; t : type = a => [#a a]`, `'t' has kind 'type -> type', not 'type'`},
 		{`1 ; t : type -> type = int`, `'t' has kind 'type', not 'type -> type'`},
+		{`1 ; t : type = option ; option = a => [#some a, #none]`, `'t' has kind 'type -> type', not 'type'`},
+		{`1 ; t : type -> type = either int int ; either = a => b => [#left a, #right b]`, `'t' has kind 'type', not 'type -> type'`},
+		{`1 ; t : type -> type = t`, `'t' has kind 'type', not 'type -> type'`},
 		// A binding that denotes a type has no value.
 		{`p 1 ; p = option ; option = a => [#some a, #none]`, `cannot use type 'p' as a value`},
 		{`x ; x : int = t ; t : type = int`, `cannot use type 't' as a value`},
@@ -528,6 +540,15 @@ func TestInferImport(t *testing.T) {
 			imp: option, sort: true, params: optionParams, result: `a -> $source:0 a`},
 		{in: `get-a ; get-a : r => $source:0 int r -> int = x -> x.a`,
 			imp: hasA, sort: true, params: hasAParams, result: `$source:0 int a -> int`},
+		// A sort binding may name an imported type constructor.
+		{in: `or-zero ; or-zero : o int -> int = | #some n -> n | #none -> 0 ; o : type -> type = $source:0`,
+			imp: option, sort: true, params: optionParams, result: `$source:0 int -> int`},
+		{in: `get-a ; get-a : r => h int r -> int = x -> x.a ; h : type -> row -> type = $source:0`,
+			imp: hasA, sort: true, params: hasAParams, result: `$source:0 int a -> int`},
+		{in: `o ; o : type -> type = $source:0`, imp: option, sort: true, params: optionParams,
+			result: `type -> type = a => [ #none, #some a ]`},
+		{in: `1 ; o : type = $source:0`, imp: option, sort: true, params: optionParams,
+			err: `'o' has kind 'type -> type', not 'type'`},
 		// A binding without an annotation may name an imported type.
 		{in: `or-zero ; or-zero : o int -> int = | #some n -> n | #none -> 0 ; o = $source:0`,
 			imp: option, sort: true, params: optionParams, result: `o int -> int`},

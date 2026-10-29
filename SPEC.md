@@ -376,6 +376,15 @@ turn   : type -> type          = s => { state : s, print : list text, next : [#r
 either : type -> type -> type  = a => b => [#left a, #right b]
 ```
 
+The body after the `=>`s may be a type constructor applied to fewer arguments
+than it takes, or to none. The binding then takes the rest as further
+parameters, so it can name a constructor, such as an imported one:
+
+```scrap
+or-int : type -> type          = either int     -- a => either int a
+app    : type -> type -> type  = $source:…      -- a => b => $source:… a b
+```
+
 The annotation is optional when the right-hand side starts with `NAME "=>"`,
 because `=>` occurs only in type syntax:
 
