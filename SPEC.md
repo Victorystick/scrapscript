@@ -400,6 +400,17 @@ Right-hand sides that share syntax with value expressions (`[#line text, #eof]`,
 `list int`, `()`, `{}`) need the annotation. Without it,
 `event = [#line text, #eof]` is a value: a list of two variants.
 
+A binding without an annotation whose value denotes only a type is a type, as a
+record field of that form is a member (7.7): a name of a type, a hash reference
+to a type scrap, or a path to a type member. It has no value, and its kind is
+that of what it names. Any annotation makes the binding a value or a sort binding
+as above.
+
+```scrap
+web    = $source:…       -- a type, of the type scrap's kind
+tree   = avl.tree        -- type -> type -> type
+```
+
 ### 7.3 Rows
 
 A row is a finite map from labels to types, plus a tail that is either empty
@@ -506,8 +517,8 @@ t
 f : $source:… -> int = | #a _ -> 1 | #b n -> n | #c _ -> 0
 ```
 
-- The body denotes a type when it is a name bound by a sort binding, or a hash
-  reference to a type scrap. Where-clauses are looked through, so the body may be
+- The body denotes a type when it is a name bound by a sort binding, or by a
+  binding that denotes a type (7.2), or a hash reference to a type scrap. Where-clauses are looked through, so the body may be
   `t ; t : type = …`. Anywhere else, a type in value position is an error.
 - A type scrap's type is its kind together with the type it denotes: tooling
   prints the first example as `type = [ #a [ #x, #y, #z ], #b int, #c byte ]`.

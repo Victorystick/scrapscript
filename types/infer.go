@@ -164,7 +164,7 @@ func (c *context) inferNode(x ast.Node) TypeRef {
 		name := c.src.Name(c.src.Main(x))
 		bound := c.scope.Get(name)
 		if bound == nil {
-			if a := c.aliases.Lookup(name); a != nil && a.value == ast.None {
+			if c.staticName(c.src.NameBytes(c.src.Main(x))).isType() {
 				c.bail(x, fmt.Sprintf("cannot use type '%s' as a value", name))
 			}
 			c.bail(x, "unbound variable: "+name)
@@ -248,8 +248,11 @@ func (c *context) scrap(x ast.Node) Result {
 	case ast.Ident:
 		name := c.src.Name(c.src.Main(x))
 		if c.scope.Get(name) == nil {
-			if a := c.aliases.Lookup(name); a != nil && a.value == ast.None {
-				return c.export(x, a)
+			switch s := c.staticName(c.src.NameBytes(c.src.Main(x))); {
+			case s.alias != nil:
+				return c.export(x, s.alias)
+			case s.imp && s.res.Sort:
+				return s.res
 			}
 		}
 	case ast.Import:
@@ -388,7 +391,11 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 
 	// An annotated binding has the type its annotation declares, everywhere
 	// in the group, so references to it don't make it part of a component.
+	// A binding without one whose value denotes only a type, such as
+	// `web = $"./web.scrap"`, is a type as a sort binding is, and has no
+	// value to infer.
 	annotated := make(map[ast.Node]bool)
+	typeOnly := c.typeOnlyBindings(binds)
 	for _, b := range binds {
 		if _, id, typ, _ := c.src.Where(b); typ != ast.None && !c.src.Sort(b) {
 			annotated[b] = true
@@ -396,7 +403,7 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 		}
 	}
 
-	comps := c.src.Components(binds, func(b ast.Node) bool { return annotated[b] })
+	comps := c.src.Components(binds, func(b ast.Node) bool { return annotated[b] || typeOnly[b] })
 	if len(annotated) == 0 {
 		c.functions(comps)
 	} else {
@@ -404,6 +411,9 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 	}
 
 	for _, comp := range comps {
+		if typeOnly[comp.Binds[0]] {
+			continue
+		}
 		if b := comp.Binds[0]; annotated[b] {
 			// Check the value with the annotation's type variables rigid, so
 			// that it can't assume anything about them.
@@ -431,6 +441,43 @@ func where[T any](c *context, x ast.Node, inferBody func(ast.Node) T) T {
 	}
 
 	return inferBody(body)
+}
+
+// typeOnlyBindings returns the value bindings of a group without an
+// annotation whose values denote only types, as record fields that are
+// members do. The group's other value bindings, which aren't in scope yet,
+// shadow types of the same names, as they will once bound.
+func (c *context) typeOnlyBindings(binds []ast.Node) map[ast.Node]bool {
+	scope := c.scope
+	defer func() { c.scope = scope }()
+	var typeOnly map[ast.Node]bool
+	shadowed := false
+	for _, b := range binds {
+		_, _, typ, val := c.src.Where(b)
+		if typ != ast.None || c.src.Sort(b) {
+			continue
+		}
+		switch c.src.Kind(val) {
+		case ast.Ident, ast.Import, ast.Access:
+		default:
+			continue
+		}
+		if !shadowed {
+			for _, b := range binds {
+				if _, id, _, val := c.src.Where(b); !c.src.Sort(b) && !c.mayBeStatic(val) {
+					c.bind(c.src.Name(id), NoType)
+				}
+			}
+			shadowed = true
+		}
+		if c.typeOnly(val) {
+			if typeOnly == nil {
+				typeOnly = make(map[ast.Node]bool)
+			}
+			typeOnly[b] = true
+		}
+	}
+	return typeOnly
 }
 
 // functions checks that the bindings of recursive components are
