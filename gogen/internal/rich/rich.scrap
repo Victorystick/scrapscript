@@ -11,6 +11,8 @@ api
     flag   : byte,
     unit   : (),
     tree   : tree,
+    count  : box int,
+    names  : box (list text),
     helper : (int -> int -> int) -> int
   }
 ; reply : type =
@@ -19,3 +21,4 @@ api
     , #range   text
     ]
 ; tree : type = [#leaf, #node { left : tree, value : int, right : tree }]
+; box  : type -> type = a => { value : a }

@@ -17,6 +17,8 @@ const app = `{ init = 5
 , flag = ~FF
 , unit = ()
 , tree = #node { left = #leaf, value = 2, right = #node { left = #leaf, value = 3, right = #leaf } }
+, count = { value = 7 }
+, names = { value = ["x", "y"] }
 , helper = add -> add 20 22
 }`
 
@@ -42,6 +44,11 @@ func TestBindings(t *testing.T) {
 	if !slices.Equal(api.Tags, []string{"a", "b"}) || string(api.Data) != "hi" ||
 		api.Ratio != 1.5 || api.Flag != 0xFF {
 		t.Errorf("unexpected fields: %+v", api)
+	}
+
+	// An alias used at two types binds to a type for each.
+	if api.Count.Value != 7 || !slices.Equal(api.Names.Value, []string{"x", "y"}) {
+		t.Errorf("unexpected boxes: %+v, %+v", api.Count, api.Names)
 	}
 
 	// A recursive enum, with records as payloads.
@@ -90,6 +97,10 @@ func TestRefs(t *testing.T) {
 		if tag != []string{"a", "b"}[i] {
 			t.Errorf("unexpected tag %d: %q", i, tag)
 		}
+	}
+
+	if api.Count().Value() != 7 || api.Names().Value().At(1) != "y" {
+		t.Errorf("unexpected boxes: %+v, %+v", api.Count().Load(), api.Names().Load())
 	}
 
 	node := api.Tree().Node()
