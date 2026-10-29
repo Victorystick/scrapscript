@@ -76,6 +76,16 @@ func TestPushByHttp(t *testing.T) {
 		t.Errorf("unexpected request %s %s", trans.req.Method, trans.req.Header)
 	}
 
+	// A newly stored scrap.
+	trans.resp = &http.Response{
+		StatusCode: 201,
+		Body:       io.NopCloser(bytes.NewReader([]byte("abc"))),
+	}
+	key, err = f.PushScrap([]byte("1"))
+	if err != nil || key != "abc" {
+		t.Errorf("expected key abc, got %q, %v", key, err)
+	}
+
 	// Error case: the body is the server's message, not a key.
 	trans.resp = &http.Response{
 		Status:     "422 Unprocessable Entity",
