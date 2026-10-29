@@ -15,6 +15,9 @@ var roundTrips = []string{
 	// Destructured closures print as their values.
 	`f ; f = x -> max x 1 ; { max } = { max = a -> b -> a + b }`,
 	`x -> (max x 1 ; { max, min = lo } = { max = a -> b -> a + b, min = 1 })`,
+	// A binding that names a type prints as it is written.
+	`f ; f : p -> int = _ -> 1 ; p = t ; t : type = int`,
+	`{ f = f } ; f : p int -> int = _ -> 1 ; p = option ; option = a => [#some a, #none]`,
 	// Closures of one lambda print with their own captures.
 	`list/map mk [1, 2] ; mk = n -> (f ; f = x -> x + n)`,
 	`list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x)) [1, 2, 3]`,

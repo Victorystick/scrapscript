@@ -235,7 +235,7 @@ var failures = []struct {
 	{`a ; { a } = 1`, `cannot unify 'int' with '{ a : a, ..b }'`},
 	{`a ; { a } = r ; { a } = r ; r = { a = 1 }`, `cannot bind 'a' twice`},
 	{`f 1 ; { f } = { f = x -> f x }`, `a destructured record can't be recursive`},
-	{`u ; { u } = ({ u = t } ; t = a => [#some a, #none])`, `cannot use type 'u' as a value`},
+	{`u 1 ; { u } = ({ u = t } ; t = a => [#some a, #none])`, `cannot use type 'u' as a value`},
 	// Builtins fail on their values.
 	{`list/repeat -1 0`, `list/repeat: negative count -1`},
 	{`text/repeat -1 "a"`, `text/repeat: negative count -1`},
@@ -478,12 +478,34 @@ func TestImportType(t *testing.T) {
 		t.Errorf("Expected 1, got %s", got)
 	}
 
+	// So may a binding without an annotation, which has no value either.
+	scrap, err = env.Read([]byte(`or-zero (#a 1) ; or-zero : t -> int = | #a n -> n | #b -> 0 ; t = $source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val, err = env.Eval(scrap); err != nil || env.Print(val) != "1" {
+		t.Errorf("Expected 1, got %v, %v", val, err)
+	}
+
 	// The type scrap itself has no value.
 	scrap, err = env.Read([]byte(`t ; t : type = [#a int, #b]`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	typ, err := env.Infer(scrap)
+	if err != nil || typ != "type = [ #a int, #b ]" {
+		t.Errorf("Expected type = [ #a int, #b ], got %s, %v", typ, err)
+	}
+	if _, err = env.Eval(scrap); err == nil || err.Error() != "cannot evaluate a type" {
+		t.Errorf("Expected 'cannot evaluate a type', got %v", err)
+	}
+
+	// Nor has one whose body is a binding that names a type.
+	scrap, err = env.Read([]byte(`u ; u = $source:a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a445`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	typ, err = env.Infer(scrap)
 	if err != nil || typ != "type = [ #a int, #b ]" {
 		t.Errorf("Expected type = [ #a int, #b ], got %s, %v", typ, err)
 	}

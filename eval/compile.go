@@ -602,6 +602,13 @@ func (c *compiler) label(t ast.Tok) int32 {
 	return int32(c.labels.Of(c.name(t)))
 }
 
+// typeOnly reports whether x, the value of a value binding without an
+// annotation or of a record field, denotes only a type, to which the
+// checker gave no type.
+func (c *compiler) typeOnly(x ast.Node) bool {
+	return c.typed != nil && c.typed[x] == types.NoType
+}
+
 // valueFields returns the fields of a record that are values. The others are
 // type members, which the checker gave no type, and which are erased.
 func (c *compiler) valueFields(fields ast.Fields) ast.Fields {
@@ -610,7 +617,7 @@ func (c *compiler) valueFields(fields ast.Fields) ast.Fields {
 	}
 	var kept ast.Fields
 	for i := range fields.Len() {
-		if c.typed[fields.Value(i)] == types.NoType {
+		if c.typeOnly(fields.Value(i)) {
 			if kept == nil {
 				kept = slices.Clip(fields[:2*i])
 			}
@@ -1245,7 +1252,11 @@ func (c *compiler) group(x ast.Node) cnode {
 	for _, comp := range comps {
 		var made []int32
 		for _, w := range comp.Binds {
-			_, _, _, val := se.Where(w)
+			_, _, typ, val := se.Where(w)
+			if typ == ast.None && c.typeOnly(val) {
+				// A binding whose value denotes only a type has no value.
+				continue
+			}
 			b := byNode[w]
 			v := c.expr(val)
 			switch c.ops[v] {
