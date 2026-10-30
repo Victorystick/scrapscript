@@ -132,7 +132,7 @@ Useful on their own, so they land first:
    arguments, as `web : type -> type -> type = $"./web.scrap"` (#23).
 2. [x] **Checker:** let a binding without an annotation name a type, as
    `web = $"./web.scrap"` (#24).
-3. [ ] **Hosts without the network:** bindings from `scrap-gen-go
+3. [x] **Hosts without the network:** bindings from `scrap-gen-go
    -main=false` import `host`, which imports `yards` and so `net/http`, into
    every WebAssembly host. Move the command line into its own package, which
    only the generated `main.go` imports, and the HTTP client into
@@ -144,7 +144,7 @@ Useful on their own, so they land first:
    WebAssembly, hosts must not start Go timers, as `context.WithTimeout`
    does: the runtime would wait on them through WASI's `poll_oneoff`, which
    our shim doesn't implement.
-5. [ ] **Generic aliases in bindings:** `scrap-gen-go` rejects an alias used
+5. [x] **Generic aliases in bindings:** `scrap-gen-go` rejects an alias used
    at more than one type, such as `response text` and `response json`. Name
    each use by its arguments instead: `ResponseText`, `ResponseJson` (#25).
 6. [ ] **`js/` workspace:** move the wasm loader and its WASI shim,

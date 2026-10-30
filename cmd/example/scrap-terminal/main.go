@@ -6,14 +6,14 @@ import (
 	"os"
 
 	"github.com/Victorystick/scrapscript/eval"
-	"github.com/Victorystick/scrapscript/host"
+	"github.com/Victorystick/scrapscript/host/cli"
 )
 
 // main runs the host's command line, and then run, which the host
 // implements, with the value of the script that it names, once the script
 // is checked against the interface.
 func main() {
-	os.Exit(host.Main(Interface, func(env *eval.Environment, script *eval.Scrap, args []string) (int, error) {
+	os.Exit(cli.Main(Interface, func(env *eval.Environment, script *eval.Scrap, args []string) (int, error) {
 		p, err := Load(env, script)
 		if err != nil {
 			return 0, err
