@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -28,10 +29,14 @@ var commands = []Command{
 }
 
 var (
-	server = flag.String("server", "https://scraps.oseg.dev/", "The scrapyard server to use")
-	root   = flag.String("root", ".", "The directory the script reads drafts from, as if it were a file there")
-	cache  = flag.String("cache", "", "The directory to cache fetched scraps in (default: the user cache directory)")
+	server  = flag.String("server", "https://scraps.oseg.dev/", "The scrapyard server to use")
+	root    = flag.String("root", ".", "The directory the script reads drafts from, as if it were a file there")
+	cache   = flag.String("cache", "", "The directory to cache fetched scraps in (default: the user cache directory)")
+	timeout = flag.Duration("timeout", 0, "How long to evaluate for, such as 5s, before stopping with an error (default: no limit)")
 )
+
+// ctx ends --timeout after the command starts.
+var ctx = context.Background()
 
 func main() {
 	flag.Parse()
@@ -58,6 +63,11 @@ func main() {
 
 	// Flags may also follow the command.
 	flag.CommandLine.Parse(flag.Args()[1:])
+	if *timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *timeout)
+		defer cancel()
+	}
 	cmd.fn(flag.Args())
 }
 
@@ -75,6 +85,9 @@ func makeEnv() *eval.Environment {
 	pusher := yards.ByHttp(*server)
 	env.UsePusher(pusher)
 	env.UseDrafts(os.DirFS(*root))
+	if *timeout > 0 {
+		env.UseContext(ctx)
+	}
 	// Don't cache invalid scraps, but trust the local cache for now.
 	fetcher := yards.Validate(pusher)
 	if *cache != "" {

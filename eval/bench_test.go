@@ -131,7 +131,7 @@ func BenchmarkEval(b *testing.B) {
 			if res.Sort {
 				b.Fatal("cannot evaluate a type")
 			}
-			c, err := compile(e.units(scrap), &e.reg, e.vars, e.shapes)
+			c, err := compile(e.units(scrap), &e.reg, e.vars, e.shapes, e.limit)
 			if err != nil {
 				b.Fatal(err)
 			}

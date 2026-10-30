@@ -26,7 +26,10 @@
 //     response has a result for each, "results", next to its type: its
 //     "path", and whether it "failed" and why, "message".
 //
-// If evaluating fails, the response has the error next to the type.
+// If evaluating fails, the response has the error next to the type. A
+// request's "timeout", in milliseconds, stops an evaluation that runs for
+// longer than that since the request came, as `scrap --timeout` does, so
+// that a host on one thread isn't stuck in a scrap that loops forever.
 //
 // "highlight" neither checks nor runs the scrap, which needn't parse. The
 // response has its ranges for syntax highlighting, "highlights", for the
@@ -36,12 +39,14 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strconv"
+	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -56,6 +61,7 @@ type request struct {
 	Source  string            `json:"source"`
 	Sources map[string]string `json:"sources"`
 	Command string            `json:"command"`
+	Timeout int               `json:"timeout"` // in milliseconds, or 0 for none
 }
 
 type response struct {
@@ -89,6 +95,25 @@ func handle(input []byte) []byte {
 	return out
 }
 
+// deadline is a context that is done at a time, which it tells by the
+// clock alone. context.WithDeadline would start a timer, which the Go
+// runtime waits on through WASI's poll_oneoff, which the hosts of this
+// module don't implement; the evaluator compares the deadline with the
+// clock itself.
+type deadline struct {
+	context.Context
+	at time.Time
+}
+
+func (d deadline) Deadline() (time.Time, bool) { return d.at, true }
+
+func (d deadline) Err() error {
+	if time.Now().Before(d.at) {
+		return nil
+	}
+	return context.DeadlineExceeded
+}
+
 // sources is a Fetcher of the scraps in a request, by hash.
 type sources map[string]string
 
@@ -117,6 +142,9 @@ func respond(req request) response {
 	}
 	env := eval.NewEnvironment()
 	env.UseFetcher(sources(req.Sources))
+	if req.Timeout > 0 {
+		env.UseContext(deadline{context.Background(), time.Now().Add(time.Duration(req.Timeout) * time.Millisecond)})
+	}
 	s, err := env.Read([]byte(req.Source))
 	if err != nil {
 		return response{Error: token.Render(err, nil)}
