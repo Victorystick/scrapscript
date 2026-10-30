@@ -1,15 +1,14 @@
 // Package host is what hosts of platforms share: helpers for the bindings
-// that scrap-gen-go generates from a platform's interface. It reaches
-// outside the process only through what an Environment is given, so that
-// hosts built for WebAssembly need no network; the command line is in
-// package cli.
+// that scrap-gen-go generates from a platform's interface. It needs no
+// network, so that hosts built for WebAssembly don't carry it; the command
+// line, which fetches from the scrapyard, is in package cli.
 package host
 
 import (
-	"errors"
 	"iter"
 
 	"github.com/Victorystick/scrapscript/eval"
+	"github.com/Victorystick/scrapscript/yards"
 )
 
 // An Interface is a platform's interface, as a host embeds it.
@@ -31,20 +30,8 @@ func (i Interface) Source() string {
 }
 
 // Fetcher returns a Fetcher of the interface and the scraps it refers to.
-func (i Interface) Fetcher() eval.Fetcher {
-	return sources(i.Sources)
-}
-
-// sources is a Fetcher of scraps by their sha256 hash in hex.
-type sources map[string]string
-
-var errNotFound = errors.New("no scrap found")
-
-func (s sources) FetchSha256(key string) ([]byte, error) {
-	if src, ok := s[key]; ok {
-		return []byte(src), nil
-	}
-	return nil, errNotFound
+func (i Interface) Fetcher() yards.Fetcher {
+	return yards.ByMap(i.Sources)
 }
 
 // ListFrom converts a list value with the conversion of its elements.

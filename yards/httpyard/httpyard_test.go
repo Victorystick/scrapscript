@@ -1,4 +1,4 @@
-package yards
+package httpyard
 
 import (
 	"bytes"
@@ -19,7 +19,7 @@ func (t *transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 	return t.resp, t.err
 }
 
-func TestByHttp(t *testing.T) {
+func TestNew(t *testing.T) {
 	u, err := url.Parse("https://scraps.oseg.dev/key")
 	if err != nil {
 		t.Fatalf("could not parse url: %v", err)
@@ -27,7 +27,7 @@ func TestByHttp(t *testing.T) {
 
 	trans := transport{}
 	client := http.Client{Transport: &trans}
-	f := ByHttpWithClient("https://scraps.oseg.dev/", &client)
+	f := NewWithClient("https://scraps.oseg.dev/", &client)
 
 	// Happy case.
 	trans.resp = &http.Response{
@@ -38,7 +38,9 @@ func TestByHttp(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error %v", err)
 	}
-	equalBytes(t, bs, []byte{1, 2, 3})
+	if !bytes.Equal(bs, []byte{1, 2, 3}) {
+		t.Errorf("read bytes were wrong %v != %v", bs, []byte{1, 2, 3})
+	}
 	if trans.req.URL.String() != u.String() {
 		t.Errorf("unexpectedly URL %s != %s", trans.req.URL, u)
 	}
@@ -58,10 +60,10 @@ func TestByHttp(t *testing.T) {
 	}
 }
 
-func TestPushByHttp(t *testing.T) {
+func TestPush(t *testing.T) {
 	trans := transport{}
 	client := http.Client{Transport: &trans}
-	f := ByHttpWithClient("https://scraps.oseg.dev/", &client)
+	f := NewWithClient("https://scraps.oseg.dev/", &client)
 
 	// Happy case.
 	trans.resp = &http.Response{

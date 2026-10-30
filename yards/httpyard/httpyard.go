@@ -1,10 +1,16 @@
-package yards
+// Package httpyard fetches scraps from a scrapyard over HTTP, and pushes
+// them to it. It is kept apart from package yards, whose fetchers and their
+// composition need no network, so that hosts built for WebAssembly can use
+// them without it.
+package httpyard
 
 import (
 	"bytes"
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/Victorystick/scrapscript/yards"
 )
 
 type httpFetcher struct {
@@ -12,11 +18,14 @@ type httpFetcher struct {
 	hostname string
 }
 
-func ByHttp(hostname string) FetchPusher {
-	return ByHttpWithClient(hostname, http.DefaultClient)
+// New returns the scrapyard at the URL hostname, which ends in a slash.
+func New(hostname string) yards.FetchPusher {
+	return NewWithClient(hostname, http.DefaultClient)
 }
 
-func ByHttpWithClient(hostname string, client *http.Client) FetchPusher {
+// NewWithClient returns the scrapyard at the URL hostname, which client
+// makes the requests to.
+func NewWithClient(hostname string, client *http.Client) yards.FetchPusher {
 	return httpFetcher{client, hostname}
 }
 

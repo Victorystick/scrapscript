@@ -12,6 +12,7 @@ import (
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/gogen"
 	"github.com/Victorystick/scrapscript/yards"
+	"github.com/Victorystick/scrapscript/yards/httpyard"
 )
 
 // scrap-gen-go generates Go bindings for a platform's interface, given as a
@@ -39,7 +40,7 @@ func main() {
 	}
 
 	env := eval.NewEnvironment()
-	yard := yards.Validate(yards.ByHttp(*server))
+	yard := yards.Validate(httpyard.New(*server))
 	if cached, err := yards.NewDefaultCacheFetcher(yard); err == nil {
 		yard = cached
 	}

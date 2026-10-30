@@ -19,6 +19,7 @@ import (
 	"github.com/Victorystick/scrapscript/host"
 	"github.com/Victorystick/scrapscript/token"
 	"github.com/Victorystick/scrapscript/yards"
+	"github.com/Victorystick/scrapscript/yards/httpyard"
 )
 
 // A Run runs a script, which the host has read from the command line,
@@ -67,7 +68,7 @@ func Main(iface host.Interface, run Run) int {
 	}
 
 	env := eval.NewEnvironment()
-	yard := yards.Validate(yards.ByHttp(*server))
+	yard := yards.Validate(httpyard.New(*server))
 	if cached, err := yards.NewDefaultCacheFetcher(yard); err == nil {
 		yard = cached
 	}

@@ -14,7 +14,7 @@ func TestDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forbidden := map[string]bool{"net": true, "net/http": true, "github.com/Victorystick/scrapscript/yards": true}
+	forbidden := map[string]bool{"net": true, "net/http": true, "github.com/Victorystick/scrapscript/yards/httpyard": true}
 	for _, pkg := range strings.Fields(string(out)) {
 		if forbidden[pkg] {
 			t.Errorf("host depends on %s", pkg)

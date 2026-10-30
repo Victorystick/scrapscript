@@ -11,6 +11,7 @@ import (
 	"github.com/Victorystick/scrapscript/highlight"
 	"github.com/Victorystick/scrapscript/token"
 	"github.com/Victorystick/scrapscript/yards"
+	"github.com/Victorystick/scrapscript/yards/httpyard"
 )
 
 type Command struct {
@@ -72,7 +73,7 @@ func must[T any](val T, err error) T {
 func makeEnv() *eval.Environment {
 	env := eval.NewEnvironment()
 
-	pusher := yards.ByHttp(*server)
+	pusher := httpyard.New(*server)
 	env.UsePusher(pusher)
 	env.UseDrafts(os.DirFS(*root))
 	// Don't cache invalid scraps, but trust the local cache for now.
