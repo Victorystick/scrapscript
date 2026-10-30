@@ -11,6 +11,9 @@ export interface WasmRequest {
   // "highlight" it, which needn't even parse: its ranges by tree-sitter
   // capture name, as start and end offsets into source.
   command?: Command;
+  // How long evaluating may take, in milliseconds since the request, before
+  // it stops with an error. No limit if absent.
+  timeout?: number;
 }
 
 export type Command = 'type' | 'eval' | 'test' | 'highlight';

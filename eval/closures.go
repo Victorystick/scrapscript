@@ -70,6 +70,7 @@ func (p *program) lam(n cnode) *lambdaCode {
 // enter1 starts a call of the lambda l of sf, which takes one argument,
 // with arg, returning the body of the arm that matches and its frame.
 func (l *lambdaCode) enter1(sf *scriptFunc, arg value) (tcode, frame) {
+	sf.prog.limit.tick()
 	g := frame{caps: sf.caps}
 	if l.size > 0 {
 		g.slots = make([]value, l.size)
@@ -85,6 +86,7 @@ func (l *lambdaCode) enter1(sf *scriptFunc, arg value) (tcode, frame) {
 // enterN starts a call of the lambda l of sf with its arguments, the
 // first slots of g, returning the body of the arm that matches.
 func (l *lambdaCode) enterN(sf *scriptFunc, g frame) tcode {
+	sf.prog.limit.tick()
 	for _, a := range l.arms {
 		if matchEach(a.pats, g.slots, g.slots) {
 			return a.body

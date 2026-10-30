@@ -48,6 +48,13 @@ So far it supports
     $ scrap eval --root ./lib --cache ./tmp-scraps < some.scrap
     ```
 
+* `--timeout 5s` stops evaluating once that long has passed, with an error, as when a scrap loops forever:
+
+    ```sh
+    $ echo 'f 0 ; f = n -> f (n + 1)' | scrap eval --timeout 1s
+    evaluation stopped: it ran past its deadline
+    ```
+
 ## Missing
 
 * `scrap flat` - due to a lack of details.

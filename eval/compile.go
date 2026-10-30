@@ -129,6 +129,8 @@ type core struct {
 	// of record literals and patterns.
 	table  *shapeTable
 	shapes []*shape
+	// What stops evaluation, shared by the environment's programs.
+	limit *limit
 
 	// For printing closures, not for evaluating them. A lambda's or
 	// composition's uses is what its code refers to; a binder is a name that
@@ -325,11 +327,12 @@ type unit struct {
 // before it, in the order that they depend on each other, into one core.
 // Free names that they don't bind refer to globals. Tags and record keys
 // are interned in the label table of shapes, and the shapes of records in
-// shapes.
-func compile(units []unit, reg *types.Registry, globals variables, shapes *shapeTable) (*core, error) {
+// shapes. limit stops its evaluations, shared with the environment's other
+// cores.
+func compile(units []unit, reg *types.Registry, globals variables, shapes *shapeTable, limit *limit) (*core, error) {
 	root := int32(len(units) - 1)
 	c := compiler{
-		core:     core{labels: shapes.labels, table: shapes, spans: []span{{0, root}}},
+		core:     core{labels: shapes.labels, table: shapes, limit: limit, spans: []span{{0, root}}},
 		units:    units,
 		reg:      reg,
 		globals:  globals,

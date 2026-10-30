@@ -872,12 +872,18 @@ constructor applied to types other than the interface's parameters is named by
 its arguments too, so `response text` and `response json` bind to
 `ResponseText` and `ResponseJson`, while `node msg` binds to `Node`.
 
-Open: cancelling a running evaluation (a `context.Context`, checked on each
-call, without counting steps); whether host resources such as connections can
-be values, and how they print; open rows in interfaces, rejected at first;
-whether a platform provides a pure reference
-semantics (like `platforms/terminal/simulate.scrap`'s `simulate`) that hosts
-must agree with.
+**Cancelling.** A host stops a script that runs too long with a
+`context.Context` for its environment, which the evaluator checks every so many
+calls of script functions: every loop of a scrap is a call. It polls the
+deadline against the clock rather than waiting on a timer, since a WebAssembly
+host has one thread, which a running scrap holds.
+
+Open: limiting the depth of non-tail calls, which a deadline doesn't stop from
+overflowing the stack (in WebAssembly, the engine's, within milliseconds);
+whether host resources such as connections can be values, and how they print;
+open rows in interfaces, rejected at first; whether a platform provides a pure
+reference semantics (like `platforms/terminal/simulate.scrap`'s `simulate`)
+that hosts must agree with.
 
 ## 14. Relation to the guide
 
