@@ -248,7 +248,16 @@ func NewFunc(name string, arity int, fn func(args []Value) (Value, error)) Value
 // without checking their types. It fails if the evaluation does, as when no arm matches or a
 // builtin fails.
 func Call(fn Value, args ...Value) (v Value, err error) {
-	defer catch(&err)
+	// A host may call in during an evaluation, as from a function it made,
+	// and carry on after an error, so the depth of the calls that the error
+	// unwound is restored. Only a script function tells whose depth that is;
+	// a builtin that calls back into one, such as list/map, doesn't.
+	var l *limit
+	depth := 0
+	if sf, ok := fn.v.script(); ok {
+		l, depth = sf.prog.limit, sf.prog.limit.depth
+	}
+	defer catch(&err, l, depth)
 	if len(args) == 0 {
 		return fn, nil
 	}

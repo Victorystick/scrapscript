@@ -30,6 +30,8 @@
 // request's "timeout", in milliseconds, stops an evaluation that runs for
 // longer than that since the request came, as `scrap --timeout` does, so
 // that a host on one thread isn't stuck in a scrap that loops forever.
+// Non-tail calls nest at most 1,000 deep, so that a deeper recursion fails
+// as an error too, rather than overflowing the engine's stack, which traps.
 //
 // "highlight" neither checks nor runs the scrap, which needn't parse. The
 // response has its ranges for syntax highlighting, "highlights", for the

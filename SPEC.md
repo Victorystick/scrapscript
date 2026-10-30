@@ -878,12 +878,16 @@ calls of script functions: every loop of a scrap is a call. It polls the
 deadline against the clock rather than waiting on a timer, since a WebAssembly
 host has one thread, which a running scrap holds.
 
-Open: limiting the depth of non-tail calls, which a deadline doesn't stop from
-overflowing the stack (in WebAssembly, the engine's, within milliseconds);
-whether host resources such as connections can be values, and how they print;
-open rows in interfaces, rejected at first; whether a platform provides a pure
-reference semantics (like `platforms/terminal/simulate.scrap`'s `simulate`)
-that hosts must agree with.
+**Call depth.** Calls in tail position run in constant stack, but each
+non-tail call nests in the host's stack, which a deadline doesn't stop from
+overflowing: in WebAssembly the engine's overflows within milliseconds. So
+non-tail calls nest at most 100,000 deep natively and 1,000 in WebAssembly,
+and a deeper recursion fails with an error.
+
+Open: whether host resources such as connections can be values, and how they
+print; open rows in interfaces, rejected at first; whether a platform provides
+a pure reference semantics (like `platforms/terminal/simulate.scrap`'s
+`simulate`) that hosts must agree with.
 
 ## 14. Relation to the guide
 

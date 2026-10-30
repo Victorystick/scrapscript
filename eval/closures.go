@@ -96,11 +96,18 @@ func (l *lambdaCode) enterN(sf *scriptFunc, g frame) tcode {
 }
 
 // trampoline runs the body c in f, and the bodies that it calls in tail
-// position.
-func trampoline(c tcode, f frame) value {
+// position. Each call of it nests in the Go stack, so it counts the depth
+// of the non-tail calls of l, failing beyond its maximum. An error that
+// unwinds it leaves the depth to catch.
+func trampoline(l *limit, c tcode, f frame) value {
+	if l.depth >= l.maxDepth {
+		panic(runtimeError{tooDeepError{l.maxDepth}})
+	}
+	l.depth++
 	for {
 		v, next, g := c(f)
 		if next == nil {
+			l.depth--
 			return v
 		}
 		c, f = next, g
@@ -186,14 +193,15 @@ func (p *program) expr(n cnode) code {
 			arg := ac.get(f)
 			if sf, ok := fn.script(); ok && len(sf.args) == 0 && !sf.composition() {
 				if l := sf.prog.lam(sf.node); l.arity == 1 {
-					return trampoline(l.enter1(sf, arg))
+					body, g := l.enter1(sf, arg)
+					return trampoline(sf.prog.limit, body, g)
 				}
 			}
-			body, g, v := enter(fn, arg)
+			body, g, v, _ := enter(fn, arg)
 			if v.valid() {
 				return v
 			}
-			return trampoline(body, g)
+			return trampoline(p.limit, body, g)
 		}
 
 	case opCallN:
@@ -246,18 +254,18 @@ func (p *program) expr(n cnode) code {
 					for i, c := range acs {
 						g.slots[i] = c.get(f)
 					}
-					return trampoline(l.enterN(sf, g), g)
+					return trampoline(sf.prog.limit, l.enterN(sf, g), g)
 				}
 			}
 			args := make([]value, k)
 			for i, c := range acs {
 				args[i] = c.get(f)
 			}
-			body, g, v := enterN(fn, args)
+			body, g, v, _ := enterN(fn, args)
 			if v.valid() {
 				return v
 			}
-			return trampoline(body, g)
+			return trampoline(p.limit, body, g)
 		}
 
 	case opMatch:
@@ -529,7 +537,7 @@ func (p *program) tail(n cnode) tcode {
 					return value{}, body, g
 				}
 			}
-			body, g, v := enter(fn, arg)
+			body, g, v, _ := enter(fn, arg)
 			if v.valid() {
 				return done(v)
 			}
@@ -593,7 +601,7 @@ func (p *program) tail(n cnode) tcode {
 			for i, c := range acs {
 				args[i] = c.get(f)
 			}
-			body, g, v := enterN(fn, args)
+			body, g, v, _ := enterN(fn, args)
 			if v.valid() {
 				return done(v)
 			}
