@@ -867,12 +867,15 @@ a database.
 A Ref holds the value, converts only the parts that the host reads, and
 passes back to a script as it is; its `Load` converts all of it to the
 struct, for hosts that want plain Go values, and the struct's `Ref` converts
-it back, which is how a host makes values. Aliases name the Go types.
+it back, which is how a host makes values. Aliases name the Go types. A type
+constructor applied to types other than the interface's parameters is named by
+its arguments too, so `response text` and `response json` bind to
+`ResponseText` and `ResponseJson`, while `node msg` binds to `Node`.
 
 Open: cancelling a running evaluation (a `context.Context`, checked on each
 call, without counting steps); whether host resources such as connections can
-be values, and how they print; open rows and aliases used at more than one type
-in interfaces, rejected at first; whether a platform provides a pure reference
+be values, and how they print; open rows in interfaces, rejected at first;
+whether a platform provides a pure reference
 semantics (like `platforms/terminal/simulate.scrap`'s `simulate`) that hosts
 must agree with.
 

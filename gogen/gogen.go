@@ -262,14 +262,14 @@ func (g *generator) named(s types.Shape, hint string) (*gotype, error) {
 	name := hint
 	key := ""
 	if s.Alias != "" && !s.Imported {
-		name = camel(s.Alias)
+		name = g.aliasName(s)
 		key = g.key(s)
 		if d, ok := g.byKey[key]; ok {
 			g.byRef[s.Ref] = d
 			return &gotype{expr: d.name, decl: d}, nil
 		}
 		if g.names[name] {
-			return nil, fmt.Errorf("cannot bind %s: the alias %s is used at more than one type", g.reg.String(s.Ref), s.Alias)
+			return nil, fmt.Errorf("cannot bind %s: the alias %s is used at types that are both named %s", g.reg.String(s.Ref), s.Alias, name)
 		}
 	}
 	if s.Open {
@@ -318,6 +318,50 @@ func (g *generator) named(s types.Shape, hint string) (*gotype, error) {
 		d.fields = append(d.fields, f)
 	}
 	return &gotype{expr: name, decl: d}, nil
+}
+
+// aliasName returns the Go name of a type expanded from the alias of s. A
+// type constructor applied to other types than the interface's parameters
+// is named by its arguments too, as `ResponseText` for `response text`, so
+// that each type it is used at has its own name, whichever comes first.
+func (g *generator) aliasName(s types.Shape) string {
+	name := camel(s.Alias)
+	if !slices.ContainsFunc(s.Args, func(arg types.TypeRef) bool {
+		_, ok := g.params[g.reg.Resolve(arg)]
+		return !ok
+	}) {
+		return name
+	}
+	for _, arg := range s.Args {
+		name += g.argName(arg)
+	}
+	return name
+}
+
+// argName returns the name of a type that an alias is applied to, as part
+// of the Go name of the type that it expands to.
+func (g *generator) argName(ref types.TypeRef) string {
+	s := g.reg.Shape(ref)
+	switch s.Kind {
+	case types.ShapePrimitive:
+		if s.Name == "()" {
+			return "Hole"
+		}
+		return camel(s.Name)
+	case types.ShapeVariable:
+		return g.params[s.Ref]
+	case types.ShapeList:
+		return "List" + g.argName(s.Elem)
+	case types.ShapeFunc:
+		return "Func"
+	}
+	if s.Alias != "" && !s.Imported {
+		return g.aliasName(s)
+	}
+	if s.Kind == types.ShapeEnum {
+		return "Enum"
+	}
+	return "Record"
 }
 
 // key identifies the alias of s and the arguments it is applied to.

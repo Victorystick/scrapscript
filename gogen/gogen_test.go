@@ -49,8 +49,8 @@ func TestGenerated(t *testing.T) {
 func TestGenerateFailures(t *testing.T) {
 	failures := []struct{ source, error string }{
 		{`r ; r : row -> type = a => { b : { a : int, ..a } }`, `cannot bind row parameter`},
-		{`p ; p : type = { a : box int, b : box text } ; box : type -> type = a => { v : a }`,
-			`the alias box is used at more than one type`},
+		{`p ; p : type = { a : box { x : int }, b : box { y : int } } ; box : type -> type = a => { v : a }`,
+			`the alias box is used at types that are both named BoxRecord`},
 		{`1`, `an interface must be a type`},
 		{`p ; p : type = $"./q.scrap"`, `cannot embed a scrap that refers to a path`},
 	}
