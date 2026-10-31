@@ -48,6 +48,9 @@ func TestCheck(t *testing.T) {
 			response{Type: "list int", Error: "list/repeat: negative count -1"}, ""},
 		{"stops", request{Source: "f 0\n; f = n -> f (n + 1)", Command: "eval", Timeout: 50},
 			response{Type: "a", Error: "evaluation stopped: it ran past its deadline"}, ""},
+		// In WebAssembly, the limit is 1000.
+		{"too deep", request{Source: "f 0\n; f = n -> 1 + f n", Command: "eval"},
+			response{Type: "int", Error: "evaluation stopped: calls nested deeper than 100000"}, ""},
 		{"type error before evaluation", request{Source: `1 + "a"`, Command: "eval"}, response{}, "cannot unify 'text' with 'int'"},
 		{"tests", request{Source: `{ adds = #eq { got = 1 + 1, want = 2 }, fails = [#pass, #fail "why"] }`, Command: "test"},
 			response{

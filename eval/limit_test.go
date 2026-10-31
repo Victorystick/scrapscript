@@ -3,6 +3,7 @@ package eval_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,8 +28,6 @@ func TestDeadline(t *testing.T) {
 	for _, source := range []string{
 		// A loop of tail calls, which never grows the stack.
 		`f 0 ; f = n -> f (n + 1)`,
-		// A recursion that would overflow the stack in time.
-		`f 0 ; f = n -> 1 + f n`,
 		// A loop of a match function, which takes several arguments.
 		`f 0 1 ; f = | a -> b -> f b a`,
 		// A loop in a function that a builtin calls.
@@ -85,5 +84,54 @@ func TestDeadlineCall(t *testing.T) {
 	}
 	if v, err := e.Eval(read(t, e, `list/fold 0 (a -> b -> a + b) [1, 2, 3]`)); err != nil || e.Print(v) != "6" {
 		t.Errorf("expected 6, got %v, %v", v, err)
+	}
+}
+
+// tooDeep evaluates source in e and checks that it fails because its calls
+// nest too deep.
+func tooDeep(t *testing.T, e *eval.Environment, source string) {
+	t.Helper()
+	_, err := e.Eval(read(t, e, source))
+	if err == nil || !strings.Contains(err.Error(), "calls nested deeper than") {
+		t.Fatalf("%s: expected calls nested too deep, got %v", source, err)
+	}
+}
+
+// deep is a recursion 50,000 calls deep, which is allowed natively.
+const deep = `f 50000 ; f = | 0 -> 0 | n -> 1 + f (n - 1)`
+
+func TestDepth(t *testing.T) {
+	for _, source := range []string{
+		`f 0 ; f = n -> 1 + f n`,
+		// A function that takes several arguments.
+		`f 0 1 ; f = a -> b -> 1 + f b a`,
+		// A recursion through a function that a builtin calls.
+		`f 0 ; f = n -> (| [x] -> x | _ -> 0) (list/map f [n])`,
+	} {
+		e := eval.NewEnvironment()
+		tooDeep(t, e, source)
+
+		// The calls that the error unwound don't count any longer.
+		if v, err := e.Eval(read(t, e, deep)); err != nil || e.Print(v) != "50000" {
+			t.Errorf("after %s: expected 50000, got %v, %v", source, v, err)
+		}
+	}
+}
+
+// TestDepthCall checks that a host's calls into a value are limited too,
+// and that an error in one doesn't count against the next.
+func TestDepthCall(t *testing.T) {
+	e := eval.NewEnvironment()
+	f, err := e.Eval(read(t, e, `| 0 -> 0 | n -> 1 + f n ; f = n -> 1 + f n`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := eval.Call(f, eval.Int(1)); err == nil || !strings.Contains(err.Error(), "calls nested deeper than") {
+			t.Fatalf("expected calls nested too deep, got %v", err)
+		}
+	}
+	if v, err := e.Eval(read(t, e, deep)); err != nil || e.Print(v) != "50000" {
+		t.Errorf("expected 50000, got %v, %v", v, err)
 	}
 }

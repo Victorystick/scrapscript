@@ -3,6 +3,8 @@ package eval
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime"
 	"time"
 )
 
@@ -24,6 +26,8 @@ type limit struct {
 	deadline time.Time
 	timed    bool
 	left     int // calls until the next check
+	depth    int // non-tail calls under way
+	maxDepth int // at most, beyond which they fail
 }
 
 // UseContext stops evaluations in e once ctx is done, by its deadline or
@@ -40,7 +44,7 @@ type limit struct {
 // implement.
 func (e *Environment) UseContext(ctx context.Context) {
 	l := e.limit
-	*l = limit{ctx: ctx}
+	*l = limit{ctx: ctx, depth: l.depth, maxDepth: l.maxDepth}
 	if ctx != nil {
 		l.done = ctx.Done()
 		l.deadline, l.timed = ctx.Deadline()
@@ -87,3 +91,22 @@ func (e stoppedError) Error() string {
 }
 
 func (e stoppedError) Unwrap() error { return e.err }
+
+// maxDepth returns how deep non-tail calls may nest, so that a recursion
+// fails before it overflows the stack. Natively, a call takes up to about
+// 1 KB of Go's stack, which can grow to 1 GB. In WebAssembly the engine's
+// stack overflows first: a browser's Web Worker has room for about 2,400
+// calls, and failing takes about as much stack again as the calls it
+// unwinds.
+func maxDepth() int {
+	if runtime.GOARCH == "wasm" {
+		return 1_000
+	}
+	return 100_000
+}
+
+type tooDeepError struct{ max int }
+
+func (e tooDeepError) Error() string {
+	return fmt.Sprintf("evaluation stopped: calls nested deeper than %d", e.max)
+}

@@ -84,7 +84,7 @@ func NewEnvironment() *Environment {
 	env.typeScope = typeScope
 	env.vars = vars
 	env.shapes = newShapeTable(env.reg.Labels())
-	env.limit = &limit{}
+	env.limit = &limit{maxDepth: maxDepth()}
 	env.scraps = make(map[hashKey]*Scrap)
 	env.drafts = make(map[string]*Scrap)
 	return env
@@ -350,7 +350,7 @@ func (e *Environment) Apply(fn, arg *Scrap) (v Value, err error) {
 		strs, where := e.reg.Strings(argType, param)
 		return Value{}, fmt.Errorf("cannot apply: passed '%s' but expected '%s'%s", strs[0], strs[1], where)
 	}
-	defer catch(&err)
+	defer catch(&err, e.limit, e.limit.depth)
 	return Value{apply(f, a)}, nil
 }
 

@@ -27,14 +27,19 @@ func (p *program) errorf(n cnode, format string, args ...any) runtimeError {
 	return runtimeError{p.source(n).Error(p.at[n], fmt.Sprintf(format, args...))}
 }
 
-// catch recovers a runtimeError into *err. Other panics carry on.
-func catch(err *error) {
+// catch recovers a runtimeError into *err, and sets the depth of the
+// non-tail calls of l, if any, back to depth, since the calls that the
+// error unwound didn't return. Other panics carry on.
+func catch(err *error, l *limit, depth int) {
 	if r := recover(); r != nil {
 		re, ok := r.(runtimeError)
 		if !ok {
 			panic(r)
 		}
 		*err = re.err
+		if l != nil {
+			l.depth = depth
+		}
 	}
 }
 
@@ -51,27 +56,27 @@ func (f frame) capture(caps []value, from []int32) {
 
 // eval runs the program in a new top frame.
 func (p *program) eval() (v value, err error) {
-	defer catch(&err)
-	return trampoline(p.body(p.root), frame{slots: make([]value, p.top)}), nil
+	defer catch(&err, p.limit, p.limit.depth)
+	return trampoline(p.limit, p.body(p.root), frame{slots: make([]value, p.top)}), nil
 }
 
 // apply calls the function fn with arg.
 func apply(fn, arg value) value {
-	body, f, v := enter(fn, arg)
+	body, f, v, l := enter(fn, arg)
 	if v.valid() {
 		return v
 	}
-	return trampoline(body, f)
+	return trampoline(l, body, f)
 }
 
 // call calls the function fn with args, one or more, whether it takes as
 // many or not.
 func call(fn value, args ...value) value {
-	body, f, v := enterN(fn, args)
+	body, f, v, l := enterN(fn, args)
 	if v.valid() {
 		return v
 	}
-	return trampoline(body, f)
+	return trampoline(l, body, f)
 }
 
 // call2 is call for two arguments, which a builtin or a script function
@@ -87,7 +92,7 @@ func call2(fn, a, b value) value {
 			if l := g.prog.lam(g.node); l.arity == 2 {
 				f := g.frame(l.size)
 				f.slots[0], f.slots[1] = a, b
-				return trampoline(l.enterN(g, f), f)
+				return trampoline(g.prog.limit, l.enterN(g, f), f)
 			}
 		}
 	}
@@ -97,25 +102,26 @@ func call2(fn, a, b value) value {
 // enter starts calling fn with arg. A builtin returns its result v, as
 // does a function that takes more arguments, with arg added to the ones it
 // has. Otherwise, enter returns the body of a script function's first arm
-// that matches all its arguments, in a new frame f, to run. A composition
-// applies its first function and enters its second.
-func enter(fn, arg value) (body tcode, f frame, v value) {
+// that matches all its arguments, in a new frame f, to run, and the limit
+// of its environment, lim, to run it under. A composition applies its first
+// function and enters its second.
+func enter(fn, arg value) (body tcode, f frame, v value, lim *limit) {
 	for {
 		switch fn.boxedKind() {
 		case kindBuiltin:
 			g := fn.asBuiltin()
 			if g.arity == 1 {
-				return nil, f, g.one(arg)
+				return nil, f, g.one(arg), nil
 			}
-			return nil, f, partialVal(&partial{g, []value{arg}})
+			return nil, f, partialVal(&partial{g, []value{arg}}), nil
 		case kindPartial:
 			// Each partial application has its own arguments.
 			g := fn.asPartial()
 			args := append(g.args[:len(g.args):len(g.args)], arg)
 			if len(args) == g.fn.arity {
-				return nil, f, g.fn.invoke(args)
+				return nil, f, g.fn.invoke(args), nil
 			}
-			return nil, f, partialVal(&partial{g.fn, args})
+			return nil, f, partialVal(&partial{g.fn, args}), nil
 		}
 		sf := fn.asScript()
 		if sf.composition() {
@@ -126,28 +132,28 @@ func enter(fn, arg value) (body tcode, f frame, v value) {
 		l := sf.prog.lam(sf.node)
 		if l.arity == 1 {
 			body, f = l.enter1(sf, arg)
-			return body, f, value{}
+			return body, f, value{}, sf.prog.limit
 		}
 		if len(sf.args)+1 < l.arity {
 			a := sf.applied(1)
 			a.args[len(sf.args)] = arg
-			return nil, f, scriptVal(a)
+			return nil, f, scriptVal(a), nil
 		}
 		f = sf.frame(l.size)
 		copy(f.slots, sf.args)
 		f.slots[l.arity-1] = arg
-		return l.enterN(sf, f), f, value{}
+		return l.enterN(sf, f), f, value{}, sf.prog.limit
 	}
 }
 
 // enterN is enter for one or more arguments args at once. A function that
 // takes exactly as many is called with all of them, without applying it to
 // one at a time.
-func enterN(fn value, args []value) (body tcode, f frame, v value) {
+func enterN(fn value, args []value) (body tcode, f frame, v value, lim *limit) {
 	switch fn.boxedKind() {
 	case kindBuiltin:
 		if g := fn.asBuiltin(); g.arity == len(args) && g.arity > 1 {
-			return nil, f, g.invoke(args)
+			return nil, f, g.invoke(args), nil
 		}
 	case kindScript:
 		if g := fn.asScript(); len(args) > 1 && !g.composition() {
@@ -158,11 +164,11 @@ func enterN(fn value, args []value) (body tcode, f frame, v value) {
 				// time.
 				a := g.applied(len(args))
 				copy(a.args[len(g.args):], args)
-				return nil, f, scriptVal(a)
+				return nil, f, scriptVal(a), nil
 			case have == l.arity:
 				f = g.frame(l.size)
 				copy(f.slots[copy(f.slots, g.args):], args)
-				return l.enterN(g, f), f, value{}
+				return l.enterN(g, f), f, value{}, g.prog.limit
 			}
 		}
 	}

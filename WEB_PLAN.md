@@ -137,7 +137,7 @@ Useful on their own, so they land first:
    every WebAssembly host. Move the command line into its own package, which
    only the generated `main.go` imports, and the HTTP client into
    `yards/httpyard` (#26).
-4. [ ] **Evaluator deadline:** cancel an evaluation that runs past a
+4. [x] **Evaluator deadline:** cancel an evaluation that runs past a
    deadline, polling the clock every so many calls; measure with benchstat.
    Settles the open question in SPEC.md section 13, for `scrap eval`, the
    terminal host and the tutorial's REPL as much as for the web (#27). In
@@ -154,7 +154,9 @@ Useful on their own, so they land first:
 6b. [ ] **Call depth:** a deadline doesn't stop a non-tail recursion, such as
    `f = n -> 1 + f n`, from overflowing the stack: natively Go's, fatally
    after about 6 s; in WebAssembly the engine's, within milliseconds. Limit
-   the depth of non-tail calls, so that it fails as an error.
+   the depth of non-tail calls, so that it fails as an error: 100,000
+   natively, 1,000 in WebAssembly, where a Web Worker's stack holds about
+   2,400 and failing takes about as much again (#28).
 
 The web platform:
 
