@@ -72,7 +72,7 @@ func TestCheck(t *testing.T) {
 		{"wrong hash", request{
 			Source:  `$source:` + hash(inc) + ` 1`,
 			Sources: map[string]string{hash(inc): twice},
-		}, response{}, "the source of $source:" + hash(inc) + " has a different hash"},
+		}, response{}, "fetched bytes had wrong hash: " + hash(inc)},
 	}
 	for _, ex := range examples {
 		t.Run(ex.name, func(t *testing.T) {

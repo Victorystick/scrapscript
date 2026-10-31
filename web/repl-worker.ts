@@ -1,12 +1,20 @@
 /// <reference lib="webworker" />
 // Runs scraps for repl.ts, off the page's thread, so that a scrap that
-// loops forever doesn't freeze the page. The page stops it instead.
-import { ScrapWasm, type Command, type WasmResult } from './scrap-wasm.ts';
+// loops forever doesn't freeze the page. Evaluating stops at the request's
+// timeout, and the page stops the worker if it hasn't answered by then.
+import {
+  ScrapWasm,
+  wasmURL,
+  type Command,
+  type WasmResult,
+} from '@scrapscript/web';
 
 export interface RunRequest {
   id: number;
   source: string;
   command: Command;
+  // How long evaluating may take, in milliseconds.
+  timeout: number;
 }
 
 // The worker says once whether it started, and then answers each request.
@@ -15,9 +23,7 @@ export type RunResponse =
   | { ready: false; error: string }
   | { id: number; result: WasmResult };
 
-const scrap = WebAssembly.compileStreaming(
-  fetch(new URL('./scrap-wasm.wasm', import.meta.url))
-).then((module) => new ScrapWasm(module));
+const scrap = WebAssembly.compileStreaming(fetch(wasmURL)).then((module) => new ScrapWasm(module));
 
 scrap.then(
   () => post({ ready: true }),
@@ -38,7 +44,7 @@ const maxImports = 256;
 self.onmessage = async ({ data }: MessageEvent<RunRequest>) => {
   let result: WasmResult;
   try {
-    result = await run(await scrap, data.source, data.command);
+    result = await run(await scrap, data);
   } catch (e) {
     result = { error: String(e) };
   }
@@ -47,12 +53,11 @@ self.onmessage = async ({ data }: MessageEvent<RunRequest>) => {
 
 async function run(
   scrap: ScrapWasm,
-  source: string,
-  command: Command
+  { source, command, timeout }: RunRequest
 ): Promise<WasmResult> {
   let count = 0;
   for (;;) {
-    const result = scrap.run({ source, sources, command });
+    const result = scrap.run({ source, sources, command, timeout });
     if (!('missing' in result)) return result;
 
     count += result.missing.length;

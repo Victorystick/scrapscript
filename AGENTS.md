@@ -22,7 +22,9 @@ against the base commit with interleaved runs and benchstat.
   default; override with `--root <dir>`.
 - web/ holds the tutorial and playground, deployed to GitHub Pages; see
   web/AGENTS.md. Its tests run the tutorial's examples with cmd/scrap, so
-  run `npm test` there when changing what the CLI prints.
+  run `pnpm test` there when changing what the CLI prints.
+- js/ holds the web runtime, for npm; see js/AGENTS.md. js/ and web/ are a
+  pnpm workspace.
 - Never put links to agentic coding sessions (such as claude.ai/code
   session URLs) in PR descriptions or commit messages.
 - Discuss design changes before implementing them; make one change at a time.
