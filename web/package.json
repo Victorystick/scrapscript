@@ -4,12 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "npm run build:wasm && vite dev",
-    "build": "npm run build:wasm && vite build",
-    "build:wasm": "GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -trimpath -ldflags=\"-s -w\" -o scrap-wasm.wasm ../cmd/scrap-wasm",
-    "preview": "npm run build && vite preview",
+    "dev": "pnpm build:wasm && vite dev",
+    "build": "pnpm build:wasm && vite build",
+    "build:wasm": "pnpm --filter @scrapscript/web build",
+    "preview": "pnpm build && vite preview",
     "build:scrap": "go build -o build/scrap ../cmd/scrap",
-    "test": "npm run build:wasm && npm run build:scrap && vitest run"
+    "test": "pnpm build:wasm && pnpm build:scrap && vitest run"
+  },
+  "dependencies": {
+    "@scrapscript/web": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.15.18",

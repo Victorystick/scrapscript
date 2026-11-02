@@ -42,10 +42,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"sort"
 	"strconv"
 	"time"
@@ -55,6 +52,7 @@ import (
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/highlight"
 	"github.com/Victorystick/scrapscript/token"
+	"github.com/Victorystick/scrapscript/yards"
 )
 
 func main() {}
@@ -116,24 +114,6 @@ func (d deadline) Err() error {
 	return context.DeadlineExceeded
 }
 
-// sources is a Fetcher of the scraps in a request, by hash.
-type sources map[string]string
-
-var errNotFound = errors.New("no scrap found")
-
-// FetchSha256 returns the source with the sha256 key, which it verifies, as
-// the scrap CLI does with what it fetches.
-func (s sources) FetchSha256(key string) ([]byte, error) {
-	src, ok := s[key]
-	if !ok {
-		return nil, errNotFound
-	}
-	if fmt.Sprintf("%x", sha256.Sum256([]byte(src))) != key {
-		return nil, fmt.Errorf("the source of $source:%s has a different hash", key)
-	}
-	return []byte(src), nil
-}
-
 func respond(req request) response {
 	switch req.Command {
 	case "", "type", "eval", "test":
@@ -143,7 +123,7 @@ func respond(req request) response {
 		return response{Error: "bad request: unknown command " + strconv.Quote(req.Command)}
 	}
 	env := eval.NewEnvironment()
-	env.UseFetcher(sources(req.Sources))
+	env.UseFetcher(yards.Validate(yards.ByMap(req.Sources)))
 	if req.Timeout > 0 {
 		env.UseContext(deadline{context.Background(), time.Now().Add(time.Duration(req.Timeout) * time.Millisecond)})
 	}

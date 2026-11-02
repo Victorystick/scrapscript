@@ -4,12 +4,13 @@ import { readFileSync } from 'node:fs';
 import {
   ScrapWasm,
   printTests,
+  wasmURL,
   type Command,
   type WasmResult,
-} from './scrap-wasm.ts';
+} from '@scrapscript/web';
 import { highlightExamples } from './vite.config.ts';
 
-// The scrap CLI, built from this repository by npm test, which runs each
+// The scrap CLI, built from this repository by pnpm test, which runs each
 // example in tutorial.html as a reader would.
 const scrap = './build/scrap';
 
@@ -79,10 +80,8 @@ describe('tutorial', () => {
     expect(all.length).toBeGreaterThan(40);
   });
 
-  // npm test builds scrap-wasm.wasm before running the tests.
-  const wasm = new ScrapWasm(
-    new WebAssembly.Module(readFileSync('./scrap-wasm.wasm'))
-  );
+  // pnpm test builds scrap-wasm.wasm before running the tests.
+  const wasm = new ScrapWasm(new WebAssembly.Module(readFileSync(wasmURL)));
 
   test('highlights examples, without changing their text', () => {
     const source = readFileSync('./tutorial.html', 'utf8');

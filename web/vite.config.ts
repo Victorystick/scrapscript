@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import { readFileSync } from "node:fs";
-import { ScrapWasm } from "./scrap-wasm.ts";
+import { ScrapWasm, wasmURL } from "@scrapscript/web";
 
 // Gives the scrap of each example in a page the ranges to highlight it
 // with, as data-highlights, so that repl.ts can highlight it without
@@ -9,7 +9,7 @@ export function highlightExamples(): Plugin {
   let wasm: ScrapWasm;
   const highlights = (source: string) => {
     wasm ??= new ScrapWasm(
-      new WebAssembly.Module(readFileSync("./scrap-wasm.wasm"))
+      new WebAssembly.Module(readFileSync(wasmURL))
     );
     const result = wasm.run({ source, sources: {}, command: "highlight" });
     if (!("highlights" in result)) throw new Error("highlighting failed");

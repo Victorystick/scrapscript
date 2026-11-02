@@ -1,6 +1,10 @@
 // Runs scrap-wasm.wasm, the scrap tool compiled to WebAssembly from
-// cmd/scrap-wasm (see `npm run build:wasm`), in the browser and tests alike.
+// cmd/scrap-wasm (see `pnpm build`), in the browser and tests alike.
 // The yard's Worker in Victorystick/cloudflare-scrapyard runs a copy.
+
+// The URL of scrap-wasm.wasm, next to this file. Bundlers such as Vite
+// copy it into what they build.
+export const wasmURL = new URL('./scrap-wasm.wasm', import.meta.url);
 
 export interface WasmRequest {
   source: string;

@@ -1,0 +1,12 @@
+{
+  "name": "@scrapscript/web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./scrap-wasm.ts"
+  },
+  "scripts": {
+    "build": "GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -trimpath -ldflags=\"-s -w\" -o scrap-wasm.wasm ../cmd/scrap-wasm"
+  }
+}

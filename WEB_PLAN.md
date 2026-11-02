@@ -147,11 +147,11 @@ Useful on their own, so they land first:
 5. [x] **Generic aliases in bindings:** `scrap-gen-go` rejects an alias used
    at more than one type, such as `response text` and `response json`. Name
    each use by its arguments instead: `ResponseText`, `ResponseJson` (#25).
-6. [ ] **`js/` workspace:** move the wasm loader and its WASI shim,
-   `scrap-wasm.ts`, out of `web/` into an npm workspace that `web/` uses.
+6. [x] **`js/` workspace:** move the wasm loader and its WASI shim,
+   `scrap-wasm.ts`, out of `web/` into a pnpm workspace that `web/` uses.
    No change in behaviour, besides the REPL passing a timeout. Also:
-   scrap-wasm's `sources` can be `yards.Validate(yards.ByMap(…))`.
-6b. [ ] **Call depth:** a deadline doesn't stop a non-tail recursion, such as
+   scrap-wasm's `sources` can be `yards.Validate(yards.ByMap(…))` (#29).
+6b. [x] **Call depth:** a deadline doesn't stop a non-tail recursion, such as
    `f = n -> 1 + f n`, from overflowing the stack: natively Go's, fatally
    after about 6 s; in WebAssembly the engine's, within milliseconds. Limit
    the depth of non-tail calls, so that it fails as an error: 100,000

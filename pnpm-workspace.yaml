@@ -1,0 +1,8 @@
+# js/ is the runtime, published to npm; web/ is the site, which uses it.
+packages:
+  - js
+  - web
+
+# esbuild's install script checks its binary, as npm ran it.
+onlyBuiltDependencies:
+  - esbuild

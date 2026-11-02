@@ -4,10 +4,13 @@
 // `scrap test` for an example with data-run="test". Without this script,
 // the examples show what they print as they are.
 import type { RunRequest, RunResponse } from './repl-worker.ts';
-import { printTests, type Command, type WasmResult } from './scrap-wasm.ts';
+import { printTests, type Command, type WasmResult } from '@scrapscript/web';
 
-// How long a scrap may run before the page stops it.
+// How long a scrap may run before the page stops the worker, in case it is
+// still fetching scraps or stuck. The worker stops evaluating it a little
+// earlier, so that its error usually comes first and the worker lives on.
 const timeout = 5000;
+const evalTimeout = timeout - 100;
 
 // A Runner runs scraps in a Web Worker, which it replaces when a scrap
 // runs too long.
@@ -34,7 +37,12 @@ class Runner {
         clearTimeout(timer);
         resolve(result);
       });
-      worker.postMessage({ id, source, command } satisfies RunRequest);
+      worker.postMessage({
+        id,
+        source,
+        command,
+        timeout: evalTimeout,
+      } satisfies RunRequest);
     });
   }
 

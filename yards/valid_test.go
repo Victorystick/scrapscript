@@ -2,7 +2,9 @@ package yards
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -23,7 +25,7 @@ func TestValidate(t *testing.T) {
 	// Corrupt the data
 	file.Data = []byte{1, 2, 3, 4}
 	bs, err = f.FetchSha256(key)
-	if err != ErrWrongHash {
+	if !errors.Is(err, ErrWrongHash) || !strings.Contains(err.Error(), key) {
 		t.Errorf("expected %s failure, got %s", ErrWrongHash, err)
 	}
 	if bs != nil {

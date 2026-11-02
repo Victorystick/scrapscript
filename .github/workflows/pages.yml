@@ -30,20 +30,24 @@ jobs:
         # (mostly the standard library) is what's worth keeping.
         cache-dependency-path: go.mod
 
+    # The version is package.json's packageManager.
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v4
+
     - name: Set up Node
       uses: actions/setup-node@v7
       with:
         node-version: 22
-        cache: npm
-        cache-dependency-path: web/package-lock.json
+        cache: pnpm
+        cache-dependency-path: pnpm-lock.yaml
 
-    - run: npm ci
+    - run: pnpm install --frozen-lockfile
 
     - name: Test
-      run: npm test
+      run: pnpm test
 
     - name: Build
-      run: npm run build
+      run: pnpm build
 
     - uses: actions/upload-pages-artifact@v5
       if: github.event_name == 'push'
