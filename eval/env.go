@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
+	"strings"
 
 	"github.com/Victorystick/scrapscript/ast"
 	"github.com/Victorystick/scrapscript/label"
@@ -386,19 +388,68 @@ func (e *Environment) Label(name string) label.ID {
 	return e.reg.Labels().Of(name)
 }
 
-// Push stores a scrap with the pusher and returns its hash. It must refer to
-// others only by hash, and type check.
+// Push publishes a scrap with the pusher and returns its hash. It must type
+// check. The drafts it refers to by path are published first, bottom-up, each
+// path replaced by $source:… of its target's published form (SPEC.md 11.3).
+// The published scraps it refers to are already in a yard, and not pushed.
 func (e *Environment) Push(s *Scrap) (string, error) {
 	if e.pusher == nil {
 		return "", fmt.Errorf("cannot push without a pusher")
 	}
-	for _, n := range s.expr.Imports() {
-		if _, ok := s.expr.Path(n); ok {
-			return "", s.expr.Error(n, "cannot push a draft that refers to a path")
-		}
-	}
 	if _, err := e.infer(s); err != nil {
 		return "", err
 	}
-	return e.pusher.PushScrap(s.expr.Source.Bytes())
+	return e.publish(s, make(map[*Scrap]string))
+}
+
+// publish pushes the published form of the loaded scrap s, after those of the
+// drafts it refers to, and returns its hash. Drafts in pushed are already
+// pushed, with the given hashes.
+func (e *Environment) publish(s *Scrap, pushed map[*Scrap]string) (string, error) {
+	if s.ref != "" {
+		_, digest, _ := strings.Cut(s.ref, ":")
+		return digest, nil
+	}
+	if key, ok := pushed[s]; ok {
+		return key, nil
+	}
+
+	// Replace each path token with the hash of its target, in source order.
+	type edit struct {
+		span token.Span
+		ref  string
+	}
+	var edits []edit
+	for _, n := range s.expr.Imports() {
+		if _, ok := s.expr.Path(n); !ok {
+			continue
+		}
+		key, err := e.publish(s.deps[n], pushed)
+		if err != nil {
+			return "", err
+		}
+		edits = append(edits, edit{s.expr.TokenSpan(s.expr.Main(n)), "$source:" + key})
+	}
+	slices.SortFunc(edits, func(a, b edit) int { return a.span.Start - b.span.Start })
+
+	src := s.expr.Source.Bytes()
+	data := make([]byte, 0, len(src))
+	end := 0
+	for _, ed := range edits {
+		data = append(data, src[end:ed.span.Start]...)
+		data = append(data, ed.ref...)
+		end = ed.span.End
+	}
+	data = append(data, src[end:]...)
+
+	want := fmt.Sprintf("%x", sha256.Sum256(data))
+	key, err := e.pusher.PushScrap(data)
+	if err != nil {
+		return "", err
+	}
+	if key != want {
+		return "", fmt.Errorf("pushed a scrap with hash %s, but the yard stored it as %s", want, key)
+	}
+	pushed[s] = key
+	return key, nil
 }
