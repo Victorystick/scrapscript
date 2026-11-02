@@ -884,6 +884,38 @@ overflowing: in WebAssembly the engine's overflows within milliseconds. So
 non-tail calls nest at most 100,000 deep natively and 1,000 in WebAssembly,
 and a deeper recursion fails with an error.
 
+**The web platform** (in progress; WEB_PLAN.md). Apps in the Elm
+architecture, which `cmd/scrap-web` runs in a page. Its interface,
+`cmd/scrap-web/web.scrap`, is `app model msg`, with two parameters that
+the app chooses: its model, and its messages.
+
+```scrap
+; app : type -> type -> type = model => msg =>
+    { init : json -> step model msg
+    , update : msg -> model -> step model msg
+    , view : model -> node msg
+    , subscriptions : model -> list (sub msg)
+    }
+; step : type -> type -> type = model => msg => { model : model, cmds : list (cmd msg) }
+```
+
+- **Steps.** `init` starts the app with flags, a `json` value from the page
+  that mounts it, and `update` handles one message. Each returns the next
+  model and the commands to carry out, in order: HTTP requests, the time,
+  random numbers.
+- **Messages** come from the app alone. A view's handlers are messages, or
+  functions to them from what an event carries, such as an input's text;
+  a command or subscription carries a function from its result to a
+  message. The host calls these and passes the message to `update`, one
+  at a time.
+- **Rendering.** The view and the subscriptions depend on the model alone,
+  so the host asks for them once for any number of updates, such as once
+  per animation frame, and carries out the difference from the last ones:
+  patches to the page, and timers started and stopped.
+- **Failure.** A step that fails, by an error or by running past its
+  deadline, changes nothing: the model stays as it was and its commands
+  are not carried out.
+
 Open: whether host resources such as connections can be values, and how they
 print; open rows in interfaces, rejected at first; whether a platform provides
 a pure reference semantics (like `platforms/terminal/simulate.scrap`'s

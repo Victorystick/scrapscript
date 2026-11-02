@@ -1,0 +1,65 @@
+-- The web platform's contract: an app in the Elm architecture.
+--
+-- An app keeps its own model, of type model, which the host never inspects,
+-- and reacts to messages of its own type msg. `init` starts it with flags
+-- from the page, and `update` handles each message; both return the next
+-- model and the commands to carry out. `view` and `subscriptions` say what
+-- the page shows and what the app listens to, for the model at hand.
+
+app
+
+; app : type -> type -> type = model => msg =>
+    { init : json -> step model msg
+    , update : msg -> model -> step model msg
+    , view : model -> node msg
+    , subscriptions : model -> list (sub msg)
+    }
+; step : type -> type -> type = model => msg => { model : model, cmds : list (cmd msg) }
+; node : type -> type = msg =>
+    [ #text text
+    , #el (element msg)
+    , #keyed (keyed msg)
+    ]
+; element : type -> type = msg => { tag : text, attrs : list (attr msg), children : list (node msg) }
+; keyed : type -> type = msg => { tag : text, attrs : list (attr msg), children : list (child msg) }
+; child : type -> type = msg => { key : text, node : node msg }
+; attr : type -> type = msg =>
+    [ #attr { name : text, value : text }
+    , #prop { name : text, value : json }
+    , #style { name : text, value : text }
+    , #on-click msg
+    , #on-input (text -> msg)
+    , #on-check (bool -> msg)
+    , #on-submit msg
+    , #on { event : text, msg : msg }
+    ]
+; cmd : type -> type = msg =>
+    [ #http (request msg)
+    , #now (int -> msg)
+    , #random-int { min : int, max : int, msg : int -> msg }
+    , #random-float (float -> msg)
+    ]
+; request : type -> type = msg =>
+    { method : text, url : text, headers : list header, body : text, expect : expect msg }
+; expect : type -> type = msg =>
+    [ #text (result (response text) -> msg)
+    , #bytes (result (response bytes) -> msg)
+    , #json (result (response json) -> msg)
+    ]
+; result : type -> type = a => [#ok a, #error text]
+; response : type -> type = body => { status : int, headers : list header, body : body }
+; header : type = { name : text, value : text }
+; sub : type -> type = msg =>
+    [ #every { ms : int, msg : int -> msg }
+    , #animation-frame (float -> msg)
+    ]
+; bool : type = [#false, #true]
+; json : type =
+    [ #null
+    , #bool bool
+    , #number float
+    , #text text
+    , #list (list json)
+    , #object (list member)
+    ]
+; member : type = { key : text, value : json }
