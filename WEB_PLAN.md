@@ -111,7 +111,7 @@ The web platform:
 7. [x] **Interface and session:** `web.scrap`, its generated bindings, and
    a Go session that runs `init` and `update` and collects commands and
    subscriptions. Tested in Go. Sketch the platform in SPEC.md section 13
-   (#PR).
+   (#30).
 8. [ ] **Diff:** views to binary patches, unkeyed, with the opcode format
    documented and the handler table. Tested against a mock DOM in Go:
    applying `diff(a, b)` to the DOM of `a` gives the DOM of `b`.
