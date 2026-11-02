@@ -36,67 +36,15 @@ as a series of small PRs; tick them off here as they land.
 
 ## Interface
 
-A draft. The counter after it checks and runs against it.
-
-```scrap
-app
-
-; app : type -> type -> type = model => msg =>
-    { init : json -> step model msg
-    , update : msg -> model -> step model msg
-    , view : model -> node msg
-    , subscriptions : model -> list (sub msg)
-    }
-; step : type -> type -> type = model => msg => { model : model, cmd : list (cmd msg) }
-; node : type -> type = msg =>
-    [ #text text
-    , #el { tag : text, attrs : list (attr msg), children : list (node msg) }
-    , #keyed { tag : text, attrs : list (attr msg), children : list { key : text, node : node msg } }
-    ]
-; attr : type -> type = msg =>
-    [ #attr { name : text, value : text }
-    , #prop { name : text, value : json }
-    , #style { name : text, value : text }
-    , #on-click msg
-    , #on-input (text -> msg)
-    , #on-check (bool -> msg)
-    , #on-submit msg
-    , #on { event : text, msg : msg }
-    ]
-; cmd : type -> type = msg =>
-    [ #http { method : text, url : text, headers : list header, body : text, expect : expect msg }
-    , #now (int -> msg)
-    , #random-int { min : int, max : int, msg : int -> msg }
-    , #random-float (float -> msg)
-    ]
-; expect : type -> type = msg =>
-    [ #text ([#ok (response text), #error text] -> msg)
-    , #bytes ([#ok (response bytes), #error text] -> msg)
-    , #json ([#ok (response json), #error text] -> msg)
-    ]
-; response : type -> type = body => { status : int, headers : list header, body : body }
-; header : type = { name : text, value : text }
-; sub : type -> type = msg =>
-    [ #every { ms : int, msg : int -> msg }
-    , #animation-frame (float -> msg)
-    ]
-; bool : type = [#false, #true]
-; json : type =
-    [ #null
-    , #bool bool
-    , #number float
-    , #text text
-    , #list (list json)
-    , #object (list { key : text, value : json })
-    ]
-```
+In `cmd/scrap-web/web.scrap`, sketched in SPEC.md section 13. The counter
+checks and runs against it.
 
 ```scrap
 app
 ; app : web int msg =
-    { init = _ -> { model = 0, cmd = [] }
-    , update = | #inc -> n -> { model = n + 1, cmd = [] }
-               | #tick _ -> n -> { model = n + 1, cmd = [] }
+    { init = _ -> { model = 0, cmds = [] }
+    , update = | #inc -> n -> { model = n + 1, cmds = [] }
+               | #tick _ -> n -> { model = n + 1, cmds = [] }
     , view = n -> #el { tag = "button", attrs = [#on-click #inc], children = [#text (int/to-text n)] }
     , subscriptions = _ -> [#every { ms = 1000, msg = t -> #tick t }]
     }
@@ -160,9 +108,10 @@ Useful on their own, so they land first:
 
 The web platform:
 
-7. [ ] **Interface and session:** `web.scrap`, its generated bindings, and
+7. [x] **Interface and session:** `web.scrap`, its generated bindings, and
    a Go session that runs `init` and `update` and collects commands and
-   subscriptions. Tested in Go. Sketch the platform in SPEC.md section 13.
+   subscriptions. Tested in Go. Sketch the platform in SPEC.md section 13
+   (#PR).
 8. [ ] **Diff:** views to binary patches, unkeyed, with the opcode format
    documented and the handler table. Tested against a mock DOM in Go:
    applying `diff(a, b)` to the DOM of `a` gives the DOM of `b`.

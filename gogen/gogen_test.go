@@ -19,6 +19,7 @@ func TestGenerated(t *testing.T) {
 	}{
 		{"internal/rich", "rich.scrap", Config{Package: "rich"}},
 		{"../cmd/example/scrap-terminal", "program.scrap", Config{Package: "main", Main: true}},
+		{"../cmd/scrap-web", "web.scrap", Config{Package: "main"}},
 	}
 	for _, c := range cases {
 		source, err := os.ReadFile(filepath.Join(c.dir, c.iface))
