@@ -119,7 +119,7 @@ The web platform:
 9. [x] **Keyed children** in the diff (#33).
 10. [x] **Runtime:** in the `js/` workspace, the patch interpreter, event
     delegation, and `mount(element, { source, flags, fetchScrap })`.
-    Tested in Chromium (#PR).
+    Tested in Chromium (#34).
 11. [ ] **HTTP**, and `json` both ways.
 12. [ ] **Time, animation frames and random**, with subscriptions diffed.
 13. [ ] **Playground** page in `web/`: an editor and the running app,
