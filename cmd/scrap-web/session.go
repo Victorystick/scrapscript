@@ -20,6 +20,7 @@ type Session struct {
 	app   AppRef
 	model Model
 	cmds  []CmdRef
+	r     renderer
 }
 
 // Start checks that script is an app, evaluates it, and runs its init with
@@ -68,6 +69,59 @@ func (s *Session) Commands() []CmdRef {
 // View returns the app's view of its model.
 func (s *Session) View() (NodeRef, error) {
 	return s.app.View(s.model)
+}
+
+// Render returns the patch that takes the page from the last view that it
+// rendered to the app's view now, valid until the next Render; the first
+// fills the mount element. If the view fails, the page stays as it was.
+func (s *Session) Render() ([]byte, error) {
+	view, err := s.View()
+	if err != nil {
+		return nil, err
+	}
+	return s.r.render(view), nil
+}
+
+// An Event is what the page reports when an event that a node listens to
+// fires: the node's id and the event's name, and the value and checked
+// state of the element it fired on, which inputs and checkboxes have.
+type Event struct {
+	Node    uint32
+	Name    string
+	Value   string
+	Checked bool
+}
+
+// Event runs update with the message of the handler of e, of the view as
+// last rendered. An event without a handler is ignored: it can come just
+// after a render removed it.
+func (s *Session) Event(e Event) error {
+	a, ok := s.r.handler(e.Node, e.Name)
+	if !ok {
+		return nil
+	}
+	var msg Msg
+	var err error
+	switch a.Tag() {
+	case AttrOnClick:
+		msg = a.OnClick()
+	case AttrOnSubmit:
+		msg = a.OnSubmit()
+	case AttrOn:
+		msg = a.On().Msg()
+	case AttrOnInput:
+		msg, err = a.OnInput()(e.Value)
+	case AttrOnCheck:
+		b := NewBoolFalse()
+		if e.Checked {
+			b = NewBoolTrue()
+		}
+		msg, err = a.OnCheck()(b.Ref(s.app.Bindings()))
+	}
+	if err != nil {
+		return err
+	}
+	return s.Update(msg)
 }
 
 // Subscriptions returns what the app listens to, for its model.

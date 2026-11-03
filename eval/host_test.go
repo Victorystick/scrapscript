@@ -247,3 +247,34 @@ func TestReadAsOtherKind(t *testing.T) {
 	}()
 	eval.Text("x").Int()
 }
+
+func TestSame(t *testing.T) {
+	e := environment()
+	v, err := e.Eval(read(t, e, `{ a = shared, b = shared, c = [1], d = 2, e = "x" }
+; shared = { x = [1, 2] }`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := e.Record(v)
+	field := func(l string) eval.Value { return r.Get(e.Label(l)) }
+	for _, c := range []struct {
+		a, b string
+		same bool
+	}{
+		{"a", "b", true},  // one record, passed on twice
+		{"a", "c", false}, // different kinds
+		{"d", "d", true},
+		{"e", "e", true},
+	} {
+		if got := eval.Same(field(c.a), field(c.b)); got != c.same {
+			t.Errorf("Same(%s, %s) = %v, want %v", c.a, c.b, got, c.same)
+		}
+	}
+	// Equal scalars are the same, while equal lists made apart are not.
+	if !eval.Same(eval.Int(2), field("d")) || eval.Same(eval.NewList(eval.Int(1)), field("c")) {
+		t.Errorf("unexpected sameness of ints or lists")
+	}
+	if !eval.Same(eval.Value{}, eval.Value{}) {
+		t.Errorf("the zero Value isn't the same as itself")
+	}
+}
