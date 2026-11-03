@@ -41,9 +41,7 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"sort"
 	"strconv"
 	"time"
 	"unicode/utf16"
@@ -51,6 +49,7 @@ import (
 
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/highlight"
+	"github.com/Victorystick/scrapscript/host"
 	"github.com/Victorystick/scrapscript/token"
 	"github.com/Victorystick/scrapscript/yards"
 )
@@ -95,25 +94,6 @@ func handle(input []byte) []byte {
 	return out
 }
 
-// deadline is a context that is done at a time, which it tells by the
-// clock alone. context.WithDeadline would start a timer, which the Go
-// runtime waits on through WASI's poll_oneoff, which the hosts of this
-// module don't implement; the evaluator compares the deadline with the
-// clock itself.
-type deadline struct {
-	context.Context
-	at time.Time
-}
-
-func (d deadline) Deadline() (time.Time, bool) { return d.at, true }
-
-func (d deadline) Err() error {
-	if time.Now().Before(d.at) {
-		return nil
-	}
-	return context.DeadlineExceeded
-}
-
 func respond(req request) response {
 	switch req.Command {
 	case "", "type", "eval", "test":
@@ -125,13 +105,13 @@ func respond(req request) response {
 	env := eval.NewEnvironment()
 	env.UseFetcher(yards.Validate(yards.ByMap(req.Sources)))
 	if req.Timeout > 0 {
-		env.UseContext(deadline{context.Background(), time.Now().Add(time.Duration(req.Timeout) * time.Millisecond)})
+		env.UseContext(host.Deadline(time.Now().Add(time.Duration(req.Timeout) * time.Millisecond)))
 	}
 	s, err := env.Read([]byte(req.Source))
 	if err != nil {
 		return response{Error: token.Render(err, nil)}
 	}
-	if missing := missing(env, s, req.Sources); len(missing) > 0 {
+	if missing := host.Missing(env, s, req.Sources); len(missing) > 0 {
 		return response{Missing: missing}
 	}
 	t, err := env.Infer(s)
@@ -180,36 +160,4 @@ func highlights(src string) map[string][]int {
 		res[name] = append(res[name], start, unitsAt(int(s.Ends[i])))
 	}
 	return res
-}
-
-// missing returns the hashes of the scraps that s refers to, directly or
-// through the scraps in srcs, that aren't in srcs, sorted. References that
-// can't be fetched for other reasons are left for inference to report.
-func missing(env *eval.Environment, s *eval.Scrap, srcs map[string]string) []string {
-	seen := make(map[string]bool)
-	var missing []string
-	var visit func(s *eval.Scrap)
-	visit = func(s *eval.Scrap) {
-		expr := s.Expr()
-		for _, n := range expr.Imports() {
-			if _, ok := expr.Path(n); ok {
-				continue
-			}
-			scheme, digest := expr.Hash(n)
-			if scheme != "source" || seen[digest] {
-				continue
-			}
-			seen[digest] = true
-			if _, ok := srcs[digest]; !ok {
-				missing = append(missing, digest)
-				continue
-			}
-			if dep, err := env.Fetch(scheme, digest); err == nil {
-				visit(dep)
-			}
-		}
-	}
-	visit(s)
-	sort.Strings(missing)
-	return missing
 }
