@@ -133,6 +133,14 @@ var expressions = []struct {
 	{`{ a = xs ++ [1], b = xs ++ [2] } ; xs = [0, 0, 0] +< 9`, `{ a = [ 0, 0, 0, 9, 1 ], b = [ 0, 0, 0, 9, 2 ] }`},
 	{`{ a = bs +< ~01, b = bs +< ~02 } ; bs = ~~AAAA +< ~09`, `{ a = ~~AAAACQE=, b = ~~AAAACQI= }`},
 	{`| ns ++ [2, 3] -> ns | _ -> [] <| [1, 2, 3]`, `[ 1 ]`},
+	{`| b >+ bs -> { b, bs } | ~~ -> { b = ~00, bs = ~~ } <| ~~YWJj`, `{ b = ~61, bs = ~~YmM= }`},
+	{`| bs +< b -> { b, bs } | ~~ -> { b = ~00, bs = ~~ } <| ~~YWJj`, `{ b = ~63, bs = ~~YWI= }`},
+	{`| ~61 >+ bs -> bs | _ -> ~~ <| ~~YWJj`, `~~YmM=`},
+	{`| ~62 >+ bs -> bs | _ -> ~~ <| ~~YWJj`, `~~`},
+	{`| a >+ ~~ -> [a] | ~~ -> [] | a >+ _ +< c -> [a, c] <| ~~YWJj`, `[ ~61, ~63 ]`},
+	{`| a >+ ~~ -> [a] | ~~ -> [] | a >+ _ +< c -> [a, c] <| ~~YQ==`, `[ ~61 ]`},
+	// A bytes' rest shares its bytes, which appending to it copies.
+	{`| b >+ bs -> { a = bs +< ~01, b = bs +< ~02, bs } | ~~ -> { a = ~~, b = ~~, bs = ~~ } <| ~~YWJj`, `{ a = ~~YmMB, b = ~~YmMC, bs = ~~YmM= }`},
 	{`| [1, 2] ++ ns -> ns | _ -> [] <| [1, 2, 3]`, `[ 3 ]`},
 	{`| ns ++ [2, last] -> ns +< last | _ -> [] <| [1, 2, 3]`, `[ 1, 3 ]`},
 	// A catch-all binder excludes the tags that earlier arms cover.

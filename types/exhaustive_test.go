@@ -20,6 +20,11 @@ func TestExhaustive(t *testing.T) {
 		`| [] -> 0 | [a] -> a | [a] ++ _ ++ [b] -> 3`,
 		`| [] -> 0 | [1] ++ _ -> 1 | _ ++ [2] -> 2 | _ -> 3`,
 		`| 0 -> 1 | n -> n`,
+		// Bytes split by length too, with ~~ for none.
+		`| ~~ -> 0 | b >+ _ -> 1`,
+		`| ~~ -> 0 | _ +< b -> 1`,
+		`| a >+ b >+ c >+ d >+ _ -> 4 | a >+ b >+ c >+ ~~ -> 3 | a >+ b >+ ~~ -> 2 | a >+ ~~ -> 1 | ~~ -> 0`,
+		`| ~~ -> 0 | a >+ ~~ -> 1 | a >+ _ +< b -> 2`,
 		// Without a catch-all, the enums are closed.
 		`| #a #x -> 1 | #b -> 2 | #a #y -> 3 | #a #x -> 1`,
 		`| #a (#b x) -> 1 | #a (#c y) -> 2`,
@@ -67,6 +72,14 @@ func TestNotExhaustive(t *testing.T) {
 		// The catch-all in the second column leaves its enum open.
 		{`| #a -> #c -> 1 | #a -> #d -> 2 | #b -> _ -> 3`, `#a, _`},
 		{`| [] -> _ -> 0 | _ -> [] -> 0`, `[ _ ] ++ _, [ _ ] ++ _`},
+		// Bytes split by length, but their bytes need a catch-all.
+		{`f ; f : bytes -> int = | b >+ _ -> 1`, `~~`},
+		{`| ~~ -> 0`, `_ >+ _`},
+		{`| ~~ -> 0 | ~01 >+ _ -> 1`, `_ >+ _`},
+		{`| a >+ b >+ _ +< c -> 3 | ~~ -> 0`, `_ >+ ~~`},
+		{`| a >+ b >+ _ +< c -> 3 | a >+ ~~ -> 1 | ~~ -> 0`, `_ >+ _ >+ ~~`},
+		{`| ~~YQ== -> 1 | a >+ b >+ _ -> 2 | ~~ -> 0`, `_ >+ ~~`},
+		{`| #a ~~ -> 0 | #b -> 1`, `#a (_ >+ _)`},
 		// Inner match functions are checked too.
 		{`| #a -> (| 1 -> 1) | #b -> (x -> x)`, `_`},
 		// Annotations close enums that catch-alls leave open, or keep them open.

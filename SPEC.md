@@ -229,8 +229,24 @@ prest    = ".." [ NAME ]                         # the other fields; first, as i
 pfield   = NAME [ "=" pattern ]                  # `{ x }` is `{ x = x }`, binding x
 ```
 
-Open: text-prefix patterns (`"he" ++ rest`). Either add
-`TEXT "++" NAME` to `pat-atom` or reject. Do not parse it and fail later.
+`>+` and `+<` take bytes apart as they take lists apart, since bytes are a
+sequence of bytes, as for the operators (2.1). A match function settles,
+once its arms are inferred, whether each such pattern matches bytes: it
+does when the value it matches, its element or its rest is known to be
+bytes or a byte, such as from a BYTE or BYTES pattern in it or in another
+arm, from an annotation, or from how an arm's body uses a name it binds.
+Otherwise it matches a list. `~~` is the empty bytes:
+
+```scrap
+| a >+ b >+ rest -> 2 | a >+ ~~ -> 1 | ~~ -> 0
+```
+
+The elements of a `[…]` pattern are a list's, as `[…]` builds a list, so
+`[a, b] ++ rest` doesn't match bytes.
+
+Open: text-prefix and bytes-prefix patterns (`"he" ++ rest`,
+`~~aGk= ++ rest`). Either add `TEXT "++" NAME` to `pat-atom` or reject. Do
+not parse it and fail later.
 
 ## 5. Core language
 
@@ -287,11 +303,13 @@ Desugaring:
   there. Each use of the name may have the excluded tags or not, so
   `| #lit n -> n | other -> ext other` passes `other` to an `ext` that doesn't
   handle `#lit`, and `| #none -> d | o -> option-map f o` to one that does. Exhaustiveness is a typing rule: a scrap that type-checks
-  cannot raise a match error. INT, BYTE, TEXT and BYTES patterns always need a
-  catch-all arm. The checker closes enums, then, once the whole scrap is
+  cannot raise a match error. INT, BYTE and TEXT patterns always need a
+  catch-all arm. Bytes split by length as lists do, with `~~` for the empty
+  bytes; any other BYTES pattern, like a BYTE one, needs a catch-all for the
+  bytes it tests. The checker closes enums, then, once the whole scrap is
   inferred, checks every match function against its argument types (Maranget's
-  usefulness, one column per argument of a multi-pattern arm, with list
-  patterns split by length) and names arguments that no arm matches. A host's call into a scrap doesn't check its arguments, so a value
+  usefulness, one column per argument of a multi-pattern arm, with list and
+  bytes patterns split by length) and names arguments that no arm matches. A host's call into a scrap doesn't check its arguments, so a value
   from a host that no arm accepts still stops evaluation with an error.
 - Records and variants share one row mechanism (7.3).
 - Int and Float are separate types with no overloading. Type classes are
@@ -964,7 +982,8 @@ elsewhere, and leaves some of it open.
 - TEXT: the guide allows raw newlines and has interpolation, `"a` x `b"`.
 - Text and bytes prefix patterns: the guide matches `"hi " ++ name`; this
   grammar lists them as open (section 4). List patterns follow the guide
-  (`head >+ tail`, `[x, y] ++ tail`).
+  (`head >+ tail`, `[x, y] ++ tail`), and `>+` and `+<` take bytes apart
+  too.
 - The `,` where-operator, binding tighter than `;` (in the guide's source, not
   shown on the page).
 - Flat scraps (a compact binary encoding), scrap maps, yards, passes and books:

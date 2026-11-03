@@ -160,6 +160,19 @@ func TestInfer(t *testing.T) {
 		{`| ns ++ [a, b] -> ns | _ -> []`, `list a -> list a`},
 
 		{`| n >+ ns -> ns | [] -> [] <| [1, 2, 3]`, `list int`},
+		// Bytes are a sequence of bytes, when the match function knows them
+		// to be, from any of its arms.
+		{`| b >+ bs -> bs | ~~ -> ~~`, `bytes -> bytes`},
+		{`| bs +< b -> b | ~~ -> ~00`, `bytes -> byte`},
+		{`| ~61 >+ bs -> bs | _ -> ~~`, `bytes -> bytes`},
+		{`| a >+ b >+ ~~ -> b | _ -> ~00`, `bytes -> byte`},
+		{`| b >+ bs -> bs ++ ~~YQ== | _ -> ~~`, `bytes -> bytes`},
+		{`| { p = b >+ _ } -> b | { p = ~~ } -> ~00`, `{ p : bytes } -> byte`},
+		{`f ; f : bytes -> int = | b >+ _ -> 1 | _ -> 0`, `bytes -> int`},
+		{`| b >+ _ -> b | _ -> ~00 <| ~~YWJj`, `byte`},
+		// Without anything to tell, they are lists.
+		{`| b >+ _ -> 1 | _ -> 0`, `list a -> int`},
+		{`| (a >+ _) >+ _ -> a | _ -> ~00`, `list bytes -> byte`},
 		// Multi-pattern arms: one pattern per argument.
 		{`| 1 -> b -> 1 | a -> b -> a + b`, `int -> int -> int`},
 		{`| _ -> [] -> 0 | _ -> x >+ _ -> x`, `a -> list int -> int`},

@@ -12,6 +12,7 @@ import (
 // (2007): a match function is exhaustive when a wildcard arm added after its
 // arms would match nothing that they don't. Lists split by length, as Rust
 // does for slice patterns: lengths below some bound, and all lengths from it.
+// Bytes split as a list of bytes, with ~~ for the empty bytes.
 //
 // A matrix of patterns is a window of rows in cells, which holds pattern
 // nodes, with None for a wildcard. Its columns' types are the last ones in
@@ -40,6 +41,8 @@ type ctor struct {
 	// how many of them are first.
 	n, prefix int
 	rest      bool
+	// listCtor: whether the list is bytes.
+	bytes bool
 }
 
 type ctorKind uint8
@@ -134,9 +137,13 @@ func (c *context) missingIn(at, rows, width int) bool {
 	case n.kind == recordKind:
 		return c.split(at, rows, width, ctor{kind: recordCtor, typ: typ})
 
-	case n.kind == listKind:
+	case n.kind == listKind, typ == BytesRef:
 		// Lengths up to the longest fixed list, and beyond it all lengths
 		// at once, long enough for each prefix and suffix.
+		k := ctor{kind: listCtor, typ: n.a}
+		if typ == BytesRef {
+			k = ctor{kind: listCtor, typ: ByteRef, bytes: true}
+		}
 		fixed, prefix, suffix := -1, 0, 0
 		for i := range rows {
 			h := e.cells[at+i*width]
@@ -156,11 +163,13 @@ func (c *context) missingIn(at, rows, width int) bool {
 		}
 		length := max(fixed+1, prefix+suffix)
 		for i := range length {
-			if c.split(at, rows, width, ctor{kind: listCtor, typ: n.a, n: i}) {
+			k.n = i
+			if c.split(at, rows, width, k) {
 				return true
 			}
 		}
-		return c.split(at, rows, width, ctor{kind: listCtor, typ: n.a, n: length, rest: true, prefix: length - suffix})
+		k.n, k.rest, k.prefix = length, true, length-suffix
+		return c.split(at, rows, width, k)
 
 	case typ == HoleRef:
 		return c.split(at, rows, width, ctor{kind: holeCtor})
@@ -348,7 +357,10 @@ func (c *context) listItems(p ast.Node) (items, prefix int, ok bool) {
 	return items, prefix, true
 }
 
-// flatten pushes the elements of the list pattern p to items.
+// flatten pushes the elements of the list pattern p to items. Of the
+// literals, it takes only ~~, the empty bytes: a longer one has bytes,
+// which never cover all bytes without a wildcard, so it can't help to
+// cover its length.
 func (c *context) flatten(p ast.Node) bool {
 	e := &c.ex
 	src := c.src
@@ -356,6 +368,8 @@ func (c *context) flatten(p ast.Node) bool {
 	case ast.Ident:
 		e.items = append(e.items, rest)
 		return true
+	case ast.Literal:
+		return src.LiteralKind(p) == token.BYTES && src.NodeText(p) == "~~"
 	case ast.List:
 		for _, x := range src.List(p) {
 			e.items = append(e.items, c.cell(x))
@@ -460,6 +474,9 @@ func (c *context) write(b *strings.Builder, ks []ctor, arg bool) []ctor {
 		slices.Sort(fields)
 		b.WriteString("{ " + strings.Join(fields, ", ") + " }")
 	case listCtor:
+		if k.bytes {
+			return c.writeBytes(b, ks, k, arg)
+		}
 		if !k.rest {
 			return c.writeList(b, ks, k.n)
 		}
@@ -495,5 +512,38 @@ func (c *context) writeList(b *strings.Builder, ks []ctor, n int) []ctor {
 		ks = c.write(b, ks, false)
 	}
 	b.WriteString(" ]")
+	return ks
+}
+
+// writeBytes writes the bytes k as its first bytes prepended to the rest,
+// with its last bytes appended, or to ~~ if it has no rest.
+func (c *context) writeBytes(b *strings.Builder, ks []ctor, k ctor, arg bool) []ctor {
+	if k.n == 0 && !k.rest {
+		b.WriteString("~~")
+		return ks
+	}
+	if arg {
+		b.WriteString("(")
+	}
+	first := k.n
+	if k.rest {
+		first = k.prefix
+	}
+	for range first {
+		ks = c.write(b, ks, true)
+		b.WriteString(" >+ ")
+	}
+	if !k.rest {
+		b.WriteString("~~")
+	} else {
+		b.WriteString("_")
+		for range k.n - k.prefix {
+			b.WriteString(" +< ")
+			ks = c.write(b, ks, true)
+		}
+	}
+	if arg {
+		b.WriteString(")")
+	}
 	return ks
 }
