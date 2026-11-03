@@ -19,7 +19,7 @@ var opNames = [...]string{
 	opSetAttr: "SET_ATTR", opRemoveAttr: "REMOVE_ATTR", opSetProp: "SET_PROP",
 	opRemoveProp: "REMOVE_PROP", opSetStyle: "SET_STYLE", opRemoveStyle: "REMOVE_STYLE",
 	opListen: "LISTEN", opUnlisten: "UNLISTEN", opAppend: "APPEND", opReplace: "REPLACE",
-	opRemove: "REMOVE",
+	opRemove: "REMOVE", opInsert: "INSERT",
 }
 
 // The operands of each op: i for an id, s for a string.
@@ -28,7 +28,7 @@ var opArgs = [...]string{
 	opSetAttr: "iss", opRemoveAttr: "is", opSetProp: "iss",
 	opRemoveProp: "is", opSetStyle: "iss", opRemoveStyle: "is",
 	opListen: "is", opUnlisten: "is", opAppend: "ii", opReplace: "ii",
-	opRemove: "i",
+	opRemove: "i", opInsert: "iii",
 }
 
 // An op is a decoded op, with its strings looked up.
@@ -216,6 +216,23 @@ func (d *dom) apply(ops []op) {
 			p := d.node(uint32(n.parent))
 			p.children = slices.DeleteFunc(p.children, func(c uint32) bool { return c == ids[0] })
 			n.parent = -1
+		case opInsert:
+			p, c := d.el(ids[0]), d.node(ids[1])
+			switch c.parent {
+			case int64(ids[0]):
+				p.children = slices.DeleteFunc(p.children, func(c uint32) bool { return c == ids[1] })
+			case -1:
+			default:
+				d.t.Fatalf("%v: the child has another parent", o)
+			}
+			at := len(p.children)
+			if ids[2] != 0 {
+				if at = slices.Index(p.children, ids[2]); at < 0 || ids[2] == ids[1] {
+					d.t.Fatalf("%v: before isn't another child of the parent", o)
+				}
+			}
+			p.children = slices.Insert(p.children, at, ids[1])
+			c.parent = int64(ids[0])
 		}
 	}
 }
@@ -325,6 +342,9 @@ func (d *dom) render(r *renderer, view NodeRef) []op {
 	if !slices.Equal(ids, r.ids) {
 		d.t.Fatalf("the page's ids %v aren't the renderer's %v", ids, r.ids)
 	}
+	if len(r.stack) != 0 {
+		d.t.Fatalf("%d entries left on the stack", len(r.stack))
+	}
 	if len(r.ids)+len(r.free)+1 != len(r.attrs) {
 		d.t.Fatalf("%d ids in use and %d free of %d", len(r.ids), len(r.free), len(r.attrs)-1)
 	}
@@ -394,15 +414,38 @@ func (g *gen) node(depth int) eval.Value {
 	if depth == 0 || g.rnd.IntN(3) == 0 {
 		v = eval.NewVariant(l.text, eval.Text(pick(g, []string{"a", "b", ""})))
 	} else if tag := eval.Text(pick(g, []string{"div", "p"})); g.rnd.IntN(4) == 0 {
-		kids := g.list(&g.keyedKids, func() eval.Value {
-			return l.childShape.New(eval.Text(pick(g, []string{"k", "j"})), g.node(depth-1))
-		})
+		kid := func() eval.Value {
+			return l.childShape.New(eval.Text(pick(g, []string{"a", "b", "c", "d", "e", "a"})), g.node(depth-1))
+		}
+		var kids eval.Value
+		if len(g.keyedKids) > 0 && g.rnd.IntN(2) == 0 {
+			kids = g.shuffle(pick(g, g.keyedKids), kid)
+		} else {
+			kids = g.list(&g.keyedKids, kid)
+		}
 		v = eval.NewVariant(l.keyed, l.keyedShape.New(g.attrList(), kids, tag))
 	} else {
 		kids := g.list(&g.children, func() eval.Value { return g.node(depth - 1) })
 		v = eval.NewVariant(l.el, l.elementShape.New(g.attrList(), kids, tag))
 	}
 	g.nodes = append(g.nodes, v)
+	return v
+}
+
+// shuffle returns a list with the elements of list, the same values, in
+// another order, with some dropped and some new from elem.
+func (g *gen) shuffle(list eval.Value, elem func() eval.Value) eval.Value {
+	xs := slices.Clone(list.List().Elements())
+	g.rnd.Shuffle(len(xs), func(i, j int) { xs[i], xs[j] = xs[j], xs[i] })
+	if len(xs) > 0 && g.rnd.IntN(2) == 0 {
+		k := g.rnd.IntN(len(xs))
+		xs = slices.Delete(xs, k, k+1)
+	}
+	for range g.rnd.IntN(3) {
+		xs = slices.Insert(xs, g.rnd.IntN(len(xs)+1), elem())
+	}
+	v := eval.NewList(xs...)
+	g.keyedKids = append(g.keyedKids, v)
 	return v
 }
 
@@ -496,5 +539,152 @@ func TestJSON(t *testing.T) {
 	})
 	if got := string(appendJSON(nil, j.Ref(l))); got != `{"a":[null,false,-0.5,1e+21],"b":{}}` {
 		t.Errorf("got %s", got)
+	}
+}
+
+// A keyed list whose children each view shuffles, drops and adds to.
+func TestRenderKeyedRandom(t *testing.T) {
+	l := newBindings(eval.NewEnvironment())
+	for seed := range uint64(300) {
+		g := newGen(seed, l)
+		d := newDOM(t)
+		var r renderer
+		kid := func() eval.Value {
+			return l.childShape.New(eval.Text(pick(g, []string{"a", "b", "c", "d", "e", "f", "g", "a"})), g.node(2))
+		}
+		kids := g.list(&g.keyedKids, kid)
+		for range 20 {
+			kids = g.shuffle(kids, kid)
+			// Sometimes a key gets another node.
+			if xs := kids.List().Elements(); len(xs) > 0 && g.rnd.IntN(2) == 0 {
+				xs = slices.Clone(xs)
+				k := g.rnd.IntN(len(xs))
+				xs[k] = l.childShape.New(l.childShape.Field(xs[k], 0), g.node(2))
+				kids = eval.NewList(xs...)
+			}
+			d.render(&r, NodeRef{ref{l, eval.NewVariant(l.keyed, l.keyedShape.New(eval.NewList(), kids, eval.Text("ul")))}})
+		}
+	}
+}
+
+// Reordering children with distinct keys moves all but a longest run of
+// them that keeps its order, and nothing else.
+func TestRenderKeyedMoves(t *testing.T) {
+	l := newBindings(eval.NewEnvironment())
+	rnd := rand.New(rand.NewPCG(1, 2))
+	var kids []eval.Value
+	for _, k := range strings.Split("abcdefgh", "") {
+		kids = append(kids, l.childShape.New(eval.Text(k), NewNodeText(k).toValue(l)))
+	}
+	ul := func(kids []eval.Value) NodeRef {
+		return NodeRef{ref{l, eval.NewVariant(l.keyed, l.keyedShape.New(eval.NewList(), eval.NewList(kids...), eval.Text("ul")))}}
+	}
+	d := newDOM(t)
+	var r renderer
+	d.render(&r, ul(kids))
+	order := []int{0, 1, 2, 3, 4, 5, 6, 7} // the old place of each child
+	for range 200 {
+		rnd.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
+		perm := make([]eval.Value, len(order))
+		for i, o := range order {
+			perm[i] = kids[o]
+		}
+		// The longest increasing run of old places, against the last view.
+		last := r.ids
+		var places []int
+		for _, o := range order {
+			places = append(places, slices.Index(last[1:], d.idOf(kids[o], l, r))) // ignores the ul
+		}
+		ops := d.render(&r, ul(perm))
+		for _, o := range ops {
+			if o.code != opInsert {
+				t.Fatalf("got %v, want only moves", ops)
+			}
+		}
+		if want := len(places) - longestRun(places); len(ops) != want {
+			t.Fatalf("moving to %v: got %d moves, want %d: %v", places, len(ops), want, ops)
+		}
+	}
+}
+
+func (k Keyed) node() Node { return NewNodeKeyed(k) }
+
+// idOf returns the DOM id of the text node of a keyed child in the page.
+func (d *dom) idOf(kid eval.Value, l *Bindings, r renderer) uint32 {
+	text := l.childShape.Field(kid, 1).Variant().Payload().Text()
+	for _, id := range r.ids[1:] {
+		if d.nodes[id].text == text {
+			return id
+		}
+	}
+	d.t.Fatalf("no node %q", text)
+	return 0
+}
+
+// longestRun returns the length of the longest increasing subsequence.
+func longestRun(xs []int) int {
+	best := make([]int, len(xs))
+	run := 0
+	for i := range xs {
+		best[i] = 1
+		for j := range i {
+			if xs[j] < xs[i] {
+				best[i] = max(best[i], best[j]+1)
+			}
+		}
+		run = max(run, best[i])
+	}
+	return run
+}
+
+func TestRenderKeyed(t *testing.T) {
+	l := newBindings(eval.NewEnvironment())
+	ul := func(keyed bool, kids ...string) Node {
+		var cs []Child
+		var ns []Node
+		for _, k := range kids {
+			key, text, _ := strings.Cut(k, "=")
+			if text == "" {
+				text = key
+			}
+			cs = append(cs, Child{Key: key, Node: NewNodeText(text)})
+			ns = append(ns, NewNodeText(text))
+		}
+		if keyed {
+			return NewNodeKeyed(Keyed{Tag: "ul", Children: cs})
+		}
+		return NewNodeEl(Element{Tag: "ul", Children: ns})
+	}
+	for _, c := range []struct {
+		name     string
+		from, to Node
+		ops      string
+	}{
+		{"move to the front", ul(true, "a", "b", "c"), ul(true, "c", "a", "b"), "INSERT 1 4 2"},
+		{"move to the end", ul(true, "a", "b", "c"), ul(true, "b", "c", "a"), "INSERT 1 2 0"},
+		{"swap", ul(true, "a", "b", "c", "d"), ul(true, "a", "c", "b", "d"), "INSERT 1 4 3"},
+		{"remove", ul(true, "a", "b", "c", "d"), ul(true, "a", "c", "d"), "REMOVE 3"},
+		{"insert", ul(true, "a", "c"), ul(true, "a", "b", "c"), "CREATE_TEXT 4 b; INSERT 1 4 3"},
+		{"append", ul(true, "a"), ul(true, "a", "b"), "CREATE_TEXT 3 b; INSERT 1 3 0"},
+		{"replace a key", ul(true, "a", "b", "c"), ul(true, "a", "x", "c"), "REMOVE 3; CREATE_TEXT 3 x; INSERT 1 3 4"},
+		{"repeated keys match in order", ul(true, "k=1", "k=2", "j"), ul(true, "j", "k=3", "k=2"),
+			"SET_TEXT 2 3; INSERT 1 4 2"},
+		// The text changes in place, and keeps its node.
+		{"diff a moved child", ul(true, "a", "b=1"), ul(true, "b=2", "a"), "SET_TEXT 3 2; INSERT 1 3 2"},
+		{"replace a moved child", ul(true, "a", "b"), Keyed{Tag: "ul", Children: []Child{
+			{Key: "b", Node: NewNodeEl(Element{Tag: "p"})}, {Key: "a", Node: NewNodeText("a")}}}.node(),
+			"CREATE_ELEMENT 4 p; REPLACE 3 4; INSERT 1 4 2"},
+		{"from unkeyed, by position", ul(false, "a", "b"), ul(true, "b", "a"), "SET_TEXT 2 b; SET_TEXT 3 a"},
+	} {
+		d := newDOM(t)
+		var r renderer
+		d.render(&r, c.from.Ref(l))
+		var got []string
+		for _, o := range d.render(&r, c.to.Ref(l)) {
+			got = append(got, o.String())
+		}
+		if g := strings.Join(got, "; "); g != c.ops {
+			t.Errorf("%s:\ngot  %s\nwant %s", c.name, g, c.ops)
+		}
 	}
 }
