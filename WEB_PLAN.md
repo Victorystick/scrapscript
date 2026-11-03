@@ -115,7 +115,7 @@ The web platform:
    (#30).
 8. [x] **Diff:** views to binary patches, unkeyed, with the opcode format
    documented and the handler table. Tested against a mock DOM in Go:
-   applying `diff(a, b)` to the DOM of `a` gives the DOM of `b` (#PR).
+   applying `diff(a, b)` to the DOM of `a` gives the DOM of `b` (#31).
 9. [ ] **Keyed children** in the diff.
 10. [ ] **Runtime:** in the `js/` workspace, the patch interpreter, event
     delegation, and `mount(element, { source, flags, fetchScrap })`.
