@@ -40,7 +40,7 @@ var clock = `app
 ; deep = n -> 1 + deep n
 ` + web
 
-func start(t *testing.T, env *eval.Environment, source string, flags Json) *Session {
+func start(t testing.TB, env *eval.Environment, source string, flags Json) *Session {
 	t.Helper()
 	env.UseFetcher(Interface.Fetcher())
 	script, err := env.Read([]byte(source))
@@ -89,7 +89,7 @@ func render(t *testing.T, s *Session) string {
 }
 
 // click returns the message of the first #on-click in the view.
-func click(t *testing.T, s *Session) Msg {
+func click(t testing.TB, s *Session) Msg {
 	t.Helper()
 	n, err := s.View()
 	if err != nil {
@@ -226,5 +226,84 @@ func TestNotAnApp(t *testing.T) {
 		if _, err := Start(env, script, NewJsonNull()); err == nil || !strings.Contains(err.Error(), c.error) {
 			t.Errorf("got %v, want an error containing %q", err, c.error)
 		}
+	}
+}
+
+// form has a text input, a checkbox, and a button whose message depends
+// on the model.
+var form = `app
+; app : web model msg =
+    { init = _ -> { model = { text = "", done = #false, n = 0 }, cmds = [] }
+    , update = | #typed t   -> m -> { model = { text = t, done = m.done, n = m.n }, cmds = [] }
+               | #checked b -> m -> { model = { text = m.text, done = b, n = m.n }, cmds = [] }
+               | #add k     -> m -> { model = { text = m.text, done = m.done, n = m.n + k + 1 }, cmds = [] }
+               | #sent      -> m -> { model = { text = "", done = m.done, n = m.n }, cmds = [] }
+    , view = m -> #el { tag = "form", attrs = [#attr { name = "data-done", value = yes m.done }, #on-submit #sent], children =
+        [ #el { tag = "input", attrs = [#prop { name = "value", value = #text m.text }, #on-input (t -> #typed t)], children = [] }
+        , #el { tag = "input", attrs = [#on-check (b -> #checked b)], children = [] }
+        , #el { tag = "button", attrs = [#on-click (#add m.n)], children = [#text (int/to-text m.n)] }
+        , #text m.text
+        ] }
+    , subscriptions = _ -> []
+    }
+; model : type = { text : text, done : bool, n : int }
+; msg : type = [#typed text, #checked bool, #add int, #sent]
+; bool : type = [#false, #true]
+; yes = | #true -> "yes" | #false -> "no"
+` + web
+
+func TestEvents(t *testing.T) {
+	s := start(t, eval.NewEnvironment(), form, NewJsonNull())
+	d := newDOM(t)
+	show := func() string {
+		t.Helper()
+		p, err := s.Render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.apply(decode(t, p))
+		var ids []uint32
+		return d.print(&ids)
+	}
+	event := func(e Event) {
+		t.Helper()
+		if err := s.Event(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page := func(done, value, n, text string) string {
+		return `<form a:data-done=` + done + ` on:submit><input on:input p:value="` + value + `"></input>` +
+			`<input on:change></input><button on:click>"` + n + `"</button>"` + text + `"</form>`
+	}
+	if got, want := show(), page("no", "", "0", ""); got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+
+	// The form is node 1, its inputs 2 and 3, and the button 4.
+	event(Event{Node: 2, Name: "input", Value: "hi"})
+	event(Event{Node: 3, Name: "change", Checked: true})
+	if got, want := show(), page("yes", "hi", "0", "hi"); got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+
+	// Until the next render, the button's handler is the one rendered.
+	event(Event{Node: 4, Name: "click"})
+	event(Event{Node: 4, Name: "click"})
+	if got, want := show(), page("yes", "hi", "2", "hi"); got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+	event(Event{Node: 4, Name: "click"})
+	event(Event{Node: 3, Name: "change"})
+	event(Event{Node: 1, Name: "submit"})
+	if got, want := show(), page("no", "", "5", ""); got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+
+	// Events without handlers are ignored.
+	event(Event{Node: 4, Name: "input"})
+	event(Event{Node: 5, Name: "click"})
+	event(Event{Node: 99, Name: "click"})
+	if got, want := show(), page("no", "", "5", ""); got != want {
+		t.Errorf("got %s, want %s", got, want)
 	}
 }
