@@ -19,6 +19,7 @@ const app = `{ init = 5
 , tree = #node { left = #leaf, value = 2, right = #node { left = #leaf, value = 3, right = #leaf } }
 , count = { value = 7 }
 , names = { value = ["x", "y"] }
+, forest = [#leaf, #node { left = #leaf, value = 4, right = #leaf }]
 , helper = add -> add 20 22
 }`
 
@@ -108,6 +109,10 @@ func TestRefs(t *testing.T) {
 		t.Errorf("unexpected tree: %+v", node.Load())
 	}
 
+	if f := api.Forest(); f.Len() != 2 || f.At(0).Tag() != TreeLeaf || f.At(1).Node().Value() != 4 {
+		t.Errorf("unexpected forest: %+v", f.Load())
+	}
+
 	// Function fields are methods, which take and return Refs.
 	reply, err := api.Handle(api.Init(), "/x")
 	if err != nil {
@@ -134,6 +139,31 @@ func TestRefs(t *testing.T) {
 	rebuilt := api.Tree().Load().Ref(api.Bindings())
 	if got := rebuilt.Node().Right().Node().Value(); got != 3 {
 		t.Errorf("expected the same tree, got %d", got)
+	}
+}
+
+// Reading a list of Refs and its elements allocates nothing.
+func TestListRefAllocs(t *testing.T) {
+	api, err := load(t, app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum int64
+	allocs := testing.AllocsPerRun(100, func() {
+		f := api.Forest()
+		for i := range f.Len() {
+			if n := f.At(i); n.Tag() == TreeNode {
+				sum += n.Node().Value()
+			}
+		}
+		for _, n := range f.All() {
+			if n.Tag() == TreeNode {
+				sum += n.Node().Value()
+			}
+		}
+	})
+	if allocs != 0 {
+		t.Errorf("reading a ListRef allocated %v times", allocs)
 	}
 }
 
@@ -199,6 +229,9 @@ const bigTree = `{ init = 0
 , flag = ~00
 , unit = ()
 , tree = make 16
+, forest = []
+, count = { value = 0 }
+, names = { value = [] }
 , helper = add -> 0
 }
 ; make : int -> t = | 0 -> #leaf | n -> #node { left = make (n - 1), value = n, right = make (n - 1) }

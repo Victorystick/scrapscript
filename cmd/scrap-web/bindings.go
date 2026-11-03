@@ -159,14 +159,14 @@ func (x AppRef) Init(a0 JsonRef) (StepRef, error) {
 	return StepRef{ref{l, v}}, nil
 }
 
-func (x AppRef) Subscriptions(a0 Model) (host.ListRef[SubRef], error) {
+func (x AppRef) Subscriptions(a0 Model) (ListRef[SubRef], error) {
 	l := x.b
 	v, err := eval.Call(l.appShape.Field(x.v, 1), a0.v)
 	if err != nil {
-		var zero host.ListRef[SubRef]
+		var zero ListRef[SubRef]
 		return zero, err
 	}
-	return host.NewListRef(v, func(v eval.Value) SubRef { return SubRef{ref{l, v}} }), nil
+	return host.NewListRef(v, l, func(l *Bindings, v eval.Value) SubRef { return SubRef{ref{l, v}} }), nil
 }
 
 func (x AppRef) Update(a0 Msg, a1 Model) (StepRef, error) {
@@ -347,13 +347,13 @@ func (x JsonRef) Bool() BoolRef {
 }
 
 // List returns the payload of #list, and panics on another tag.
-func (x JsonRef) List() host.ListRef[JsonRef] {
+func (x JsonRef) List() ListRef[JsonRef] {
 	l := x.b
 	t := x.v.Variant()
 	if t.Tag() != l.list {
 		panic("JsonRef: #list of " + x.Tag().String())
 	}
-	return host.NewListRef(t.Payload(), func(v eval.Value) JsonRef { return JsonRef{ref{l, v}} })
+	return host.NewListRef(t.Payload(), l, func(l *Bindings, v eval.Value) JsonRef { return JsonRef{ref{l, v}} })
 }
 
 // Number returns the payload of #number, and panics on another tag.
@@ -367,13 +367,13 @@ func (x JsonRef) Number() float64 {
 }
 
 // Object returns the payload of #object, and panics on another tag.
-func (x JsonRef) Object() host.ListRef[MemberRef] {
+func (x JsonRef) Object() ListRef[MemberRef] {
 	l := x.b
 	t := x.v.Variant()
 	if t.Tag() != l.object {
 		panic("JsonRef: #object of " + x.Tag().String())
 	}
-	return host.NewListRef(t.Payload(), func(v eval.Value) MemberRef { return MemberRef{ref{l, v}} })
+	return host.NewListRef(t.Payload(), l, func(l *Bindings, v eval.Value) MemberRef { return MemberRef{ref{l, v}} })
 }
 
 // Text returns the payload of #text, and panics on another tag.
@@ -528,9 +528,9 @@ type StepRef struct{ ref }
 // Load converts all of x.
 func (x StepRef) Load() Step { return stepFromValue(x.b, x.v) }
 
-func (x StepRef) Cmds() host.ListRef[CmdRef] {
+func (x StepRef) Cmds() ListRef[CmdRef] {
 	l := x.b
-	return host.NewListRef(l.stepShape.Field(x.v, 0), func(v eval.Value) CmdRef { return CmdRef{ref{l, v}} })
+	return host.NewListRef(l.stepShape.Field(x.v, 0), l, func(l *Bindings, v eval.Value) CmdRef { return CmdRef{ref{l, v}} })
 }
 
 func (x StepRef) Model() Model {
@@ -797,9 +797,9 @@ func (x RequestRef) Expect() ExpectRef {
 	return ExpectRef{ref{l, l.requestShape.Field(x.v, 1)}}
 }
 
-func (x RequestRef) Headers() host.ListRef[HeaderRef] {
+func (x RequestRef) Headers() ListRef[HeaderRef] {
 	l := x.b
-	return host.NewListRef(l.requestShape.Field(x.v, 2), func(v eval.Value) HeaderRef { return HeaderRef{ref{l, v}} })
+	return host.NewListRef(l.requestShape.Field(x.v, 2), l, func(l *Bindings, v eval.Value) HeaderRef { return HeaderRef{ref{l, v}} })
 }
 
 func (x RequestRef) Method() string {
@@ -1177,9 +1177,9 @@ func (x ResponseBytesRef) Body() []byte {
 	return bytes.Clone(l.responseBytesShape.Field(x.v, 0).Bytes())
 }
 
-func (x ResponseBytesRef) Headers() host.ListRef[HeaderRef] {
+func (x ResponseBytesRef) Headers() ListRef[HeaderRef] {
 	l := x.b
-	return host.NewListRef(l.responseBytesShape.Field(x.v, 1), func(v eval.Value) HeaderRef { return HeaderRef{ref{l, v}} })
+	return host.NewListRef(l.responseBytesShape.Field(x.v, 1), l, func(l *Bindings, v eval.Value) HeaderRef { return HeaderRef{ref{l, v}} })
 }
 
 func (x ResponseBytesRef) Status() int64 {
@@ -1379,9 +1379,9 @@ func (x ResponseJsonRef) Body() JsonRef {
 	return JsonRef{ref{l, l.responseJsonShape.Field(x.v, 0)}}
 }
 
-func (x ResponseJsonRef) Headers() host.ListRef[HeaderRef] {
+func (x ResponseJsonRef) Headers() ListRef[HeaderRef] {
 	l := x.b
-	return host.NewListRef(l.responseJsonShape.Field(x.v, 1), func(v eval.Value) HeaderRef { return HeaderRef{ref{l, v}} })
+	return host.NewListRef(l.responseJsonShape.Field(x.v, 1), l, func(l *Bindings, v eval.Value) HeaderRef { return HeaderRef{ref{l, v}} })
 }
 
 func (x ResponseJsonRef) Status() int64 {
@@ -1541,9 +1541,9 @@ func (x ResponseTextRef) Body() string {
 	return l.responseTextShape.Field(x.v, 0).Text()
 }
 
-func (x ResponseTextRef) Headers() host.ListRef[HeaderRef] {
+func (x ResponseTextRef) Headers() ListRef[HeaderRef] {
 	l := x.b
-	return host.NewListRef(l.responseTextShape.Field(x.v, 1), func(v eval.Value) HeaderRef { return HeaderRef{ref{l, v}} })
+	return host.NewListRef(l.responseTextShape.Field(x.v, 1), l, func(l *Bindings, v eval.Value) HeaderRef { return HeaderRef{ref{l, v}} })
 }
 
 func (x ResponseTextRef) Status() int64 {
@@ -1983,14 +1983,14 @@ type ElementRef struct{ ref }
 // Load converts all of x.
 func (x ElementRef) Load() Element { return elementFromValue(x.b, x.v) }
 
-func (x ElementRef) Attrs() host.ListRef[AttrRef] {
+func (x ElementRef) Attrs() ListRef[AttrRef] {
 	l := x.b
-	return host.NewListRef(l.elementShape.Field(x.v, 0), func(v eval.Value) AttrRef { return AttrRef{ref{l, v}} })
+	return host.NewListRef(l.elementShape.Field(x.v, 0), l, func(l *Bindings, v eval.Value) AttrRef { return AttrRef{ref{l, v}} })
 }
 
-func (x ElementRef) Children() host.ListRef[NodeRef] {
+func (x ElementRef) Children() ListRef[NodeRef] {
 	l := x.b
-	return host.NewListRef(l.elementShape.Field(x.v, 1), func(v eval.Value) NodeRef { return NodeRef{ref{l, v}} })
+	return host.NewListRef(l.elementShape.Field(x.v, 1), l, func(l *Bindings, v eval.Value) NodeRef { return NodeRef{ref{l, v}} })
 }
 
 func (x ElementRef) Tag() string {
@@ -2515,14 +2515,14 @@ type KeyedRef struct{ ref }
 // Load converts all of x.
 func (x KeyedRef) Load() Keyed { return keyedFromValue(x.b, x.v) }
 
-func (x KeyedRef) Attrs() host.ListRef[AttrRef] {
+func (x KeyedRef) Attrs() ListRef[AttrRef] {
 	l := x.b
-	return host.NewListRef(l.keyedShape.Field(x.v, 0), func(v eval.Value) AttrRef { return AttrRef{ref{l, v}} })
+	return host.NewListRef(l.keyedShape.Field(x.v, 0), l, func(l *Bindings, v eval.Value) AttrRef { return AttrRef{ref{l, v}} })
 }
 
-func (x KeyedRef) Children() host.ListRef[ChildRef] {
+func (x KeyedRef) Children() ListRef[ChildRef] {
 	l := x.b
-	return host.NewListRef(l.keyedShape.Field(x.v, 1), func(v eval.Value) ChildRef { return ChildRef{ref{l, v}} })
+	return host.NewListRef(l.keyedShape.Field(x.v, 1), l, func(l *Bindings, v eval.Value) ChildRef { return ChildRef{ref{l, v}} })
 }
 
 func (x KeyedRef) Tag() string {
@@ -2722,3 +2722,7 @@ func newBindings(env *eval.Environment) *Bindings {
 	l.childShape = env.Shape(l.key, l.node)
 	return l
 }
+
+// ListRef is a list as a script holds it, whose elements convert to T
+// as they are read, and which goes back to a script as it is.
+type ListRef[T any] = host.ListRef[*Bindings, T]

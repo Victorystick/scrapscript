@@ -121,8 +121,27 @@ type generator struct {
 	// The fields of the Bindings struct that hold the shapes of records, in
 	// the order of the records' declarations.
 	shapes []shapeField
-	// Whether the bindings use the bytes package.
-	usesBytes bool
+	// Whether the bindings use the bytes package, and ListRef.
+	usesBytes, usesListRef bool
+}
+
+// bindingsType returns the type of the bindings that ListRefs convert
+// their elements with: *Bindings, or struct{} for an interface without
+// records or enums, which has none.
+func (g *generator) bindingsType() string {
+	if len(g.decls) > 0 {
+		return "*Bindings"
+	}
+	return "struct{}"
+}
+
+// bindingsExpr returns an expression of the bindings, of bindingsType, where
+// l, if any, is in scope.
+func (g *generator) bindingsExpr() string {
+	if len(g.decls) > 0 {
+		return "l"
+	}
+	return "struct{}{}"
 }
 
 // label returns an expression of the ID of a record label or tag, a field
@@ -390,21 +409,22 @@ func primitive(name string) (*gotype, error) {
 }
 
 // expr returns the Go type of t, or with ref, the type that holds a value
-// of it: a record's or an enum's Ref, and a list's host.ListRef.
-func expr(t *gotype, ref bool) string {
+// of it: a record's or an enum's Ref, and a list's ListRef.
+func (g *generator) expr(t *gotype, ref bool) string {
 	switch {
 	case !ref || t.prim != "" || t.param:
 		return t.expr
 	case t.elem != nil:
-		return "host.ListRef[" + expr(t.elem, true) + "]"
+		g.usesListRef = true
+		return "ListRef[" + g.expr(t.elem, true) + "]"
 	case t.decl != nil:
 		return t.decl.name + "Ref"
 	}
 	var args []string
 	for _, a := range t.args {
-		args = append(args, expr(a, true))
+		args = append(args, g.expr(a, true))
 	}
-	return fmt.Sprintf("func(%s) (%s, error)", strings.Join(args, ", "), expr(t.result, true))
+	return fmt.Sprintf("func(%s) (%s, error)", strings.Join(args, ", "), g.expr(t.result, true))
 }
 
 // from returns a Go expression that converts the value v to t, or with ref,
@@ -430,7 +450,10 @@ func (g *generator) from(t *gotype, v string, ref bool) string {
 	case t.param:
 		return fmt.Sprintf("%s{%s}", t.expr, v)
 	case t.elem != nil && ref:
-		return fmt.Sprintf("host.NewListRef(%s, func(v eval.Value) %s { return %s })", v, expr(t.elem, true), g.from(t.elem, "v", true))
+		// The conversion takes the bindings rather than capturing them,
+		// so that it is static and the ListRef allocates nothing.
+		return fmt.Sprintf("host.NewListRef(%s, %s, func(l %s, v eval.Value) %s { return %s })",
+			v, g.bindingsExpr(), g.bindingsType(), g.expr(t.elem, true), g.from(t.elem, "v", true))
 	case t.elem != nil:
 		return fmt.Sprintf("host.ListFrom(%s, func(v eval.Value) %s { return %s })", v, t.elem.expr, g.from(t.elem, "v", false))
 	case t.decl != nil && ref:
@@ -444,7 +467,7 @@ func (g *generator) from(t *gotype, v string, ref bool) string {
 	return func(%s) (%s, error) {
 %s
 	}
-}(%s)`, expr(t, ref), params, expr(t.result, ref), call, v)
+}(%s)`, g.expr(t, ref), params, g.expr(t.result, ref), call, v)
 }
 
 // call returns the parameters of a Go function of the type of the function
@@ -453,10 +476,10 @@ func (g *generator) from(t *gotype, v string, ref bool) string {
 func (g *generator) call(t *gotype, fn string, ref bool) (params, body string) {
 	var ps, args []string
 	for i, a := range t.args {
-		ps = append(ps, fmt.Sprintf("a%d %s", i, expr(a, ref)))
+		ps = append(ps, fmt.Sprintf("a%d %s", i, g.expr(a, ref)))
 		args = append(args, g.to(a, fmt.Sprintf("a%d", i), ref))
 	}
-	result := expr(t.result, ref)
+	result := g.expr(t.result, ref)
 	return strings.Join(ps, ", "), fmt.Sprintf(`	v, err := eval.Call(%s, %s)
 	if err != nil {
 		var zero %s
@@ -524,8 +547,8 @@ func (g *generator) bindings(pkg, hash string, sources map[string]string, top *g
 	w("// Load checks that the scrap app implements the interface, and returns its\n")
 	w("// value. The environment must find the scraps that the interface refers to,\n")
 	w("// as with Interface.Fetcher.\n")
-	w("func Load(env *eval.Environment, app *eval.Scrap) (%s, error) {\n", expr(top, true))
-	w("\tvar zero %s\n", expr(top, true))
+	w("func Load(env *eval.Environment, app *eval.Scrap) (%s, error) {\n", g.expr(top, true))
+	w("\tvar zero %s\n", g.expr(top, true))
 	w("\tiface, err := env.Read([]byte(Interface.Source()))\n\tif err != nil {\n\t\treturn zero, err\n\t}\n")
 	w("\tif err := env.Check(app, iface); err != nil {\n\t\treturn zero, err\n\t}\n")
 	w("\tv, err := env.Eval(app)\n\tif err != nil {\n\t\treturn zero, err\n\t}\n")
@@ -557,6 +580,11 @@ func (g *generator) bindings(pkg, hash string, sources map[string]string, top *g
 	}
 	if len(g.decls) > 0 {
 		g.labelsType(w)
+	}
+	if g.usesListRef {
+		w("\n// ListRef is a list as a script holds it, whose elements convert to T\n")
+		w("// as they are read, and which goes back to a script as it is.\n")
+		w("type ListRef[T any] = host.ListRef[%s, T]\n", g.bindingsType())
 	}
 
 	var head bytes.Buffer
@@ -645,14 +673,14 @@ func (g *generator) record(w func(string, ...any), d *decl) {
 		if isFunc(f.typ) {
 			// A function field is a method that calls it.
 			params, body := g.call(f.typ, field, true)
-			w("\nfunc (x %sRef) %s(%s) (%s, error) {\n\tl := x.b\n%s\n}\n", d.name, f.name, params, expr(f.typ.result, true), body)
+			w("\nfunc (x %sRef) %s(%s) (%s, error) {\n\tl := x.b\n%s\n}\n", d.name, f.name, params, g.expr(f.typ.result, true), body)
 			continue
 		}
 		if f.typ.prim == "()" {
 			w("\nfunc (x %sRef) %s() struct{} { return struct{}{} }\n", d.name, f.name)
 			continue
 		}
-		w("\nfunc (x %sRef) %s() %s {\n\tl := x.b\n\treturn %s\n}\n", d.name, f.name, expr(f.typ, true), g.from(f.typ, field, true))
+		w("\nfunc (x %sRef) %s() %s {\n\tl := x.b\n\treturn %s\n}\n", d.name, f.name, g.expr(f.typ, true), g.from(f.typ, field, true))
 	}
 }
 
@@ -745,7 +773,7 @@ func (g *generator) enum(w func(string, ...any), d *decl) {
 			continue
 		}
 		w("\n// %s returns the payload of #%s, and panics on another tag.\n", f.name, f.label)
-		w("func (x %sRef) %s() %s {\n\tl := x.b\n\tt := x.v.Variant()\n\tif t.Tag() != %s {\n", d.name, f.name, expr(f.typ, true), g.label(f.label))
+		w("func (x %sRef) %s() %s {\n\tl := x.b\n\tt := x.v.Variant()\n\tif t.Tag() != %s {\n", d.name, f.name, g.expr(f.typ, true), g.label(f.label))
 		w("\t\tpanic(\"%sRef: #%s of \" + x.Tag().String())\n\t}\n", d.name, f.label)
 		w("\treturn %s\n}\n", g.from(f.typ, "t.Payload()", true))
 	}

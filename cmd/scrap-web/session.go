@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/Victorystick/scrapscript/eval"
-	"github.com/Victorystick/scrapscript/host"
 )
 
 // A Session runs an app: it holds the app's model, which it passes from one
@@ -72,6 +71,6 @@ func (s *Session) View() (NodeRef, error) {
 }
 
 // Subscriptions returns what the app listens to, for its model.
-func (s *Session) Subscriptions() (host.ListRef[SubRef], error) {
+func (s *Session) Subscriptions() (ListRef[SubRef], error) {
 	return s.app.Subscriptions(s.model)
 }

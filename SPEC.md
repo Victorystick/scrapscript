@@ -858,7 +858,7 @@ a database.
 | Type | Go |
 |---|---|
 | `()`, `int`, `float`, `text`, `byte`, `bytes` | `struct{}`, `int64`, `float64`, `string`, `byte`, `[]byte` (copied) |
-| `list a` | `host.ListRef[A]`, or `[]A` |
+| `list a` | `ListRef[A]`, an alias of `host.ListRef` that converts elements with the bindings, or `[]A` |
 | record | a Ref with an accessor per label, in CamelCase, or a struct |
 | enum | a Ref with a tag, constants dense per enum, and a typed accessor and constructor per tag, or a struct of the same |
 | function | Go func, uncurried; it returns an error if evaluation fails. A function in a record's Ref is a method |
