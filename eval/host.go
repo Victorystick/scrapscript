@@ -87,6 +87,15 @@ type Value struct {
 	v value
 }
 
+// Same reports whether a and b are the same value: the same scalar, or the
+// same text, list, record, variant or function, as one evaluation made it
+// and others passed it on. Values that are the same are equal, but equal
+// values needn't be the same. It takes constant time, so a host can skip
+// comparing a value with an earlier one that it is the same as.
+func Same(a, b Value) bool {
+	return a.v == b.v
+}
+
 // IsValid returns true if v is a value, rather than the zero Value.
 func (v Value) IsValid() bool {
 	return v.v.valid()

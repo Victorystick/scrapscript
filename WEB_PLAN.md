@@ -56,7 +56,8 @@ app
 
 - Values are two words and immutable, so a subtree of the view that is the
   same value as in the last view is skipped in O(1), as with Elm's `lazy`
-  but without asking. Needs an `eval.Same(a, b)`.
+  but without asking, with `eval.Same(a, b)`. Copying the subtree's ids
+  is still linear, but cheap.
 - Handlers are closures, which can't be compared, so they never cause
   patches. The DOM side only knows that node 17 listens to `input`; Go
   keeps a table from (node, event) to the current handler, overwritten on
@@ -112,9 +113,9 @@ The web platform:
    a Go session that runs `init` and `update` and collects commands and
    subscriptions. Tested in Go. Sketch the platform in SPEC.md section 13
    (#30).
-8. [ ] **Diff:** views to binary patches, unkeyed, with the opcode format
+8. [x] **Diff:** views to binary patches, unkeyed, with the opcode format
    documented and the handler table. Tested against a mock DOM in Go:
-   applying `diff(a, b)` to the DOM of `a` gives the DOM of `b`.
+   applying `diff(a, b)` to the DOM of `a` gives the DOM of `b` (#31).
 9. [ ] **Keyed children** in the diff.
 10. [ ] **Runtime:** in the `js/` workspace, the patch interpreter, event
     delegation, and `mount(element, { source, flags, fetchScrap })`.

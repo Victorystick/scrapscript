@@ -907,11 +907,14 @@ the app chooses: its model, and its messages.
   functions to them from what an event carries, such as an input's text;
   a command or subscription carries a function from its result to a
   message. The host calls these and passes the message to `update`, one
-  at a time.
+  at a time. An event runs the handler of the view that the page shows,
+  even if updates since have changed the model.
 - **Rendering.** The view and the subscriptions depend on the model alone,
   so the host asks for them once for any number of updates, such as once
   per animation frame, and carries out the difference from the last ones:
-  patches to the page, and timers started and stopped.
+  patches to the page, and timers started and stopped. Where an
+  attribute, property, style or handler of an event is given twice on an
+  element, the last counts. Changing a handler patches nothing.
 - **Failure.** A step that fails, by an error or by running past its
   deadline, changes nothing: the model stays as it was and its commands
   are not carried out.
