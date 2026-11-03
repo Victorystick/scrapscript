@@ -4,9 +4,19 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
-    ".": "./scrap-wasm.ts"
+    ".": "./index.ts",
+    "./scrap-wasm": "./scrap-wasm.ts"
   },
   "scripts": {
-    "build": "GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -trimpath -ldflags=\"-s -w\" -o scrap-wasm.wasm ../cmd/scrap-wasm"
+    "build": "pnpm build:wasm && pnpm build:web",
+    "build:wasm": "GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -trimpath -ldflags=\"-s -w\" -o scrap-wasm.wasm ../cmd/scrap-wasm",
+    "build:web": "GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -trimpath -ldflags=\"-s -w\" -o scrap-web.wasm ../cmd/scrap-web",
+    "test": "pnpm build && vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "playwright": "1.63.0",
+    "vite": "^6.4.5",
+    "vitest": "3.2.4"
   }
 }

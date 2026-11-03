@@ -13,8 +13,8 @@ it to GitHub Pages (`.github/workflows/pages.yml`).
   `sha256sum`) gives a scrap's key and `scrap push` uploads it.
 - The site uses the runtime in `../js`, `@scrapscript/web`, through the
   pnpm workspace: `scrap-wasm.wasm`, the scrap tool as WebAssembly, and
-  `scrap-wasm.ts`, which runs it. `pnpm build` and `pnpm test` build the
-  wasm first, so building needs Go.
+  `scrap-wasm.ts`, which runs it, from `@scrapscript/web/scrap-wasm`.
+  `pnpm build` and `pnpm test` build the wasm first, so building needs Go.
 - The pages (`index.html`, `tutorial.html`, `play.html`), `style.css` and
   the browser's copy of `scrap-wasm.wasm` are built by Vite under the base path `/scrapscript/`,
   so links between pages are relative. A new page must be listed in

@@ -95,6 +95,12 @@ func (m *module) respond(req startRequest) startResponse {
 	if missing := host.Missing(a.env, script, sources); len(missing) > 0 {
 		return startResponse{Missing: missing}
 	}
+	// Check the script before the deadline starts, which bounds evaluating
+	// only: Load checks it again, against the interface, but inference is
+	// done by then.
+	if _, err := a.env.Infer(script); err != nil {
+		return startResponse{Error: token.Render(err, nil)}
+	}
 	a.step()
 	if a.s, err = Start(a.env, script, flags); err != nil {
 		return startResponse{Error: token.Render(err, nil)}

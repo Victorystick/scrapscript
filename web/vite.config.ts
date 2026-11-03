@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import { readFileSync } from "node:fs";
-import { ScrapWasm, wasmURL } from "@scrapscript/web";
+import { ScrapWasm, wasmURL } from "@scrapscript/web/scrap-wasm";
 
 // Gives the scrap of each example in a page the ranges to highlight it
 // with, as data-highlights, so that repl.ts can highlight it without
