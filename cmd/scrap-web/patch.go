@@ -37,6 +37,10 @@ import (
 //	REPLACE old new           puts new, which isn't in the page, in old's
 //	                          place, and drops old
 //	REMOVE id                 drops a node
+//	INSERT parent child before
+//	                          puts child before before, a child of
+//	                          parent, or last if before is 0; child is
+//	                          new, or a child of parent, which moves
 //
 // A dropped node's id, and the ids of the nodes in it, may name new nodes
 // later in the same patch: a CREATE forgets whatever its id named before,
@@ -65,6 +69,7 @@ const (
 	opAppend
 	opReplace
 	opRemove
+	opInsert
 )
 
 // reset empties the patch for a new batch.

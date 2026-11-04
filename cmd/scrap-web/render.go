@@ -14,7 +14,8 @@ import (
 // deep as views nest. A node that is the same value as the one in its
 // place before, as when a view reuses a part of the model or a constant,
 // is skipped without looking inside: its ids are copied. Children are
-// matched by their position; #keyed children too, for now.
+// matched by their position, or by their keys where the element is #keyed
+// in both views (diffKeyed).
 //
 // It reads views as values, through the bindings' labels and shapes,
 // rather than through Refs, which allocate as they read lists.
@@ -34,6 +35,12 @@ type renderer struct {
 
 	// Scratch for diffing attributes: an element's before and after.
 	olds, news []entry
+
+	// Scratch for diffing keyed children: a stack of each keyed element's
+	// tables, which nested elements push theirs onto, and a map of keys,
+	// used only between them.
+	stack []int32
+	keys  map[string]int32
 
 	p patch
 }
@@ -174,10 +181,14 @@ func (r *renderer) diff(old eval.Value, i int, n eval.Value) {
 }
 
 // diffChildren patches the children of the last view's element at i, old,
-// into those of n.
+// into those of n: by key if both are keyed, and otherwise by position.
 func (r *renderer) diffChildren(id uint32, i int, old, n *element) {
 	if eval.Same(old.children, n.children) {
 		r.keep(i+1, i+int(r.sizes[i]))
+		return
+	}
+	if old.keyed && n.keyed {
+		r.diffKeyed(id, i, old, n)
 		return
 	}
 	c := i + 1 // the last view's node of the next old child
@@ -196,6 +207,158 @@ func (r *renderer) diffChildren(id uint32, i int, old, n *element) {
 	for k := common; k < len(n.kids); k++ {
 		r.p.op(opAppend, id, r.create(r.child(n, k)))
 	}
+}
+
+// key returns the key of a keyed element's child.
+func (r *renderer) key(kid eval.Value) string {
+	return r.l.childShape.Field(kid, 0).Text()
+}
+
+// diffKeyed patches the keyed children of the last view's element at i,
+// old, into those of n. It diffs children with the same key, which keep
+// their DOM nodes, and removes or creates the others. Children with a
+// repeated key match in order.
+//
+// The common prefix and suffix of keys are diffed in place. Of the matched
+// children between, those in a longest increasing run of their old places
+// stay, and the others move: going backwards, each is inserted before the
+// child after it, which is in its place by then, as is any new child.
+func (r *renderer) diffKeyed(id uint32, i int, old, n *element) {
+	olds, news := old.kids, n.kids
+	c := i + 1 // the last view's node of the next old child
+
+	// The prefix, in place.
+	pre := 0
+	for ; pre < len(olds) && pre < len(news) && r.key(olds[pre]) == r.key(news[pre]); pre++ {
+		next := c + int(r.sizes[c])
+		r.diff(r.child(old, pre), c, r.child(n, pre))
+		c = next
+	}
+	suf := 0
+	for suf < len(olds)-pre && suf < len(news)-pre && r.key(olds[len(olds)-1-suf]) == r.key(news[len(news)-1-suf]) {
+		suf++
+	}
+	no, nn := len(olds)-pre-suf, len(news)-pre-suf
+
+	// The tables of the middle, on the stack: by old child, its node in
+	// the last view, the new child it matches or -1, and the next old
+	// child with its key or -1; by new child, the old child it matches or
+	// -1, its DOM id, whether it stays, and for the run, the index of its
+	// predecessor and the run's tails.
+	base := len(r.stack)
+	r.stack = append(r.stack, make([]int32, 3*no+5*nn)...)
+	start, newOf, same := base, base+no, base+2*no
+	match, dom, stay, prev, tails := base+3*no, base+3*no+nn, base+3*no+2*nn, base+3*no+3*nn, base+3*no+4*nn
+	st := r.stack
+	for k := range no {
+		st[start+k] = int32(c)
+		st[newOf+k] = -1
+		c += int(r.sizes[c])
+	}
+	suffix := c // the last view's node of the first old child of the suffix
+
+	// Match keys, through the map, which no nested call uses meanwhile.
+	if r.keys == nil {
+		r.keys = map[string]int32{}
+	}
+	clear(r.keys)
+	for k := no - 1; k >= 0; k-- {
+		key := r.key(olds[pre+k])
+		st[same+k] = -1
+		if first, ok := r.keys[key]; ok {
+			st[same+k] = first
+		}
+		r.keys[key] = int32(k)
+	}
+	for j := range nn {
+		st[match+j] = -1
+		key := r.key(news[pre+j])
+		if k, ok := r.keys[key]; ok {
+			st[match+j], st[newOf+int(k)] = k, int32(j)
+			if s := st[same+int(k)]; s >= 0 {
+				r.keys[key] = s
+			} else {
+				delete(r.keys, key)
+			}
+		}
+	}
+
+	// The matched children that stay: a longest run of increasing old
+	// places, by patience sorting.
+	run := 0
+	for j := range nn {
+		k := st[match+j]
+		if k < 0 {
+			continue
+		}
+		lo, hi := 0, run
+		for lo < hi {
+			mid := (lo + hi) / 2
+			if st[match+int(st[tails+mid])] < k {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		st[prev+j] = -1
+		if lo > 0 {
+			st[prev+j] = st[tails+lo-1]
+		}
+		st[tails+lo] = int32(j)
+		if lo == run {
+			run++
+		}
+	}
+	if run > 0 {
+		for j := st[tails+run-1]; j >= 0; j = st[prev+int(j)] {
+			st[stay+int(j)] = 1
+		}
+	}
+
+	// Remove the old children that match none.
+	for k := range no {
+		if st[newOf+k] < 0 {
+			at := int(st[start+k])
+			r.p.op(opRemove, r.ids[at])
+			r.release(at)
+		}
+	}
+
+	// Diff the matched children and create the others, in the new order.
+	// Nested calls may grow the stack, so read it afresh.
+	for j := range nn {
+		at := len(r.nids)
+		if k := r.stack[match+j]; k >= 0 {
+			r.diff(r.child(old, pre+int(k)), int(r.stack[start+int(k)]), r.child(n, pre+j))
+			r.stack[dom+j] = int32(r.nids[at])
+		} else {
+			r.stack[dom+j] = int32(r.create(r.child(n, pre+j)))
+		}
+	}
+
+	// The suffix, in place.
+	anchor := uint32(0) // the DOM id of the first child of the suffix, or 0 for the end
+	c = suffix
+	for k := range suf {
+		at := len(r.nids)
+		next := c + int(r.sizes[c])
+		r.diff(r.child(old, len(olds)-suf+k), c, r.child(n, len(news)-suf+k))
+		if k == 0 {
+			anchor = r.nids[at]
+		}
+		c = next
+	}
+
+	// Going backwards, put the children that don't stay in place.
+	next := anchor
+	for j := nn - 1; j >= 0; j-- {
+		d := uint32(r.stack[dom+j])
+		if r.stack[stay+j] == 0 {
+			r.p.op(opInsert, id, d, next)
+		}
+		next = d
+	}
+	r.stack = r.stack[:base]
 }
 
 // An entry is an attribute, a property, a style or a handler, as diffAttrs

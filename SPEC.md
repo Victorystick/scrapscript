@@ -914,7 +914,11 @@ the app chooses: its model, and its messages.
   per animation frame, and carries out the difference from the last ones:
   patches to the page, and timers started and stopped. Where an
   attribute, property, style or handler of an event is given twice on an
-  element, the last counts. Changing a handler patches nothing.
+  element, the last counts. Changing a handler patches nothing. Children
+  are matched by their place, except those of a `#keyed` element, which
+  are matched by key, so that a child keeps its DOM node, with its focus
+  and state, as others come and go around it. Keys should be distinct
+  among siblings; repeated ones match in order.
 - **Failure.** A step that fails, by an error or by running past its
   deadline, changes nothing: the model stays as it was and its commands
   are not carried out.

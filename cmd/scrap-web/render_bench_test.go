@@ -1,6 +1,8 @@
 package main
 
 import (
+	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/Victorystick/scrapscript/eval"
@@ -70,4 +72,38 @@ func BenchmarkRender(b *testing.B) {
 			}
 		}
 	})
+}
+
+// BenchmarkRenderKeyed measures diffing a keyed list of 1,000 rows against
+// one with a row moved from the front to the back, and the reverse of it;
+// each row is the same value in both.
+func BenchmarkRenderKeyed(b *testing.B) {
+	l := newBindings(eval.NewEnvironment())
+	rows := make([]eval.Value, 1000)
+	for i := range rows {
+		k := strconv.Itoa(i)
+		li := NewNodeEl(Element{Tag: "li", Children: []Node{NewNodeText(k)}})
+		rows[i] = l.childShape.New(eval.Text(k), li.toValue(l))
+	}
+	ul := func(rows []eval.Value) NodeRef {
+		return NodeRef{ref{l, eval.NewVariant(l.keyed, l.keyedShape.New(eval.NewList(), eval.NewList(rows...), eval.Text("ul")))}}
+	}
+	moved := append(slices.Clone(rows[1:]), rows[0])
+	reversed := slices.Clone(rows)
+	slices.Reverse(reversed)
+	for _, c := range []struct {
+		name string
+		to   []eval.Value
+	}{{"move", moved}, {"reverse", reversed}} {
+		b.Run(c.name, func(b *testing.B) {
+			views := []NodeRef{ul(rows), ul(c.to)}
+			var r renderer
+			r.render(views[0])
+			i := 0
+			for b.Loop() {
+				i ^= 1
+				r.render(views[i])
+			}
+		})
+	}
 }
