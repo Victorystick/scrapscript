@@ -172,6 +172,14 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, variables) {
 	define("ceil", floatToInt, roundFunc(math.Ceil))
 	define("floor", floatToInt, roundFunc(math.Floor))
 
+	// Bytes
+	define("byte/to-int", reg.Func(types.ByteRef, types.IntRef), func(b value) value {
+		return intVal(int(b.asByte()))
+	})
+	define("bytes/length", reg.Func(types.BytesRef, types.IntRef), func(bs value) value {
+		return intVal(len(bs.asBytes()))
+	})
+
 	// bytes <-> text
 	define("bytes/to-utf8-text", reg.Func(types.BytesRef, types.TextRef), func(v value) value {
 		if !utf8.Valid(v.asBytes()) {

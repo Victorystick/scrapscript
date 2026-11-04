@@ -20,6 +20,10 @@ func TestInferBuiltin(t *testing.T) {
 		{`floor`, `float -> int`},
 		{`to-float`, `int -> float`},
 
+		// bytes
+		{`byte/to-int`, `byte -> int`},
+		{`bytes/length`, `bytes -> int`},
+
 		// byte <-> text conversion
 		{`bytes/to-utf8-text`, `bytes -> text`},
 		{`bytes/from-utf8-text`, `text -> bytes`},

@@ -263,6 +263,9 @@ var exp2str = []struct{ source, result string }{
 	{`~~aGVsbG8gd29ybGQ= +< ~21 |> bytes/to-utf8-text`, `"hello world!"`},
 	{`bytes/to-utf8-text ~~aGVsbG8gd29ybGQ=`, `"hello world"`},
 	{`bytes/from-utf8-text "hello world"`, `~~aGVsbG8gd29ybGQ=`},
+	{`[~00, ~7f, ~80, ~ff] |> list/map byte/to-int`, `[ 0, 127, 128, 255 ]`},
+	{`[~~, ~~/w==, ~~aGVsbG8=] |> list/map bytes/length`, `[ 0, 1, 5 ]`},
+	{`bytes/length (bytes/from-utf8-text "héllo")`, `6`},
 
 	{`1 >+ [2, 3] +< 4`, `[ 1, 2, 3, 4 ]`},
 	{`1 >+ []`, `[ 1 ]`},
