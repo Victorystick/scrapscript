@@ -264,6 +264,14 @@ var exp2str = []struct{ source, result string }{
 	{`bytes/to-utf8-text ~~aGVsbG8gd29ybGQ=`, `"hello world"`},
 	{`bytes/from-utf8-text "hello world"`, `~~aGVsbG8gd29ybGQ=`},
 	{`[~00, ~7f, ~80, ~ff] |> list/map byte/to-int`, `[ 0, 127, 128, 255 ]`},
+	{`[int/and 12 10, int/or 12 10, int/xor 12 10]`, `[ 8, 14, 6 ]`},
+	{`[int/and -1 255, int/or -256 255, int/xor -1 0]`, `[ 255, -1, -1 ]`},
+	{`[int/shl 4 1, int/shl 63 1, int/shl 64 1, int/shl 0 7]`, `[ 16, -9223372036854775808, 0, 7 ]`},
+	// Right shifts are logical: they fill with zeros, also for negative ints.
+	{`[int/shr 2 16, int/shr 60 -1, int/shr 63 -1, int/shr 64 -1]`, `[ 4, 15, 1, 0 ]`},
+	// Negative amounts shift the other way.
+	{`[int/shl -2 16, int/shr -2 1, int/shl -64 -1, int/shr (0 - 9223372036854775807 - 1) -1]`, `[ 4, 4, 0, 0 ]`},
+	{`16 |> int/shr 2 |> int/shl 1`, `8`},
 	{`[~~, ~~/w==, ~~aGVsbG8=] |> list/map bytes/length`, `[ 0, 1, 5 ]`},
 	{`bytes/length (bytes/from-utf8-text "héllo")`, `6`},
 
