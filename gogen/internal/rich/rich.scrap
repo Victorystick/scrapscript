@@ -11,6 +11,7 @@ api
     flag   : byte,
     unit   : (),
     tree   : tree,
+    forest : list tree,
     count  : box int,
     names  : box (list text),
     helper : (int -> int -> int) -> int

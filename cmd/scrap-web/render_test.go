@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/Victorystick/scrapscript/eval"
-	"github.com/Victorystick/scrapscript/host"
 )
 
 var opNames = [...]string{
@@ -268,7 +267,7 @@ func expected(n NodeRef) string {
 	var print func(n NodeRef)
 	print = func(n NodeRef) {
 		var tag string
-		var attrs host.ListRef[AttrRef]
+		var attrs ListRef[AttrRef]
 		var children []NodeRef
 		switch n.Tag() {
 		case NodeText:

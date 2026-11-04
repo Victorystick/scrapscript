@@ -55,32 +55,36 @@ func ListTo[T any](xs []T, to func(T) eval.Value) eval.Value {
 }
 
 // A ListRef is a list as a script holds it, whose elements convert to T
-// only as they are read, and which goes back to a script as it is.
-type ListRef[T any] struct {
+// only as they are read, and which goes back to a script as it is. Its
+// elements convert with at and the bindings b, which at takes rather than
+// captures: a func literal that captures nothing is static, so making a
+// ListRef allocates nothing. Bindings name it ListRef[T], with their own B.
+type ListRef[B, T any] struct {
+	b     B
 	v     eval.Value
 	elems []eval.Value
-	at    func(eval.Value) T
+	at    func(B, eval.Value) T
 }
 
-// NewListRef returns the list value v, whose elements at converts.
-func NewListRef[T any](v eval.Value, at func(eval.Value) T) ListRef[T] {
-	return ListRef[T]{v, v.List().Elements(), at}
+// NewListRef returns the list value v, whose elements at converts with b.
+func NewListRef[B, T any](v eval.Value, b B, at func(B, eval.Value) T) ListRef[B, T] {
+	return ListRef[B, T]{b, v, v.List().Elements(), at}
 }
 
 // Value returns the list as a value.
-func (x ListRef[T]) Value() eval.Value { return x.v }
+func (x ListRef[B, T]) Value() eval.Value { return x.v }
 
 // Len returns the number of elements.
-func (x ListRef[T]) Len() int { return len(x.elems) }
+func (x ListRef[B, T]) Len() int { return len(x.elems) }
 
 // At returns the ith element.
-func (x ListRef[T]) At(i int) T { return x.at(x.elems[i]) }
+func (x ListRef[B, T]) At(i int) T { return x.at(x.b, x.elems[i]) }
 
 // All returns the elements in order, with their indices.
-func (x ListRef[T]) All() iter.Seq2[int, T] {
+func (x ListRef[B, T]) All() iter.Seq2[int, T] {
 	return func(yield func(int, T) bool) {
 		for i, e := range x.elems {
-			if !yield(i, x.at(e)) {
+			if !yield(i, x.at(x.b, e)) {
 				return
 			}
 		}
@@ -88,4 +92,10 @@ func (x ListRef[T]) All() iter.Seq2[int, T] {
 }
 
 // Load converts all the elements.
-func (x ListRef[T]) Load() []T { return ListFrom(x.v, x.at) }
+func (x ListRef[B, T]) Load() []T {
+	xs := make([]T, len(x.elems))
+	for i, e := range x.elems {
+		xs[i] = x.at(x.b, e)
+	}
+	return xs
+}
