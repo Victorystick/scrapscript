@@ -84,18 +84,20 @@ const (
 	opVariant // A: the tag, a label.ID. B: the payload, or none.
 
 	// Patterns.
-	patBind    // A: the slot it binds.
-	patArg     // A: the slot of the argument it names, which already holds it.
-	patWild    // _
-	patLiteral // A: the index of the value in consts.
-	patVariant // A: the tag, a label.ID. B: the payload, or none.
-	patRecord  // A..B: the rest or none, the shape of its fields, then a key and pattern per field.
-	patSplit   // A..B: the rest, the shape of the record, of a closed type, and of the rest, the index in the record of each of the rest's values, then a key and pattern per field.
-	patList    // A..B: the elements.
-	patCons    // head >+ tail. A: head. B: tail.
-	patSnoc    // init +< last. A: init. B: last.
-	patPrefix  // [a, b] ++ rest. A..B: rest, then the elements.
-	patSuffix  // rest ++ [a, b]. A..B: rest, then the elements.
+	patBind      // A: the slot it binds.
+	patArg       // A: the slot of the argument it names, which already holds it.
+	patWild      // _
+	patLiteral   // A: the index of the value in consts.
+	patVariant   // A: the tag, a label.ID. B: the payload, or none.
+	patRecord    // A..B: the rest or none, the shape of its fields, then a key and pattern per field.
+	patSplit     // A..B: the rest, the shape of the record, of a closed type, and of the rest, the index in the record of each of the rest's values, then a key and pattern per field.
+	patList      // A..B: the elements.
+	patCons      // head >+ tail. A: head. B: tail.
+	patSnoc      // init +< last. A: init. B: last.
+	patConsBytes // head >+ tail, on bytes.
+	patSnocBytes // init +< last, on bytes.
+	patPrefix    // [a, b] ++ rest. A..B: rest, then the elements.
+	patSuffix    // rest ++ [a, b]. A..B: rest, then the elements.
 )
 
 // data holds a node's two children or indices; see op for their meaning.
@@ -1481,11 +1483,20 @@ func (c *compiler) pattern(x ast.Node, scope int) cnode {
 
 	case ast.Binary:
 		op, left, right := se.Binary(x)
+		bytes := c.typed != nil && c.reg.Resolve(c.typed[x]) == types.BytesRef
 		switch op {
 		case token.PREPEND:
-			return c.node(patCons, int32(c.pattern(left, scope)), int32(c.pattern(right, scope)), x)
+			o := patCons
+			if bytes {
+				o = patConsBytes
+			}
+			return c.node(o, int32(c.pattern(left, scope)), int32(c.pattern(right, scope)), x)
 		case token.APPEND:
-			return c.node(patSnoc, int32(c.pattern(left, scope)), int32(c.pattern(right, scope)), x)
+			o := patSnoc
+			if bytes {
+				o = patSnocBytes
+			}
+			return c.node(o, int32(c.pattern(left, scope)), int32(c.pattern(right, scope)), x)
 		case token.CONCAT:
 			if se.Kind(left) == ast.List {
 				elems := c.patterns([]int32{0}, se.List(left), scope)

@@ -20,6 +20,10 @@ func TestInferBuiltin(t *testing.T) {
 		{`floor`, `float -> int`},
 		{`to-float`, `int -> float`},
 
+		// bytes
+		{`byte/to-int`, `byte -> int`},
+		{`bytes/length`, `bytes -> int`},
+
 		// byte <-> text conversion
 		{`bytes/to-utf8-text`, `bytes -> text`},
 		{`bytes/from-utf8-text`, `text -> bytes`},
@@ -28,6 +32,11 @@ func TestInferBuiltin(t *testing.T) {
 		{`int/cmp`, `int -> int -> [ #eq, #gt, #lt ]`},
 		{`int/div`, `int -> int -> [ #none, #some int ]`},
 		{`int/to-text`, `int -> text`},
+		{`int/and`, `int -> int -> int`},
+		{`int/or`, `int -> int -> int`},
+		{`int/xor`, `int -> int -> int`},
+		{`int/shl`, `int -> int -> int`},
+		{`int/shr`, `int -> int -> int`},
 		{`text/cmp`, `text -> text -> [ #eq, #gt, #lt ]`},
 		{`text/split`, `text -> text -> list text`},
 		{`text/to-int`, `text -> [ #none, #some int ]`},

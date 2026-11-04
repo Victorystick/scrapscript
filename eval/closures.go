@@ -850,6 +850,21 @@ func (p *program) pattern(n cnode) mcode {
 			return last >= 0 && im(listVal(l[:last]), f) && lm(l[last], f)
 		}
 
+	case patConsBytes:
+		hm, tm := p.pattern(cnode(d.a)), p.pattern(cnode(d.b))
+		return func(v value, f []value) bool {
+			b := v.asBytes()
+			return len(b) > 0 && hm(byteVal(b[0]), f) && tm(bytesVal(b[1:]), f)
+		}
+
+	case patSnocBytes:
+		im, lm := p.pattern(cnode(d.a)), p.pattern(cnode(d.b))
+		return func(v value, f []value) bool {
+			b := v.asBytes()
+			last := len(b) - 1
+			return last >= 0 && im(bytesVal(b[:last]), f) && lm(byteVal(b[last]), f)
+		}
+
 	case patPrefix:
 		rest, elems := p.elems(n)
 		rm, ms := p.pattern(rest), p.patterns(elems)

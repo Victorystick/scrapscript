@@ -160,6 +160,15 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, variables) {
 	define("int/to-text", reg.Func(types.IntRef, types.TextRef), func(i value) value {
 		return textVal(strconv.Itoa(i.asInt()))
 	})
+	// Bitwise operations on the 64 bits of ints.
+	intOp := reg.Func(types.IntRef, reg.Func(types.IntRef, types.IntRef))
+	define2("int/and", intOp, func(a, b value) value { return intVal(a.asInt() & b.asInt()) })
+	define2("int/or", intOp, func(a, b value) value { return intVal(a.asInt() | b.asInt()) })
+	define2("int/xor", intOp, func(a, b value) value { return intVal(a.asInt() ^ b.asInt()) })
+	// Shifts take the amount first. They are logical, and total: by 64 or
+	// more they give 0, and by a negative amount they shift the other way.
+	define2("int/shl", intOp, func(n, x value) value { return intVal(shift(x.asInt(), n.asInt(), true)) })
+	define2("int/shr", intOp, func(n, x value) value { return intVal(shift(x.asInt(), n.asInt(), false)) })
 
 	// int -> float
 	define("to-float", reg.Func(types.IntRef, types.FloatRef), func(i value) value {
@@ -171,6 +180,14 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, variables) {
 	define("round", floatToInt, roundFunc(math.Round))
 	define("ceil", floatToInt, roundFunc(math.Ceil))
 	define("floor", floatToInt, roundFunc(math.Floor))
+
+	// Bytes
+	define("byte/to-int", reg.Func(types.ByteRef, types.IntRef), func(b value) value {
+		return intVal(int(b.asByte()))
+	})
+	define("bytes/length", reg.Func(types.BytesRef, types.IntRef), func(bs value) value {
+		return intVal(len(bs.asBytes()))
+	})
 
 	// bytes <-> text
 	define("bytes/to-utf8-text", reg.Func(types.BytesRef, types.TextRef), func(v value) value {
@@ -185,6 +202,23 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, variables) {
 	})
 
 	return scope, builtIns
+}
+
+// shift shifts the bits of x by n, left or right, filling with zeros.
+func shift(x, n int, left bool) int {
+	if n < 0 {
+		if n <= -64 {
+			return 0
+		}
+		n, left = -n, !left
+	}
+	if n >= 64 {
+		return 0
+	}
+	if left {
+		return int(uint64(x) << n)
+	}
+	return int(uint64(x) >> n)
 }
 
 func roundFunc(round func(float64) float64) func(value) value {

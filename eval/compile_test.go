@@ -57,7 +57,8 @@ import (
 //	                     k is at index i
 //	[p, q]               matches a list of exactly that length
 //	(>+ h t), (+< i l)   matches a non-empty list by head and tail, or by
-//	                     init and last element
+//	                     init and last element; suffixed with bytes, the
+//	                     same of bytes
 //	(++ [p] r), (++ r [p])
 //	                     matches a list by a prefix or suffix of elements,
 //	                     and the rest
@@ -88,7 +89,7 @@ var opStrings = map[op]string{
 	opAppendList: "+<", opAppendBytes: "+<bytes",
 	opPrependList: ">+", opPrependBytes: ">+bytes",
 	opConcatList: "++", opConcatText: "++text", opConcatBytes: "++bytes",
-	patCons: ">+", patSnoc: "+<",
+	patCons: ">+", patSnoc: "+<", patConsBytes: ">+bytes", patSnocBytes: "+<bytes",
 }
 
 // dump writes node n of c as an S-expression, described above.
@@ -111,7 +112,7 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 		c.list(s, "(", ")", "", ns...)
 	case opAddInt, opSubInt, opMulInt, opAddFloat, opSubFloat, opMulFloat,
 		opAppendList, opAppendBytes, opPrependList, opPrependBytes,
-		opConcatList, opConcatText, opConcatBytes, patCons, patSnoc:
+		opConcatList, opConcatText, opConcatBytes, patCons, patSnoc, patConsBytes, patSnocBytes:
 		c.list(s, "("+opStrings[o]+" ", ")", "", cnode(d.a), cnode(d.b))
 	case opCompose:
 		first, second, u := c.compose(n)
@@ -469,6 +470,8 @@ func TestCompile(t *testing.T) {
 		{`1.0 * 2.0`, `(*float 1.0 2.0)`, 0},
 		{`~~aGk= ++ ~~aGk=`, `(++bytes ~~aGk= ~~aGk=)`, 0},
 		{`~00 >+ ~~aGk= +< ~21`, `(>+bytes ~00 (+<bytes ~~aGk= ~21))`, 0},
+		{`| ~~ -> 0 | h >+ _ -> 1 | ~00 >+ t +< ~01 -> 2`,
+			`(fn/1 | ~~ -> 0 | (>+bytes >0 _) -> 1 | (>+bytes ~00 (+<bytes >0 ~01)) -> 2)`, 0},
 	}
 	for _, tt := range tests {
 		c := compileString(t, tt.source)

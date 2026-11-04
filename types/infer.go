@@ -98,6 +98,18 @@ type context struct {
 	// done.
 	tests []test
 	ends  []int
+	// The >+ and +< patterns of the match functions being inferred, whose
+	// sequence is a list or bytes, as a stack like tests.
+	seqs []seqPattern
+}
+
+// A seqPattern is a >+ or +< pattern of type ty, whose element and rest
+// have the types elem and seq. Once its match function's arms are
+// inferred, it matches bytes if one of these is known to be bytes or a
+// byte, and a list otherwise.
+type seqPattern struct {
+	x             ast.Node
+	ty, elem, seq TypeRef
 }
 
 func (c *context) bail(n ast.Node, msg string) {
@@ -675,7 +687,8 @@ func (c *context) matchFunc(x ast.Node, want TypeRef) TypeRef {
 		}
 	}
 	m := arms{tests: len(c.tests), ends: len(c.ends)}
-	defer func() { c.tests, c.ends = c.tests[:m.tests], c.ends[:m.ends] }()
+	seqs := len(c.seqs)
+	defer func() { c.tests, c.ends, c.seqs = c.tests[:m.tests], c.ends[:m.ends], c.seqs[:seqs] }()
 	for _, arm := range c.src.Arms(x) {
 		pats, body := c.src.Arm(arm)
 		scope := c.scope
@@ -688,6 +701,7 @@ func (c *context) matchFunc(x ast.Node, want TypeRef) TypeRef {
 		c.ensure(body, bodyTy, c.infer(body))
 		c.scope = scope
 	}
+	c.settleSeqs(c.seqs[seqs:])
 
 	for _, e := range m.enums {
 		if !e.at.coveredBy(m.catchAll) {
@@ -700,6 +714,48 @@ func (c *context) matchFunc(x ast.Node, want TypeRef) TypeRef {
 		ty = c.reg.Func(args[i], ty)
 	}
 	return ty
+}
+
+// settleSeqs makes each of the patterns match bytes or a list. Settling one
+// can tell what another is, inside it or around it, so it settles those
+// that it knows the kind of until none are left, and when it knows none,
+// the first as a list.
+func (c *context) settleSeqs(pending []seqPattern) {
+	for len(pending) > 0 {
+		left := pending[:0]
+		for _, s := range pending {
+			bytes, list := c.seqKind(s)
+			switch {
+			case bytes:
+				c.ensure(s.x, s.ty, BytesRef)
+				c.ensure(s.x, s.seq, BytesRef)
+				c.ensure(s.x, s.elem, ByteRef)
+			case list:
+				c.settleList(s)
+			default:
+				left = append(left, s)
+			}
+		}
+		if len(left) == len(pending) {
+			c.settleList(left[0])
+			left = left[1:]
+		}
+		pending = left
+	}
+}
+
+// seqKind returns whether the pattern is known to match bytes, or a list.
+func (c *context) seqKind(s seqPattern) (bytes, list bool) {
+	ty, seq := c.reg.Resolve(s.ty), c.reg.Resolve(s.seq)
+	if ty == BytesRef || seq == BytesRef || c.reg.Resolve(s.elem) == ByteRef {
+		return true, false
+	}
+	return false, c.reg.at(ty).kind == listKind || c.reg.at(seq).kind == listKind
+}
+
+func (c *context) settleList(s seqPattern) {
+	c.ensure(s.x, s.ty, c.reg.List(s.elem))
+	c.ensure(s.x, s.seq, s.ty)
 }
 
 func (p position) coveredBy(catchAll []position) bool {
@@ -798,19 +854,23 @@ func (c *context) pattern(m *arms, x ast.Node, ty TypeRef, at position) {
 		// Parts of a list are lists, but don't catch all of it.
 		op, l, r := c.src.Binary(x)
 		c.tests = append(c.tests, test{at: at})
+		if op == token.PREPEND || op == token.APPEND {
+			// A list or bytes, which a sequence of bytes is, as for the
+			// operators. Its match function settles which.
+			elem, seq := c.reg.Var(), c.reg.Var()
+			c.seqs = append(c.seqs, seqPattern{x, ty, elem, seq})
+			if op == token.PREPEND {
+				c.pattern(m, l, elem, at.step("[]"))
+				c.pattern(m, r, seq, at.step("[..]"))
+			} else {
+				c.pattern(m, l, seq, at.step("[..]"))
+				c.pattern(m, r, elem, at.step("[]"))
+			}
+			return
+		}
 		elem := c.reg.Var()
 		list := c.reg.List(elem)
 		switch op {
-		case token.PREPEND:
-			c.ensure(x, ty, list)
-			c.pattern(m, l, elem, at.step("[]"))
-			c.pattern(m, r, list, at.step("[..]"))
-			return
-		case token.APPEND:
-			c.ensure(x, ty, list)
-			c.pattern(m, l, list, at.step("[..]"))
-			c.pattern(m, r, elem, at.step("[]"))
-			return
 		case token.CONCAT:
 			c.ensure(x, ty, list)
 			c.pattern(m, l, list, at.step("[..]"))

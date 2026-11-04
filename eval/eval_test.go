@@ -133,6 +133,14 @@ var expressions = []struct {
 	{`{ a = xs ++ [1], b = xs ++ [2] } ; xs = [0, 0, 0] +< 9`, `{ a = [ 0, 0, 0, 9, 1 ], b = [ 0, 0, 0, 9, 2 ] }`},
 	{`{ a = bs +< ~01, b = bs +< ~02 } ; bs = ~~AAAA +< ~09`, `{ a = ~~AAAACQE=, b = ~~AAAACQI= }`},
 	{`| ns ++ [2, 3] -> ns | _ -> [] <| [1, 2, 3]`, `[ 1 ]`},
+	{`| b >+ bs -> { b, bs } | ~~ -> { b = ~00, bs = ~~ } <| ~~YWJj`, `{ b = ~61, bs = ~~YmM= }`},
+	{`| bs +< b -> { b, bs } | ~~ -> { b = ~00, bs = ~~ } <| ~~YWJj`, `{ b = ~63, bs = ~~YWI= }`},
+	{`| ~61 >+ bs -> bs | _ -> ~~ <| ~~YWJj`, `~~YmM=`},
+	{`| ~62 >+ bs -> bs | _ -> ~~ <| ~~YWJj`, `~~`},
+	{`| a >+ ~~ -> [a] | ~~ -> [] | a >+ _ +< c -> [a, c] <| ~~YWJj`, `[ ~61, ~63 ]`},
+	{`| a >+ ~~ -> [a] | ~~ -> [] | a >+ _ +< c -> [a, c] <| ~~YQ==`, `[ ~61 ]`},
+	// A bytes' rest shares its bytes, which appending to it copies.
+	{`| b >+ bs -> { a = bs +< ~01, b = bs +< ~02, bs } | ~~ -> { a = ~~, b = ~~, bs = ~~ } <| ~~YWJj`, `{ a = ~~YmMB, b = ~~YmMC, bs = ~~YmM= }`},
 	{`| [1, 2] ++ ns -> ns | _ -> [] <| [1, 2, 3]`, `[ 3 ]`},
 	{`| ns ++ [2, last] -> ns +< last | _ -> [] <| [1, 2, 3]`, `[ 1, 3 ]`},
 	// A catch-all binder excludes the tags that earlier arms cover.
@@ -255,6 +263,17 @@ var exp2str = []struct{ source, result string }{
 	{`~~aGVsbG8gd29ybGQ= +< ~21 |> bytes/to-utf8-text`, `"hello world!"`},
 	{`bytes/to-utf8-text ~~aGVsbG8gd29ybGQ=`, `"hello world"`},
 	{`bytes/from-utf8-text "hello world"`, `~~aGVsbG8gd29ybGQ=`},
+	{`[~00, ~7f, ~80, ~ff] |> list/map byte/to-int`, `[ 0, 127, 128, 255 ]`},
+	{`[int/and 12 10, int/or 12 10, int/xor 12 10]`, `[ 8, 14, 6 ]`},
+	{`[int/and -1 255, int/or -256 255, int/xor -1 0]`, `[ 255, -1, -1 ]`},
+	{`[int/shl 4 1, int/shl 63 1, int/shl 64 1, int/shl 0 7]`, `[ 16, -9223372036854775808, 0, 7 ]`},
+	// Right shifts are logical: they fill with zeros, also for negative ints.
+	{`[int/shr 2 16, int/shr 60 -1, int/shr 63 -1, int/shr 64 -1]`, `[ 4, 15, 1, 0 ]`},
+	// Negative amounts shift the other way.
+	{`[int/shl -2 16, int/shr -2 1, int/shl -64 -1, int/shr (0 - 9223372036854775807 - 1) -1]`, `[ 4, 4, 0, 0 ]`},
+	{`16 |> int/shr 2 |> int/shl 1`, `8`},
+	{`[~~, ~~/w==, ~~aGVsbG8=] |> list/map bytes/length`, `[ 0, 1, 5 ]`},
+	{`bytes/length (bytes/from-utf8-text "héllo")`, `6`},
 
 	{`1 >+ [2, 3] +< 4`, `[ 1, 2, 3, 4 ]`},
 	{`1 >+ []`, `[ 1 ]`},
