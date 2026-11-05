@@ -78,6 +78,40 @@ func exportRespond(h int32) int32 {
 	return respond(nil, mod.response(int(h), input))
 }
 
+// exportWake runs app h's command with the id, which isn't a request,
+// and returns 0, or minus the length of an error message (module.wake).
+//
+//go:wasmexport wake
+func exportWake(h, id int32) int32 {
+	return respond(nil, mod.wake(int(h), uint32(id)))
+}
+
+// exportSubscriptions returns the length of the timers to run for app h's
+// subscriptions as JSON, 0 if they are as last returned, or minus the
+// length of an error message (module.subscriptions).
+//
+//go:wasmexport subscriptions
+func exportSubscriptions(h int32) int32 {
+	return respond(mod.subscriptions(int(h)))
+}
+
+// exportTick fires app h's #every subscriptions of ms milliseconds, and
+// returns 0, or minus the length of an error message (module.tick).
+//
+//go:wasmexport tick
+func exportTick(h int32, ms float64) int32 {
+	return respond(nil, mod.tick(int(h), int64(ms)))
+}
+
+// exportFrame fires app h's #animation-frame subscriptions with the
+// milliseconds since the last frame, and returns 0, or minus the length
+// of an error message (module.frame).
+//
+//go:wasmexport frame
+func exportFrame(h int32, delta float64) int32 {
+	return respond(nil, mod.frame(int(h), delta))
+}
+
 //go:wasmexport stop
 func exportStop(h int32) {
 	mod.stop(int(h))

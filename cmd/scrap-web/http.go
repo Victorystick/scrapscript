@@ -11,8 +11,9 @@ import (
 )
 
 // A command is what the page carries out for an app, which commands
-// encode as JSON: an HTTP request, for now. Its id names it when the
-// page responds.
+// encode as JSON: an HTTP request, or, without one, a call back to wake
+// soon after, when the module works out the time or a random number. Its
+// id names it when the page responds.
 type command struct {
 	ID   uint32       `json:"id"`
 	HTTP *httpRequest `json:"http,omitempty"`
@@ -28,9 +29,8 @@ type httpRequest struct {
 	Bytes   *[]byte     `json:"bytes,omitempty"`
 }
 
-// commands takes app h's queued commands, gives each request an id, and
-// returns them as a JSON list of commands, or nothing if there are none.
-// The other commands are dropped for now (WEB_PLAN.md).
+// commands takes app h's queued commands, gives each an id, and returns
+// them as a JSON list of commands, or nothing if there are none.
 func (m *module) commands(h int) ([]byte, error) {
 	a, err := m.app(h)
 	if err != nil {
@@ -38,16 +38,16 @@ func (m *module) commands(h int) ([]byte, error) {
 	}
 	var cmds []command
 	for _, c := range a.s.Commands() {
-		if c.Tag() != CmdHttp {
-			continue
-		}
-		r := c.Http()
 		a.next++
 		if a.pending == nil {
-			a.pending = map[uint32]ExpectRef{}
+			a.pending = map[uint32]CmdRef{}
 		}
-		a.pending[a.next] = r.Expect()
-		cmds = append(cmds, command{ID: a.next, HTTP: newHTTPRequest(r)})
+		a.pending[a.next] = c
+		cmd := command{ID: a.next}
+		if c.Tag() == CmdHttp {
+			cmd.HTTP = newHTTPRequest(c.Http())
+		}
+		cmds = append(cmds, cmd)
 	}
 	if len(cmds) == 0 {
 		return nil, nil
@@ -99,11 +99,12 @@ func (m *module) response(h int, input []byte) error {
 	if err != nil {
 		return err
 	}
-	expect, ok := a.pending[id]
-	if !ok {
+	cmd, ok := a.pending[id]
+	if !ok || cmd.Tag() != CmdHttp {
 		return nil
 	}
 	delete(a.pending, id)
+	expect := cmd.Http().Expect()
 
 	failure := ""
 	switch {

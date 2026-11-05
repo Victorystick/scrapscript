@@ -945,6 +945,14 @@ the app chooses: its model, and its messages.
   fails, if the status isn't 2xx (`bad status: 404`), or if a body
   expected to be JSON isn't (`bad body: …`). Requests run concurrently,
   and their responses update the app as they arrive, one at a time.
+- **Time and randomness.** `#now` gets the time in milliseconds since the
+  epoch; `#random-int` an integer from `min` to `max`, both included (or
+  from `max` to `min`, as in Elm); `#random-float` a float from 0 up to 1.
+  Their messages come soon after the step, as updates of their own. An
+  `#every` subscription gets the time every `ms` milliseconds, and those
+  with the same `ms` share a timer. An `#animation-frame` subscription
+  gets the milliseconds since the last frame, or since it subscribed,
+  just before the page renders the frame.
 - **Failure.** A step that fails, by an error or by running past its
   deadline, changes nothing: the model stays as it was and its commands
   are not carried out.
