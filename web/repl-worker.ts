@@ -7,7 +7,7 @@ import {
   wasmURL,
   type Command,
   type WasmResult,
-} from '@scrapscript/web';
+} from '@scrapscript/web/scrap-wasm';
 
 export interface RunRequest {
   id: number;

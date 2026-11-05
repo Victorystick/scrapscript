@@ -7,7 +7,7 @@ import {
   wasmURL,
   type Command,
   type WasmResult,
-} from '@scrapscript/web';
+} from '@scrapscript/web/scrap-wasm';
 import { highlightExamples } from './vite.config.ts';
 
 // The scrap CLI, built from this repository by pnpm test, which runs each

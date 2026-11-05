@@ -1,4 +1,5 @@
-# Tests the site in web/, and on main deploys it to GitHub Pages.
+# Tests the site in web/ and the runtime in js/, and on main deploys the
+# site to GitHub Pages.
 
 name: Pages
 
@@ -45,6 +46,13 @@ jobs:
 
     - name: Test
       run: pnpm test
+
+    # The runtime's tests run apps in Chromium.
+    - name: Install Chromium
+      run: pnpm --dir ../js exec playwright install --with-deps chromium
+
+    - name: Test the runtime
+      run: pnpm --dir ../js test
 
     - name: Build
       run: pnpm build

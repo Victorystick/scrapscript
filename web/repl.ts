@@ -4,7 +4,7 @@
 // `scrap test` for an example with data-run="test". Without this script,
 // the examples show what they print as they are.
 import type { RunRequest, RunResponse } from './repl-worker.ts';
-import { printTests, type Command, type WasmResult } from '@scrapscript/web';
+import { printTests, type Command, type WasmResult } from '@scrapscript/web/scrap-wasm';
 
 // How long a scrap may run before the page stops the worker, in case it is
 // still fetching scraps or stuck. The worker stops evaluating it a little

@@ -117,9 +117,9 @@ The web platform:
    documented and the handler table. Tested against a mock DOM in Go:
    applying `diff(a, b)` to the DOM of `a` gives the DOM of `b` (#31).
 9. [x] **Keyed children** in the diff (#33).
-10. [ ] **Runtime:** in the `js/` workspace, the patch interpreter, event
+10. [x] **Runtime:** in the `js/` workspace, the patch interpreter, event
     delegation, and `mount(element, { source, flags, fetchScrap })`.
-    Tested in Chromium.
+    Tested in Chromium (#34).
 11. [ ] **HTTP**, and `json` both ways.
 12. [ ] **Time, animation frames and random**, with subscriptions diffed.
 13. [ ] **Playground** page in `web/`: an editor and the running app,
