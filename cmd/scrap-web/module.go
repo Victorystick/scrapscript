@@ -25,12 +25,14 @@ type module struct {
 	apps []*app // by handle - 1, nil once stopped
 }
 
-// An app is a session, with its environment, and how long each step may
-// take.
+// An app is a session, with its environment, how long each step may
+// take, and what its requests expect, by id, until the page responds.
 type app struct {
 	s       *Session
 	env     *eval.Environment
 	timeout time.Duration
+	pending map[uint32]ExpectRef
+	next    uint32 // the last request's id
 }
 
 // A startRequest starts an app.
@@ -125,14 +127,12 @@ func (a *app) step() {
 }
 
 // render returns the patch from the app's last view to its view now, as
-// Session.Render does. Commands are dropped for now: carrying them out
-// comes later (WEB_PLAN.md).
+// Session.Render does.
 func (m *module) render(h int) ([]byte, error) {
 	a, err := m.app(h)
 	if err != nil {
 		return nil, err
 	}
-	a.s.Commands()
 	a.step()
 	p, err := a.s.Render()
 	if err != nil {

@@ -11,6 +11,9 @@ comes next.
   (their format is in `cmd/scrap-web/patch.go`), and passes events back:
   it listens to each event once, on the element, in the capture phase.
   Events update the app at once, and it renders once per animation frame.
+  It carries out the app's `#http` commands with `fetch` after each step,
+  and passes back each response as a step of its own; stopping the app
+  aborts its requests.
 - `scrap-web.wasm` is the web platform's host as WebAssembly, built from
   `cmd/scrap-web`; `scrap-web.ts` runs it, and `webWasmURL` is where it is.
   Pages share one `ScrapWeb`, which runs any number of apps.

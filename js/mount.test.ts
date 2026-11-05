@@ -240,4 +240,98 @@ ${web}`)).toBeNull();
     const marks = await page.evaluate(() => [...document.querySelectorAll('li')].map((li) => (li as any).mark));
     expect(marks).toEqual(['b', 'c', 'd', 'a']);
   });
+  describe('HTTP', () => {
+    // An API that serves some JSON, echoes what it gets, and lacks the rest.
+    beforeEach(async () => {
+      await page.route('**/api/**', async (route) => {
+        const r = route.request();
+        const path = new URL(r.url()).pathname;
+        if (path === '/api/data') {
+          await route.fulfill({ json: { name: 'hé', n: 2 } });
+        } else if (path === '/api/echo' && r.method() === 'PUT') {
+          await route.fulfill({ status: 201, body: r.postDataBuffer()! });
+        } else if (path === '/api/echo') {
+          const h = r.headers();
+          await route.fulfill({ body: `${r.method()} ${h['content-type']} ${h['x-scrap']} ${r.postData()}` });
+        } else {
+          await route.fulfill({ status: 404, body: 'none' });
+        }
+      });
+    });
+
+    const app = `app
+; app : web (list text) msg =
+    { init = _ -> { model = [], cmds =
+        [ get "/api/data" (#json (r -> #got (json-result r)))
+        , #http { method = "POST", url = "/api/echo", headers = [{ name = "x-scrap", value = "yes" }], body = #json (#object [{ key = "a", value = #list [#number 1.5, #null, #bool #true] }]), expect = #text (r -> #got (text-result r)) }
+        , #http { method = "PUT", url = "/api/echo", headers = [], body = #bytes ~~AAH/, expect = #bytes (r -> #got (bytes-result r)) }
+        ] }
+    , update = | #got t -> log -> { model = log +< t, cmds = [] }
+               | #more  -> log -> { model = log, cmds = [get "/api/missing" (#text (r -> #got (text-result r))), get "/api/data" (#text (r -> #got (text-result r)))] }
+    , view = log -> #el { tag = "div", attrs = [#on-click #more], children = list/map (t -> #el { tag = "p", attrs = [], children = [#text t] }) log }
+    , subscriptions = _ -> []
+    }
+; get = url -> expect -> #http { method = "GET", url = url, headers = [], body = #empty, expect = expect }
+; json-result =
+    | #ok { status = s, headers = _, body = #object ({ key = "name", value = #text t } >+ _) } -> int/to-text s ++ " " ++ t
+    | #ok _ -> "unexpected"
+    | #error e -> e
+; text-result =
+    | #ok r -> int/to-text r.status ++ " " ++ r.body
+    | #error e -> e
+; bytes-result =
+    | #ok r -> int/to-text r.status ++ " " ++ int/to-text (bytes/length r.body)
+    | #error e -> e
+; msg : type = [#got text, #more]
+${web}`;
+
+    // first replaces the URL of the first request, which expects JSON.
+    const first = (url: string) => app.replace('"/api/data"', JSON.stringify(url));
+    const log = () => page.$$eval('p', (ps) => ps.map((p) => p.textContent));
+
+    test('carries out requests, and passes back their responses', async () => {
+      expect(await start(app)).toBeNull();
+      await page.waitForFunction(() => document.querySelectorAll('p').length === 3);
+      expect((await log()).sort()).toEqual([
+        '200 POST application/json yes {"a":[1.5,null,true]}',
+        '200 hé',
+        '201 3',
+      ]);
+      // An update's requests; as in Elm, a status that isn't 2xx is an
+      // error.
+      await page.click('div');
+      await page.waitForFunction(() => document.querySelectorAll('p').length === 5);
+      expect((await log()).sort()).toEqual([
+        '200 POST application/json yes {"a":[1.5,null,true]}',
+        '200 hé',
+        '200 {"name":"hé","n":2}',
+        '201 3',
+        'bad status: 404',
+      ]);
+      expect(await errors()).toEqual([]);
+    });
+
+    test('reports a request that fails', async () => {
+      expect(await start(first('http://127.0.0.1:1/'))).toBeNull();
+      await page.waitForFunction(() => document.querySelectorAll('p').length === 3);
+      expect(await log()).toContain('Failed to fetch');
+    });
+
+    test('reports a body that is not the JSON expected', async () => {
+      expect(await start(first('/api/echo'))).toBeNull();
+      await page.waitForFunction(() => document.querySelectorAll('p').length === 3);
+      expect((await log()).filter((t) => t!.startsWith('bad body: '))).toHaveLength(1);
+    });
+
+    test('aborts its requests when it stops', async () => {
+      await page.route('**/api/data', () => {});
+      const failed = page.waitForEvent('requestfailed', (r) => r.url().endsWith('/api/data'));
+      expect(await start(app)).toBeNull();
+      await page.waitForFunction(() => document.querySelectorAll('p').length === 2);
+      await page.evaluate(() => (window as any).app.stop());
+      expect((await failed).failure()?.errorText).toBe('net::ERR_ABORTED');
+      expect(await page.locator('p').count()).toBe(2);
+      expect(await errors()).toEqual([]);
+    });
+  });
 });

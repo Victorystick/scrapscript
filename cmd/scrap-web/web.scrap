@@ -40,7 +40,8 @@ app
     , #random-float (float -> msg)
     ]
 ; request : type -> type = msg =>
-    { method : text, url : text, headers : list header, body : text, expect : expect msg }
+    { method : text, url : text, headers : list header, body : body, expect : expect msg }
+; body : type = [#empty, #text text, #bytes bytes, #json json]
 ; expect : type -> type = msg =>
     [ #text (result (response text) -> msg)
     , #bytes (result (response bytes) -> msg)

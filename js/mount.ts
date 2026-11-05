@@ -1,7 +1,7 @@
 // mount runs a scrapscript app in the Elm architecture in an element of
 // the page: the web platform, whose interface is cmd/scrap-web/web.scrap.
 
-import { ScrapWeb, webWasmURL } from './scrap-web.ts';
+import { ScrapWeb, webWasmURL, type HttpRequest } from './scrap-web.ts';
 
 export interface MountOptions {
   // The app's scrap.
@@ -94,9 +94,9 @@ async function fetchFromYard(key: string): Promise<string | null> {
   return response.text();
 }
 
-// A Running app renders its views into the page and passes it events.
-// Events update the app at once, and it renders once per animation frame
-// after them.
+// A Running app renders its views into the page, passes it events, and
+// carries out its commands. Events and responses update the app at once,
+// and it renders once per animation frame after them.
 class Running implements App {
   #web: ScrapWeb;
   #handle: number;
@@ -104,6 +104,8 @@ class Running implements App {
   #onError: (message: string) => void;
   #frame = 0;
   #stopped = false;
+  // Aborts the app's requests when it stops.
+  #abort = new AbortController();
 
   constructor(element: Element, web: ScrapWeb, handle: number, onError: (message: string) => void) {
     this.#web = web;
@@ -112,12 +114,14 @@ class Running implements App {
     element.replaceChildren();
     this.#page = new Page(element, (id, name, node) => this.#event(id, name, node));
     this.#render();
+    this.#carryOut();
   }
 
   stop() {
     if (this.#stopped) return;
     this.#stopped = true;
     cancelAnimationFrame(this.#frame);
+    this.#abort.abort();
     this.#page.detach();
     this.#web.stop(this.#handle);
   }
@@ -130,10 +134,58 @@ class Running implements App {
     } catch (e) {
       this.#onError(message(e));
     }
+    this.#stepped();
+  }
+
+  // #stepped carries out the commands of the steps since the last, and
+  // renders in the next animation frame.
+  #stepped() {
+    this.#carryOut();
     this.#frame ||= requestAnimationFrame(() => {
       this.#frame = 0;
       this.#render();
     });
+  }
+
+  #carryOut() {
+    let commands;
+    try {
+      commands = this.#web.commands(this.#handle);
+    } catch (e) {
+      this.#onError(message(e));
+      return;
+    }
+    for (const c of commands) {
+      if (c.http) this.#fetch(c.id, c.http);
+    }
+  }
+
+  // #fetch carries out a request, and passes the app its response, or why
+  // it failed, unless the app stops first.
+  async #fetch(id: number, r: HttpRequest) {
+    let status = 0;
+    let headers: [string, string][] = [];
+    let body: Uint8Array;
+    try {
+      const response = await fetch(r.url, {
+        method: r.method,
+        headers: r.headers,
+        body: r.bytes != null ? fromBase64(r.bytes) : r.text,
+        signal: this.#abort.signal,
+      });
+      body = new Uint8Array(await response.arrayBuffer());
+      status = response.status;
+      headers = [...response.headers];
+    } catch (e) {
+      body = encoder.encode(message(e));
+    }
+    if (this.#stopped) return;
+    try {
+      this.#web.respond(this.#handle, id, status, headers, body);
+    } catch (e) {
+      this.#onError(message(e));
+    }
+    this.#stepped();
   }
 
   #render() {
@@ -152,6 +204,12 @@ class Running implements App {
 function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
+
+function fromBase64(s: string): Uint8Array {
+  return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+}
+
+const encoder = new TextEncoder();
 
 // The ops of patches, as numbered in cmd/scrap-web/patch.go.
 const Op = {
