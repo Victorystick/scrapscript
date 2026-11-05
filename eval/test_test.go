@@ -2,6 +2,7 @@ package eval_test
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -52,6 +53,32 @@ func TestTest(t *testing.T) {
 		if results[i] != want[i] {
 			t.Errorf("result %d: got %#v, want %#v", i, results[i], want[i])
 		}
+	}
+}
+
+// TestLibraries runs the test scraps in lib, named after the scrap they
+// test, as murmur3-test.scrap tests murmur3.scrap.
+func TestLibraries(t *testing.T) {
+	files, err := filepath.Glob("../lib/*-test.scrap")
+	if err != nil || len(files) == 0 {
+		t.Fatal("no test scraps in lib", err)
+	}
+	for _, f := range files {
+		t.Run(filepath.Base(f), func(t *testing.T) {
+			source, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			results, err := testScrap(t, string(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, r := range results {
+				if r.Failed {
+					t.Errorf("%s\n%s", r.Path, r.Message)
+				}
+			}
+		})
 	}
 }
 

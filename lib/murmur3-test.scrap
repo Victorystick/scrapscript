@@ -1,0 +1,41 @@
+-- Tests of murmur3.scrap: `scrap test < murmur3-test.scrap`.
+
+{ murmur3 =
+    -- Standard MurmurHash3 x86_32 vectors. They cover every tail length,
+    -- an all-0xff block, whose products overflow to negative ints, and
+    -- non-zero seeds.
+    { empty =
+        [ t.eq (m.murmur3 0 ~~) 0
+        , t.eq (m.murmur3 1 ~~) 1364076727
+        , t.eq (m.murmur3 4294967295 ~~) 2180083513
+        ]
+    , all-ones = t.eq (m.murmur3 0 ~~/////w==) 1982413648
+    , tails =
+        [ t.eq (m.murmur3 0 ~~IUNlhw==) 4116402539
+        , t.eq (m.murmur3 0 ~~IUNl) 2118813236
+        , t.eq (m.murmur3 0 ~~IUM=) 2700587130
+        , t.eq (m.murmur3 0 ~~IQ==) 1919294708
+        ]
+    , text =
+        [ t.eq (m.murmur3 0 ~~aGVsbG8=) 613153351
+        , t.eq (m.murmur3 0 ~~VGhlIHF1aWNrIGJyb3duIGZveCBqdW1wcyBvdmVyIHRoZSBsYXp5IGRvZw==) 776992547
+        ]
+    , seeded =
+        [ t.eq (m.murmur3 2538058380 ~~SGVsbG8sIHdvcmxkIQ==) 612912314
+        , t.eq (m.murmur3 2538058380 ~~YWFhYQ==) 1519878282
+        ]
+    }
+, bucket =
+    -- Buckets of "salt:unit", checked against an independent implementation.
+    [ t.eq (m.bucket "button-copy" "u42") 7008
+    , t.eq (m.bucket "salt" "") 971
+    , t.eq (m.bucket "salt" "u0") 1023
+    , t.eq (m.bucket "salt" "u1") 4253
+    , t.eq (m.bucket "salt" "u42") 2802
+    , t.eq (m.bucket "salt" "a much longer unit name") 896
+    , t.eq (m.bucket "salt" "héllo") 4230
+    ]
+}
+
+; m = $"./murmur3.scrap"
+; t = $"./test.scrap"

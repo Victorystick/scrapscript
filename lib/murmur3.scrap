@@ -1,0 +1,48 @@
+-- MurmurHash3, the x86_32 variant, and bucketing on top of it.
+--
+-- Hash values stay within 0 .. 2^32 - 1: every step that can leave that
+-- range is masked. Ints are 64-bit and wrap, so the low 32 bits of a
+-- product are right even when the product overflows.
+
+{ murmur3, bucket }
+
+-- The 32-bit hash of data, with seed.
+; murmur3 : int -> bytes -> int = seed -> data ->
+    fmix (int/xor (blocks seed data) (bytes/length data))
+
+-- Mixes each little-endian 4-byte block into h, then the 1 to 3 bytes left.
+; blocks : int -> bytes -> int = h ->
+    | a >+ b >+ c >+ d >+ rest -> blocks (mix h (word a b c d)) rest
+    | a >+ b >+ c >+ ~~        -> int/xor h (scramble (word a b c ~00))
+    | a >+ b >+ ~~             -> int/xor h (scramble (word a b ~00 ~00))
+    | a >+ ~~                  -> int/xor h (scramble (word a ~00 ~00 ~00))
+    | ~~                       -> h
+
+; word = a -> b -> c -> d ->
+    byte/to-int a + byte/to-int b * 256 + byte/to-int c * 65536 + byte/to-int d * 16777216
+
+; mix = h -> k -> mask (rotl13 (int/xor h (scramble k)) * 5 + 3864292196)
+
+; scramble = k -> mul32 461845907 (rotl15 (mul32 3432918353 k))
+
+-- Avalanches the bits of h.
+; fmix = h -> h
+    |> shift-xor 16 |> mul32 2246822507
+    |> shift-xor 13 |> mul32 3266489909
+    |> shift-xor 16
+
+; shift-xor = n -> h -> int/xor h (int/shr n h)
+
+-- Rotations left within 32 bits. The two halves share no bits, so + is or.
+; rotl15 = x -> mask (x * 32768) + int/shr 17 x
+; rotl13 = x -> mask (x * 8192) + int/shr 19 x
+
+; mul32 = a -> b -> mask (a * b)
+
+; mask = int/and 4294967295
+
+-- A unit's bucket in 0 .. 9999 for an experiment's salt. The hash is below
+-- 2^32, so scaling it to 10000 and shifting it down needs no division and
+-- gives every bucket a share within one part in 2^32 of the others.
+; bucket : text -> text -> int = salt -> unit ->
+    int/shr 32 (murmur3 1 (bytes/from-utf8-text (salt ++ ":" ++ unit)) * 10000)
