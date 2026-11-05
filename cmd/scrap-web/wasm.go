@@ -61,6 +61,23 @@ func exportEvent(h int32) int32 {
 	return respond(nil, mod.event(int(h), input))
 }
 
+// exportCommands returns the length of app h's commands as JSON, 0 if
+// there are none, or minus the length of an error message
+// (module.commands).
+//
+//go:wasmexport commands
+func exportCommands(h int32) int32 {
+	return respond(mod.commands(int(h)))
+}
+
+// exportRespond passes app h the response in the input, and returns 0, or
+// minus the length of an error message (module.response).
+//
+//go:wasmexport respond
+func exportRespond(h int32) int32 {
+	return respond(nil, mod.response(int(h), input))
+}
+
 //go:wasmexport stop
 func exportStop(h int32) {
 	mod.stop(int(h))

@@ -28,10 +28,27 @@ export type StartResult =
   | { error: string }
   | { missing: string[] };
 
+// A command that an app's step gave, for the page to carry out, by id.
+export interface Command {
+  id: number;
+  http?: HttpRequest;
+}
+
+// An HTTP request, with a text body, or bytes as base64, or neither.
+export interface HttpRequest {
+  method: string;
+  url: string;
+  headers: [string, string][];
+  text?: string;
+  bytes?: string;
+}
+
 interface Exports extends Instance {
   start(): number;
   render(handle: number): number;
   event(handle: number): number;
+  commands(handle: number): number;
+  respond(handle: number): number;
   stop(handle: number): void;
 }
 
@@ -80,6 +97,41 @@ export class ScrapWeb {
       this.#call((e) => {
         this.#write(input);
         return e.event(handle);
+      })
+    );
+  }
+
+  // commands takes the commands that the app's steps have given since it
+  // was last asked, oldest first.
+  commands(handle: number): Command[] {
+    const out = this.#result(this.#call((e) => e.commands(handle)));
+    return out.length === 0 ? [] : JSON.parse(decoder.decode(out));
+  }
+
+  // respond passes the app the response to its request with the id: its
+  // status, headers and body, or a status of 0 and why the request failed.
+  respond(handle: number, id: number, status: number, headers: [string, string][], body: Uint8Array) {
+    const strings = headers.flat().map((s) => encoder.encode(s));
+    const size = strings.reduce((n, s) => n + s.length, 12 + 4 * strings.length + body.length);
+    const input = new Uint8Array(size);
+    const view = new DataView(input.buffer);
+    view.setUint32(0, id, true);
+    view.setUint32(4, status, true);
+    view.setUint32(8, headers.length, true);
+    let at = 12;
+    for (const s of strings) {
+      view.setUint32(at, s.length, true);
+      at += 4;
+    }
+    for (const s of strings) {
+      input.set(s, at);
+      at += s.length;
+    }
+    input.set(body, at);
+    this.#result(
+      this.#call((e) => {
+        this.#write(input);
+        return e.respond(handle);
       })
     );
   }

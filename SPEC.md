@@ -937,6 +937,14 @@ the app chooses: its model, and its messages.
   are matched by key, so that a child keeps its DOM node, with its focus
   and state, as others come and go around it. Keys should be distinct
   among siblings; repeated ones match in order.
+- **HTTP.** A `#http` request's body is `#empty`, text, bytes or a `json`
+  value, which the host sends as JSON text, with the content type
+  `application/json` unless the request's headers give one. Its `expect`
+  says how the response's body comes back: as text, as bytes, or parsed
+  into a `json` value. As in Elm, the result is `#error` if the request
+  fails, if the status isn't 2xx (`bad status: 404`), or if a body
+  expected to be JSON isn't (`bad body: …`). Requests run concurrently,
+  and their responses update the app as they arrive, one at a time.
 - **Failure.** A step that fails, by an error or by running past its
   deadline, changes nothing: the model stays as it was and its commands
   are not carried out.
