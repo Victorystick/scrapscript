@@ -334,4 +334,111 @@ ${web}`;
       expect(await errors()).toEqual([]);
     });
   });
+  describe('time', () => {
+    const t0 = Date.UTC(2026, 0, 1);
+    // The clock stands at t0, and moves only as the tests run it.
+    beforeEach(async () => {
+      await page.clock.install({ time: t0 - 1000 });
+      await page.clock.pauseAt(t0);
+    });
+
+    test('runs timers while subscribed', async () => {
+      await page.evaluate(() => {
+        const w = window as any;
+        w.cleared = 0;
+        const clear = window.clearInterval;
+        window.clearInterval = (id) => (w.cleared++, clear(id));
+      });
+      expect(await start(`app
+; app : web { n : int, at : int } [#tick int] =
+    { init = _ -> { model = { n = 0, at = 0 }, cmds = [] }
+    , update = | #tick t -> m -> { model = { n = m.n + 1, at = t }, cmds = [] }
+    , view = m -> #el { tag = "p", attrs = [], children = [#text (int/to-text m.n ++ " " ++ int/to-text m.at)] }
+    , subscriptions = | { n = 3, at = _ } -> []
+                      | _ -> [#every { ms = 1000, msg = t -> #tick t }, #every { ms = 1000, msg = t -> #tick t }]
+    }
+${web}`)).toBeNull();
+      expect(await page.textContent('p')).toBe('0 0');
+      // Two subscriptions to the same interval share a timer.
+      // It renders in the animation frame after the tick.
+      await page.clock.runFor(1050);
+      expect(await page.textContent('p')).toBe(`2 ${t0 + 1000}`);
+      await page.clock.runFor(1000);
+      expect(await page.textContent('p')).toBe(`4 ${t0 + 2000}`);
+      // It keeps the timer across renders, and clears it when it stops.
+      expect(await page.evaluate(() => (window as any).cleared)).toBe(0);
+      await page.evaluate(() => (window as any).app.stop());
+      expect(await page.evaluate(() => (window as any).cleared)).toBe(1);
+      await page.clock.runFor(1000);
+      expect(await page.textContent('p')).toBe(`4 ${t0 + 2000}`);
+    });
+
+    test('stops timers that it no longer subscribes to', async () => {
+      await page.evaluate(() => {
+        const w = window as any;
+        w.cleared = 0;
+        const clear = window.clearInterval;
+        window.clearInterval = (id) => (w.cleared++, clear(id));
+      });
+      // Ticks every 300 ms twice, and every 1000 ms three times, the
+      // last at t0 + 3000.
+      expect(await start(`app
+; app : web { a : int, b : int, at : int } [#a int, #b] =
+    { init = _ -> { model = { a = 0, b = 0, at = 0 }, cmds = [] }
+    , update = | #a t -> m -> { model = { ..m, a = m.a + 1, at = t }, cmds = [] }
+               | #b   -> m -> { model = { ..m, b = m.b + 1 }, cmds = [] }
+    , view = m -> #el { tag = "p", attrs = [], children = [#text (text/join " " (list/map int/to-text [m.a, m.b, m.at]))] }
+    , subscriptions = | { a = 3, b = _, at = _ } -> []
+                      | { a = _, b = 2, at = _ } -> [#every { ms = 1000, msg = t -> #a t }]
+                      | _ -> [#every { ms = 1000, msg = t -> #a t }, #every { ms = 300, msg = _ -> #b }]
+    }
+${web}`)).toBeNull();
+      await page.clock.runFor(5000);
+      expect(await page.textContent('p')).toBe(`3 2 ${t0 + 3000}`);
+      expect(await page.evaluate(() => (window as any).cleared)).toBe(2);
+    });
+
+    test('passes animation frames the time since the last', async () => {
+      expect(await start(`app
+; app : web (list json) [#frame float] =
+    { init = _ -> { model = [], cmds = [] }
+    , update = | #frame d -> ds -> { model = ds +< #number d, cmds = [] }
+    , view = ds -> #el { tag = "p", attrs = [#prop { name = "deltas", value = #list ds }], children = [#text (int/to-text (list/length ds))] }
+    , subscriptions = ds -> (| 3 -> [] | _ -> [#animation-frame (d -> #frame d)]) (list/length ds)
+    }
+; json : type = [#null, #bool [#false, #true], #number float, #text text, #list (list json), #object (list { key : text, value : json })]
+${web}`)).toBeNull();
+      await page.clock.runFor(1000);
+      expect(await page.textContent('p')).toBe('3');
+      const deltas: number[] = await page.evaluate(() => (document.querySelector('p') as any).deltas);
+      // A frame every 16 ms, as the clock runs them; the first is the
+      // time since the app subscribed, within a frame.
+      expect(deltas.slice(1)).toEqual([16, 16]);
+      expect(deltas[0]).toBeGreaterThan(0);
+      expect(deltas[0]).toBeLessThanOrEqual(16);
+      expect(await errors()).toEqual([]);
+    });
+
+    test('gets the time and random numbers', async () => {
+      expect(await start(`app
+; app : web (list text) [#at int, #roll int, #float float] =
+    { init = _ -> { model = [], cmds = [#now (t -> #at t), #random-float (f -> #float f)] ++ list/repeat 50 (#random-int { min = 6, max = 1, msg = n -> #roll n }) }
+    , update = | #at t    -> log -> { model = log +< ("at " ++ int/to-text t), cmds = [] }
+               | #roll n  -> log -> { model = log +< int/to-text n, cmds = [] }
+               | #float f -> log -> { model = log +< "float", cmds = [] }
+    , view = log -> #el { tag = "p", attrs = [], children = [#text (text/join " " log)] }
+    , subscriptions = _ -> []
+    }
+${web}`)).toBeNull();
+      await page.clock.runFor(100);
+      const [at, now, float, ...rolls] = (await page.textContent('p'))!.split(' ');
+      expect(at).toBe('at');
+      // Woken at once, but after init.
+      expect(Number(now)).toBeGreaterThanOrEqual(t0);
+      expect(Number(now)).toBeLessThan(t0 + 10);
+      expect(float).toBe('float');
+      expect(rolls).toHaveLength(50);
+      expect(new Set(rolls)).toEqual(new Set(['1', '2', '3', '4', '5', '6']));
+    });
+  });
 });

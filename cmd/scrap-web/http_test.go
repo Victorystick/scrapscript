@@ -94,13 +94,18 @@ func TestHTTP(t *testing.T) {
 		}
 	}
 
-	// Init's requests, with ids; #now is dropped. A JSON body is text,
+	// Init's commands, with ids: requests, and #now. A JSON body is text,
 	// with its content type unless the request gives one.
 	commands(`[{"id":1,"http":{"method":"GET","url":"/t","headers":[["accept","text/plain"]]}},` +
 		`{"id":2,"http":{"method":"POST","url":"/b","headers":[],"bytes":"AAH/"}},` +
 		`{"id":3,"http":{"method":"PUT","url":"/j","headers":[["content-type","application/json"]],"text":"{\"a\":[1.5,null,true,\"q\\\"\"]}"}},` +
-		`{"id":4,"http":{"method":"POST","url":"/s","headers":[["Content-Type","text/x"]],"text":"null"}}]`)
+		`{"id":4,"http":{"method":"POST","url":"/s","headers":[["Content-Type","text/x"]],"text":"null"}},` +
+		`{"id":5}]`)
 	commands(``)
+	// Waking a request does nothing.
+	if err := m.wake(h, 1); err != nil {
+		t.Fatal(err)
+	}
 
 	// Responses, in any order. Text is UTF-8 with invalid bytes replaced;
 	// as in Elm, a status that isn't 2xx is an error, as is a body that
@@ -114,7 +119,9 @@ func TestHTTP(t *testing.T) {
 		`["bytes","201","3"],` +
 		`"bad body: invalid character 'n'"]`)
 
-	// Responses to requests that the app doesn't await are ignored.
+	// Responses to requests that the app doesn't await are ignored, as
+	// are those to commands that aren't requests.
+	respond(encodeResponse(5, 200, nil, ""))
 	respond(encodeResponse(1, 200, nil, "again"))
 	respond(encodeResponse(99, 200, nil, ""))
 	commands(``)
@@ -126,24 +133,24 @@ func TestHTTP(t *testing.T) {
 	if err := m.event(h, encodeEvent(Event{Node: 1, Name: "click"})); err != nil {
 		t.Fatal(err)
 	}
-	commands(`[{"id":5,"http":{"method":"GET","url":"/again","headers":[]}},` +
-		`{"id":6,"http":{"method":"GET","url":"/missing","headers":[]}},` +
-		`{"id":7,"http":{"method":"GET","url":"/deep","headers":[]}}]`)
+	commands(`[{"id":6,"http":{"method":"GET","url":"/again","headers":[]}},` +
+		`{"id":7,"http":{"method":"GET","url":"/missing","headers":[]}},` +
+		`{"id":8,"http":{"method":"GET","url":"/deep","headers":[]}}]`)
 
 	// A failed request, and a bad status.
 	before := `[["json","200",{"b":[2,{}],"a":"x"}],["text","200",["content-type:text/plain","x:"],"hi �","6"],["bytes","201","3"],"bad body: invalid character 'n'"`
-	respond(encodeResponse(5, 0, nil, "Failed to fetch"))
-	respond(encodeResponse(6, 404, nil, "not here"))
+	respond(encodeResponse(6, 0, nil, "Failed to fetch"))
+	respond(encodeResponse(7, 404, nil, "not here"))
 	before += `,"Failed to fetch","bad status: 404"`
 	log(before + `]`)
 
 	// A continuation that fails is a step that fails: the model stays as
 	// it was, and the request is done.
-	if err := m.response(h, encodeResponse(7, 500, nil, "")); err == nil || !strings.Contains(err.Error(), "calls nested deeper") {
+	if err := m.response(h, encodeResponse(8, 500, nil, "")); err == nil || !strings.Contains(err.Error(), "calls nested deeper") {
 		t.Errorf("got %v, want the call depth error", err)
 	}
 	log(before + `]`)
-	respond(encodeResponse(7, 200, nil, ""))
+	respond(encodeResponse(8, 200, nil, ""))
 
 	// Bad responses.
 	for _, in := range [][]byte{nil, encodeResponse(1, 200, nil, "")[:11], encodeResponse(1, 200, []Header{{"a", "b"}}, "")[:21]} {

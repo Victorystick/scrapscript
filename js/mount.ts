@@ -95,8 +95,9 @@ async function fetchFromYard(key: string): Promise<string | null> {
 }
 
 // A Running app renders its views into the page, passes it events, and
-// carries out its commands. Events and responses update the app at once,
-// and it renders once per animation frame after them.
+// carries out its commands and subscriptions. Events, responses and
+// timers update the app at once, and it renders once per animation frame
+// after them, just after its animation frame subscriptions.
 class Running implements App {
   #web: ScrapWeb;
   #handle: number;
@@ -106,6 +107,11 @@ class Running implements App {
   #stopped = false;
   // Aborts the app's requests when it stops.
   #abort = new AbortController();
+  // The intervals of the app's #every subscriptions, by milliseconds.
+  #timers = new Map<number, ReturnType<typeof setInterval>>();
+  // Whether it subscribes to animation frames, and the time of the last.
+  #animating = false;
+  #last = 0;
 
   constructor(element: Element, web: ScrapWeb, handle: number, onError: (message: string) => void) {
     this.#web = web;
@@ -121,6 +127,7 @@ class Running implements App {
     if (this.#stopped) return;
     this.#stopped = true;
     cancelAnimationFrame(this.#frame);
+    this.#timers.forEach(clearInterval);
     this.#abort.abort();
     this.#page.detach();
     this.#web.stop(this.#handle);
@@ -129,22 +136,41 @@ class Running implements App {
   #event(id: number, name: string, node: Node) {
     if (this.#stopped) return;
     const el = node as Partial<HTMLInputElement>;
+    this.#step(() =>
+      this.#web.event(this.#handle, id, name, typeof el.value === 'string' ? el.value : '', el.checked === true)
+    );
+  }
+
+  // #step runs a step of the app, unless it has stopped, then carries out
+  // its commands, and renders in the next animation frame.
+  #step(step: () => void) {
+    if (this.#stopped) return;
     try {
-      this.#web.event(this.#handle, id, name, typeof el.value === 'string' ? el.value : '', el.checked === true);
+      step();
     } catch (e) {
       this.#onError(message(e));
     }
-    this.#stepped();
+    this.#carryOut();
+    this.#schedule();
   }
 
-  // #stepped carries out the commands of the steps since the last, and
-  // renders in the next animation frame.
-  #stepped() {
-    this.#carryOut();
-    this.#frame ||= requestAnimationFrame(() => {
-      this.#frame = 0;
-      this.#render();
-    });
+  #schedule() {
+    this.#frame ||= requestAnimationFrame((time) => this.#onFrame(time));
+  }
+
+  #onFrame(time: number) {
+    this.#frame = 0;
+    if (this.#animating) {
+      const delta = Math.max(0, time - this.#last);
+      this.#last = time;
+      try {
+        this.#web.frame(this.#handle, delta);
+      } catch (e) {
+        this.#onError(message(e));
+      }
+      this.#carryOut();
+    }
+    this.#render();
   }
 
   #carryOut() {
@@ -157,6 +183,7 @@ class Running implements App {
     }
     for (const c of commands) {
       if (c.http) this.#fetch(c.id, c.http);
+      else setTimeout(() => this.#step(() => this.#web.wake(this.#handle, c.id)));
     }
   }
 
@@ -179,25 +206,46 @@ class Running implements App {
     } catch (e) {
       body = encoder.encode(message(e));
     }
-    if (this.#stopped) return;
-    try {
-      this.#web.respond(this.#handle, id, status, headers, body);
-    } catch (e) {
-      this.#onError(message(e));
-    }
-    this.#stepped();
+    this.#step(() => this.#web.respond(this.#handle, id, status, headers, body));
   }
 
   #render() {
     if (this.#stopped) return;
-    let patch: Uint8Array;
     try {
-      patch = this.#web.render(this.#handle);
+      this.#page.apply(this.#web.render(this.#handle));
     } catch (e) {
       this.#onError(message(e));
-      return;
     }
-    this.#page.apply(patch);
+    this.#subscribe();
+  }
+
+  // #subscribe starts and stops timers for the app's subscriptions, for
+  // its model now.
+  #subscribe() {
+    let timers;
+    try {
+      timers = this.#web.subscriptions(this.#handle);
+    } catch (e) {
+      this.#onError(message(e));
+    }
+    if (timers != null) {
+      for (const [ms, timer] of this.#timers) {
+        if (!timers.every.includes(ms)) {
+          clearInterval(timer);
+          this.#timers.delete(ms);
+        }
+      }
+      for (const ms of timers.every) {
+        if (!this.#timers.has(ms)) {
+          // setInterval takes at most 2^31 - 1 ms, and runs longer ones at once.
+          const every = Math.min(ms, 2 ** 31 - 1);
+          this.#timers.set(ms, setInterval(() => this.#step(() => this.#web.tick(this.#handle, ms)), every));
+        }
+      }
+      if (timers.frame && !this.#animating) this.#last = performance.now();
+      this.#animating = timers.frame;
+    }
+    if (this.#animating) this.#schedule();
   }
 }
 

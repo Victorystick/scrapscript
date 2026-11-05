@@ -28,7 +28,8 @@ export type StartResult =
   | { error: string }
   | { missing: string[] };
 
-// A command that an app's step gave, for the page to carry out, by id.
+// A command that an app's step gave, for the page to carry out, by id:
+// an HTTP request, or, without one, a call to wake soon after.
 export interface Command {
   id: number;
   http?: HttpRequest;
@@ -43,12 +44,23 @@ export interface HttpRequest {
   bytes?: string;
 }
 
+// The timers to run for an app's subscriptions: an interval for each
+// #every, in milliseconds, and animation frames, if any #animation-frame.
+export interface Timers {
+  every: number[];
+  frame: boolean;
+}
+
 interface Exports extends Instance {
   start(): number;
   render(handle: number): number;
   event(handle: number): number;
   commands(handle: number): number;
   respond(handle: number): number;
+  wake(handle: number, id: number): number;
+  subscriptions(handle: number): number;
+  tick(handle: number, ms: number): number;
+  frame(handle: number, delta: number): number;
   stop(handle: number): void;
 }
 
@@ -134,6 +146,32 @@ export class ScrapWeb {
         return e.respond(handle);
       })
     );
+  }
+
+  // wake runs the app's command with the id, which isn't a request: it
+  // gets the time or a random number.
+  wake(handle: number, id: number) {
+    this.#result(this.#call((e) => e.wake(handle, id)));
+  }
+
+  // subscriptions returns the timers to run for the app's subscriptions,
+  // for its model now, or null if they are as last returned.
+  subscriptions(handle: number): Timers | null {
+    const out = this.#result(this.#call((e) => e.subscriptions(handle)));
+    return out.length === 0 ? null : JSON.parse(decoder.decode(out));
+  }
+
+  // tick passes the time to the app's #every subscriptions of ms
+  // milliseconds, as last returned by subscriptions.
+  tick(handle: number, ms: number) {
+    this.#result(this.#call((e) => e.tick(handle, ms)));
+  }
+
+  // frame passes the milliseconds since the last animation frame to the
+  // app's #animation-frame subscriptions, as last returned by
+  // subscriptions.
+  frame(handle: number, delta: number) {
+    this.#result(this.#call((e) => e.frame(handle, delta)));
   }
 
   stop(handle: number) {

@@ -121,7 +121,7 @@ The web platform:
     delegation, and `mount(element, { source, flags, fetchScrap })`.
     Tested in Chromium (#34).
 11. [x] **HTTP**, and `json` both ways (#36).
-12. [ ] **Time, animation frames and random**, with subscriptions diffed.
+12. [x] **Time, animation frames and random**, with subscriptions diffed (#37).
 13. [ ] **Playground** page in `web/`: an editor and the running app,
     errors, scraps fetched from the yard, and the deadline.
 14. [ ] **Hot reload** that keeps the model if its type is unchanged.

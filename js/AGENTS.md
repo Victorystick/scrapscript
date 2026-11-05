@@ -12,8 +12,13 @@ comes next.
   it listens to each event once, on the element, in the capture phase.
   Events update the app at once, and it renders once per animation frame.
   It carries out the app's `#http` commands with `fetch` after each step,
-  and passes back each response as a step of its own; stopping the app
-  aborts its requests.
+  and passes back each response as a step of its own; the module itself
+  works out the time and random numbers, when the page wakes it soon
+  after. After each render it asks for the timers that the app's
+  subscriptions need, which the module gives only when they change, and
+  runs an interval for each, and animation frames, which update the app
+  just before it renders. Stopping the app aborts its requests and stops
+  its timers. `mount.test.ts` runs timers with Playwright's fake clock.
 - `scrap-web.wasm` is the web platform's host as WebAssembly, built from
   `cmd/scrap-web`; `scrap-web.ts` runs it, and `webWasmURL` is where it is.
   Pages share one `ScrapWeb`, which runs any number of apps.

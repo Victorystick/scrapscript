@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math/rand/v2"
 	"time"
 
 	"github.com/Victorystick/scrapscript/eval"
@@ -23,16 +24,23 @@ import (
 // the page fetches them and starts it again.
 type module struct {
 	apps []*app // by handle - 1, nil once stopped
+
+	// The clock and the random numbers that commands and subscriptions
+	// get; time.Now and a source seeded at random if nil.
+	now  func() time.Time
+	rand *rand.Rand
 }
 
 // An app is a session, with its environment, how long each step may
-// take, and what its requests expect, by id, until the page responds.
+// take, its commands, by id, until the page responds, and its
+// subscriptions as the page last asked for them.
 type app struct {
 	s       *Session
 	env     *eval.Environment
 	timeout time.Duration
-	pending map[uint32]ExpectRef
-	next    uint32 // the last request's id
+	pending map[uint32]CmdRef
+	next    uint32 // the last command's id
+	subs    subscriptions
 }
 
 // A startRequest starts an app.
