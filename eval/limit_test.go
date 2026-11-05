@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -134,4 +135,84 @@ func TestDepthCall(t *testing.T) {
 	if v, err := e.Eval(read(t, e, deep)); err != nil || e.Print(v) != "50000" {
 		t.Errorf("expected 50000, got %v, %v", v, err)
 	}
+}
+
+// TestCallContext checks that each call has its own deadline: one that
+// runs past its deadline stops, while calls without one, at the same time,
+// run to the end, whatever context the environment has.
+func TestCallContext(t *testing.T) {
+	e := eval.NewEnvironment()
+	f, err := e.Eval(read(t, e, `| 0 -> 0 | n -> f n ; f = n -> f n`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	passed, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	e.UseContext(passed)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	stopped := make(chan error)
+	go func() {
+		_, err := eval.CallContext(ctx, f, eval.Int(1))
+		stopped <- err
+	}()
+	for range 100 {
+		if v, err := eval.CallContext(nil, f, eval.Int(0)); err != nil || v.Int() != 0 {
+			t.Fatalf("expected 0, got %v, %v", v, err)
+		}
+	}
+	if err := <-stopped; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected the call to stop, got %v", err)
+	}
+	// Call keeps to the environment's context.
+	if _, err := eval.Call(f, eval.Int(1)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected the call to stop, got %v", err)
+	}
+}
+
+// TestConcurrentCalls calls functions of one environment from many
+// goroutines at once, each compiled on its first call, which may be on any
+// of them. Each call nests its own calls deep, which wouldn't fit under
+// maxDepth together. Run it with -race.
+func TestConcurrentCalls(t *testing.T) {
+	e := eval.NewEnvironment()
+	v, err := e.Eval(read(t, e, `{ deep, sum, sorted, pick }
+; deep = | 0 -> 0 | n -> 1 + deep (n - 1)
+; sum = list/fold 0 (a -> b -> a + b) >> (n -> { n, twice = n * 2 })
+; sorted = list/sort int/cmp >> list/map (n -> n + 1)
+; pick = | { ..rest, a = x } -> x + rest.b`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := e.Record(v)
+	get := func(name string) eval.Value { return r.Get(e.Label(name)) }
+	deep, sum, sorted, pick := get("deep"), get("sum"), get("sorted"), get("pick")
+	abc := e.Shape(e.Label("a"), e.Label("b"), e.Label("c"))
+	twice := e.Label("twice")
+
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			check := func(what string, want int64, read func(eval.Value) int64, v eval.Value, err error) {
+				if err != nil {
+					t.Errorf("%s: %v", what, err)
+				} else if got := read(v); got != want {
+					t.Errorf("%s: expected %d, got %d", what, want, got)
+				}
+			}
+			n := eval.Int(int64(i))
+			v, err := eval.Call(deep, eval.Int(50_000))
+			check("deep", 50_000, eval.Value.Int, v, err)
+			v, err = eval.Call(sum, eval.NewList(eval.Int(1), eval.Int(2), n))
+			check("sum", int64(2*(3+i)), func(v eval.Value) int64 { return e.Record(v).Get(twice).Int() }, v, err)
+			v, err = eval.Call(sorted, eval.NewList(eval.Int(3), n, eval.Int(1)))
+			check("sorted", int64(min(i, 1)+1), func(v eval.Value) int64 { return v.List().Elements()[0].Int() }, v, err)
+			v, err = eval.Call(pick, abc.New(n, eval.Int(10), eval.Hole()))
+			check("pick", int64(i+10), eval.Value.Int, v, err)
+		}()
+	}
+	wg.Wait()
 }

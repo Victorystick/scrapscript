@@ -3,6 +3,7 @@ package eval
 import (
 	"bytes"
 	"slices"
+	"sync/atomic"
 
 	"github.com/Victorystick/scrapscript/label"
 )
@@ -13,7 +14,8 @@ import (
 // decided when it is made.
 //
 // A function's body is compiled when it is first entered, and kept per
-// program, by node. Code in tail position returns the body it calls
+// program, by node. Calls on several goroutines may compile the same body
+// at once; one of the results is kept, and any of them would do. Code in tail position returns the body it calls
 // instead of calling it, for trampoline to run, so that calls in tail
 // position don't grow the Go stack.
 
@@ -21,9 +23,10 @@ import (
 type code func(f frame) value
 
 // tcode evaluates an expression in tail position. If it ends in a call of
-// a script function, it returns that function's body as next, with its new
-// frame g, for the caller to continue with; otherwise it returns its value.
-type tcode func(f frame) (v value, next tcode, g frame)
+// a script function, it returns that function's body as next, with the
+// locals g of its new frame, for the caller to continue with; otherwise it
+// returns its value.
+type tcode func(f frame) (v value, next tcode, g locals)
 
 // mcode matches v against a pattern, writing the names it binds into the
 // slots f.
@@ -31,8 +34,17 @@ type mcode func(v value, f []value) bool
 
 // compiled holds a program's compiled bodies and lambdas, by node.
 type compiled struct {
-	bodies  []tcode
-	lambdas []*lambdaCode
+	bodies  []atomic.Pointer[tcode]
+	lambdas []atomic.Pointer[lambdaCode]
+}
+
+// newProgram returns the program of the core c, which compiles its nodes
+// as they are first run.
+func newProgram(c *core) *program {
+	return &program{core: c, compiled: compiled{
+		bodies:  make([]atomic.Pointer[tcode], len(c.ops)),
+		lambdas: make([]atomic.Pointer[lambdaCode], len(c.ops)),
+	}}
 }
 
 // lambdaCode is a compiled lambda: its frame's size, its arity, and its
@@ -49,29 +61,29 @@ type armCode struct {
 
 // lam returns the compiled lambda n, compiling it if it is the first time.
 func (p *program) lam(n cnode) *lambdaCode {
-	if p.lambdas == nil {
-		p.lambdas = make([]*lambdaCode, len(p.ops))
+	if l := p.lambdas[n].Load(); l != nil {
+		return l
 	}
-	l := p.lambdas[n]
-	if l == nil {
-		size, _, arity, arms := p.lambda(n)
-		l = &lambdaCode{size: size, arity: arity}
-		for i := 0; i < len(arms); i += arity + 1 {
-			l.arms = append(l.arms, armCode{
-				pats: p.patterns(arms[i : i+arity]),
-				body: p.body(cnode(arms[i+arity])),
-			})
-		}
-		p.lambdas[n] = l
+	size, _, arity, arms := p.lambda(n)
+	l := &lambdaCode{size: size, arity: arity}
+	for i := 0; i < len(arms); i += arity + 1 {
+		l.arms = append(l.arms, armCode{
+			pats: p.patterns(arms[i : i+arity]),
+			body: p.body(cnode(arms[i+arity])),
+		})
+	}
+	if !p.lambdas[n].CompareAndSwap(nil, l) {
+		return p.lambdas[n].Load()
 	}
 	return l
 }
 
 // enter1 starts a call of the lambda l of sf, which takes one argument,
-// with arg, returning the body of the arm that matches and its frame.
-func (l *lambdaCode) enter1(sf *scriptFunc, arg value) (tcode, frame) {
-	sf.prog.limit.tick()
-	g := frame{caps: sf.caps}
+// with arg, in the evaluation that lim limits, returning the body of the
+// arm that matches and its frame.
+func (l *lambdaCode) enter1(sf *scriptFunc, arg value, lim *limit) (tcode, frame) {
+	lim.tick()
+	g := frame{locals{caps: sf.caps}, lim}
 	if l.size > 0 {
 		g.slots = make([]value, l.size)
 	}
@@ -86,7 +98,7 @@ func (l *lambdaCode) enter1(sf *scriptFunc, arg value) (tcode, frame) {
 // enterN starts a call of the lambda l of sf with its arguments, the
 // first slots of g, returning the body of the arm that matches.
 func (l *lambdaCode) enterN(sf *scriptFunc, g frame) tcode {
-	sf.prog.limit.tick()
+	g.lim.tick()
 	for _, a := range l.arms {
 		if matchEach(a.pats, g.slots, g.slots) {
 			return a.body
@@ -97,11 +109,11 @@ func (l *lambdaCode) enterN(sf *scriptFunc, g frame) tcode {
 
 // trampoline runs the body c in f, and the bodies that it calls in tail
 // position. Each call of it nests in the Go stack, so it counts the depth
-// of the non-tail calls of l, failing beyond its maximum. An error that
-// unwinds it leaves the depth to catch.
-func trampoline(l *limit, c tcode, f frame) value {
-	if l.depth >= l.maxDepth {
-		panic(runtimeError{tooDeepError{l.maxDepth}})
+// of the non-tail calls of f's evaluation, failing beyond maxDepth.
+func trampoline(c tcode, f frame) value {
+	l := f.lim
+	if l.depth >= maxDepth {
+		panic(runtimeError{tooDeepError{maxDepth}})
 	}
 	l.depth++
 	for {
@@ -110,19 +122,18 @@ func trampoline(l *limit, c tcode, f frame) value {
 			l.depth--
 			return v
 		}
-		c, f = next, g
+		c, f.locals = next, g
 	}
 }
 
 // body returns the compiled body n, compiling it if it is the first time.
 func (p *program) body(n cnode) tcode {
-	if p.bodies == nil {
-		p.bodies = make([]tcode, len(p.ops))
+	if c := p.bodies[n].Load(); c != nil {
+		return *c
 	}
-	c := p.bodies[n]
-	if c == nil {
-		c = p.tail(n)
-		p.bodies[n] = c
+	c := p.tail(n)
+	if !p.bodies[n].CompareAndSwap(nil, &c) {
+		return *p.bodies[n].Load()
 	}
 	return c
 }
@@ -193,51 +204,34 @@ func (p *program) expr(n cnode) code {
 			arg := ac.get(f)
 			if sf, ok := fn.script(); ok && len(sf.args) == 0 && !sf.composition() {
 				if l := sf.prog.lam(sf.node); l.arity == 1 {
-					body, g := l.enter1(sf, arg)
-					return trampoline(sf.prog.limit, body, g)
+					body, g := l.enter1(sf, arg, f.lim)
+					return trampoline(body, g)
 				}
 			}
-			body, g, v, _ := enter(fn, arg)
+			body, g, v := enter(f.lim, fn, arg)
 			if v.valid() {
 				return v
 			}
-			return trampoline(p.limit, body, g)
+			return trampoline(body, g)
 		}
 
 	case opCallN:
 		r := p.range_(n)
 		acs := p.operands(r[1:])
 		k := len(acs)
-		if g, ok := p.builtin(cnode(r[0])); ok && g.arity == k {
-			switch {
-			case g.two != nil:
-				a, b := acs[0], acs[1]
-				return func(f frame) value {
-					x := a.get(f)
-					return g.two(x, b.get(f))
-				}
-			case g.three != nil:
-				a, b, c := acs[0], acs[1], acs[2]
-				return func(f frame) value {
-					x := a.get(f)
-					y := b.get(f)
-					return g.three(x, y, c.get(f))
-				}
+		if g, ok := p.builtin(cnode(r[0])); ok && g.arity == k && g.two != nil {
+			a, b := acs[0], acs[1]
+			return func(f frame) value {
+				x := a.get(f)
+				return g.two(x, b.get(f))
 			}
 		}
 		fc := p.operand(cnode(r[0]))
 		return func(f frame) value {
 			fn := fc.get(f)
-			if g, ok := fn.builtin(); ok && g.arity == k {
-				switch {
-				case g.two != nil:
-					x := acs[0].get(f)
-					return g.two(x, acs[1].get(f))
-				case g.three != nil:
-					x := acs[0].get(f)
-					y := acs[1].get(f)
-					return g.three(x, y, acs[2].get(f))
-				}
+			if g, ok := fn.builtin(); ok && g.arity == k && g.two != nil {
+				x := acs[0].get(f)
+				return g.two(x, acs[1].get(f))
 			}
 			if sf, ok := fn.script(); ok && !sf.composition() {
 				l := sf.prog.lam(sf.node)
@@ -250,22 +244,22 @@ func (p *program) expr(n cnode) code {
 					return scriptVal(a)
 				}
 				if have == 0 && l.arity == k {
-					g := sf.frame(l.size)
+					g := sf.frame(l.size, f.lim)
 					for i, c := range acs {
 						g.slots[i] = c.get(f)
 					}
-					return trampoline(sf.prog.limit, l.enterN(sf, g), g)
+					return trampoline(l.enterN(sf, g), g)
 				}
 			}
 			args := make([]value, k)
 			for i, c := range acs {
 				args[i] = c.get(f)
 			}
-			body, g, v, _ := enterN(fn, args)
+			body, g, v := enterN(f.lim, fn, args)
 			if v.valid() {
 				return v
 			}
-			return trampoline(p.limit, body, g)
+			return trampoline(body, g)
 		}
 
 	case opMatch:
@@ -514,8 +508,8 @@ func (p *program) expr(n cnode) code {
 }
 
 // done returns v as the value of a tcode.
-func done(v value) (value, tcode, frame) {
-	return v, nil, frame{}
+func done(v value) (value, tcode, locals) {
+	return v, nil, locals{}
 }
 
 // tail compiles the expression n in tail position.
@@ -525,59 +519,42 @@ func (p *program) tail(n cnode) tcode {
 	case opCall:
 		ac := p.operand(cnode(d.b))
 		if g, ok := p.builtin(cnode(d.a)); ok && g.arity == 1 {
-			return func(f frame) (value, tcode, frame) { return done(g.one(ac.get(f))) }
+			return func(f frame) (value, tcode, locals) { return done(g.one(ac.get(f))) }
 		}
 		fc := p.operand(cnode(d.a))
-		return func(f frame) (value, tcode, frame) {
+		return func(f frame) (value, tcode, locals) {
 			fn := fc.get(f)
 			arg := ac.get(f)
 			if sf, ok := fn.script(); ok && len(sf.args) == 0 && !sf.composition() {
 				if l := sf.prog.lam(sf.node); l.arity == 1 {
-					body, g := l.enter1(sf, arg)
-					return value{}, body, g
+					body, g := l.enter1(sf, arg, f.lim)
+					return value{}, body, g.locals
 				}
 			}
-			body, g, v, _ := enter(fn, arg)
+			body, g, v := enter(f.lim, fn, arg)
 			if v.valid() {
 				return done(v)
 			}
-			return value{}, body, g
+			return value{}, body, g.locals
 		}
 
 	case opCallN:
 		r := p.range_(n)
 		acs := p.operands(r[1:])
 		k := len(acs)
-		if g, ok := p.builtin(cnode(r[0])); ok && g.arity == k {
-			switch {
-			case g.two != nil:
-				a, b := acs[0], acs[1]
-				return func(f frame) (value, tcode, frame) {
-					x := a.get(f)
-					return done(g.two(x, b.get(f)))
-				}
-			case g.three != nil:
-				a, b, c := acs[0], acs[1], acs[2]
-				return func(f frame) (value, tcode, frame) {
-					x := a.get(f)
-					y := b.get(f)
-					return done(g.three(x, y, c.get(f)))
-				}
+		if g, ok := p.builtin(cnode(r[0])); ok && g.arity == k && g.two != nil {
+			a, b := acs[0], acs[1]
+			return func(f frame) (value, tcode, locals) {
+				x := a.get(f)
+				return done(g.two(x, b.get(f)))
 			}
 		}
 		fc := p.operand(cnode(r[0]))
-		return func(f frame) (value, tcode, frame) {
+		return func(f frame) (value, tcode, locals) {
 			fn := fc.get(f)
-			if g, ok := fn.builtin(); ok && g.arity == k {
-				switch {
-				case g.two != nil:
-					x := acs[0].get(f)
-					return done(g.two(x, acs[1].get(f)))
-				case g.three != nil:
-					x := acs[0].get(f)
-					y := acs[1].get(f)
-					return done(g.three(x, y, acs[2].get(f)))
-				}
+			if g, ok := fn.builtin(); ok && g.arity == k && g.two != nil {
+				x := acs[0].get(f)
+				return done(g.two(x, acs[1].get(f)))
 			}
 			if sf, ok := fn.script(); ok && !sf.composition() {
 				l := sf.prog.lam(sf.node)
@@ -590,22 +567,22 @@ func (p *program) tail(n cnode) tcode {
 					return done(scriptVal(a))
 				}
 				if have == 0 && l.arity == k {
-					g := sf.frame(l.size)
+					g := sf.frame(l.size, f.lim)
 					for i, c := range acs {
 						g.slots[i] = c.get(f)
 					}
-					return value{}, l.enterN(sf, g), g
+					return value{}, l.enterN(sf, g), g.locals
 				}
 			}
 			args := make([]value, k)
 			for i, c := range acs {
 				args[i] = c.get(f)
 			}
-			body, g, v, _ := enterN(fn, args)
+			body, g, v := enterN(f.lim, fn, args)
 			if v.valid() {
 				return done(v)
 			}
-			return value{}, body, g
+			return value{}, body, g.locals
 		}
 
 	case opMatch:
@@ -618,7 +595,7 @@ func (p *program) tail(n cnode) tcode {
 			pats[i] = p.pattern(cnode(arms[2*i]))
 			bodies[i] = p.tail(cnode(arms[2*i+1]))
 		}
-		return func(f frame) (value, tcode, frame) {
+		return func(f frame) (value, tcode, locals) {
 			v := vc.get(f)
 			for i, m := range pats {
 				if m(v, f.slots) {
@@ -636,7 +613,7 @@ func (p *program) tail(n cnode) tcode {
 		for a := r[2+k:]; len(a) > 0; a = a[k+1:] {
 			arms = append(arms, armCode{pats: p.patterns(a[:k]), body: p.tail(cnode(a[k]))})
 		}
-		return func(f frame) (value, tcode, frame) {
+		return func(f frame) (value, tcode, locals) {
 			args := f.slots[s : int(s)+k]
 			for i, vc := range vcs {
 				args[i] = vc.get(f)
@@ -652,13 +629,13 @@ func (p *program) tail(n cnode) tcode {
 	case opWhere:
 		body, binds := p.where(n)
 		bind, bc := p.binds(binds), p.tail(body)
-		return func(f frame) (value, tcode, frame) {
+		return func(f frame) (value, tcode, locals) {
 			bind(f)
 			return bc(f)
 		}
 	}
 	c := p.expr(n)
-	return func(f frame) (value, tcode, frame) { return done(c(f)) }
+	return func(f frame) (value, tcode, locals) { return done(c(f)) }
 }
 
 // binds compiles a where's bindings, as pairs of slot and value, into

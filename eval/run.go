@@ -11,9 +11,18 @@ type program struct {
 	compiled
 }
 
-// A frame holds the slots of one call of a function, or of the top level,
-// and the captures of the function.
+// A frame holds the locals of one call of a function, or of the top level,
+// and the limit of the evaluation that the call is part of.
 type frame struct {
+	locals
+	lim *limit
+}
+
+// The locals of a frame: its slots and the captures of the function. A
+// body in tail position returns those of the call it ends in alone, since
+// that call carries on the same evaluation, so that what it returns fits
+// in registers.
+type locals struct {
 	slots, caps []value
 }
 
@@ -27,19 +36,16 @@ func (p *program) errorf(n cnode, format string, args ...any) runtimeError {
 	return runtimeError{p.source(n).Error(p.at[n], fmt.Sprintf(format, args...))}
 }
 
-// catch recovers a runtimeError into *err, and sets the depth of the
-// non-tail calls of l, if any, back to depth, since the calls that the
-// error unwound didn't return. Other panics carry on.
-func catch(err *error, l *limit, depth int) {
+// catch recovers a runtimeError into *err. Other panics carry on. The
+// limit of the evaluation that failed is left as the error found it, so it
+// must not be used again.
+func catch(err *error) {
 	if r := recover(); r != nil {
 		re, ok := r.(runtimeError)
 		if !ok {
 			panic(r)
 		}
 		*err = re.err
-		if l != nil {
-			l.depth = depth
-		}
 	}
 }
 
@@ -54,34 +60,35 @@ func (f frame) capture(caps []value, from []int32) {
 	}
 }
 
-// eval runs the program in a new top frame.
-func (p *program) eval() (v value, err error) {
-	defer catch(&err, p.limit, p.limit.depth)
-	return trampoline(p.limit, p.body(p.root), frame{slots: make([]value, p.top)}), nil
+// eval runs the program in a new top frame, as an evaluation that lim
+// limits.
+func (p *program) eval(lim *limit) (v value, err error) {
+	defer catch(&err)
+	return trampoline(p.body(p.root), frame{locals{slots: make([]value, p.top)}, lim}), nil
 }
 
-// apply calls the function fn with arg.
-func apply(fn, arg value) value {
-	body, f, v, l := enter(fn, arg)
+// apply calls the function fn with arg, in the evaluation that lim limits.
+func apply(lim *limit, fn, arg value) value {
+	body, f, v := enter(lim, fn, arg)
 	if v.valid() {
 		return v
 	}
-	return trampoline(l, body, f)
+	return trampoline(body, f)
 }
 
 // call calls the function fn with args, one or more, whether it takes as
-// many or not.
-func call(fn value, args ...value) value {
-	body, f, v, l := enterN(fn, args)
+// many or not, in the evaluation that lim limits.
+func call(lim *limit, fn value, args ...value) value {
+	body, f, v := enterN(lim, fn, args)
 	if v.valid() {
 		return v
 	}
-	return trampoline(l, body, f)
+	return trampoline(body, f)
 }
 
 // call2 is call for two arguments, which a builtin or a script function
 // that takes exactly two gets without a slice.
-func call2(fn, a, b value) value {
+func call2(lim *limit, fn, a, b value) value {
 	switch fn.boxedKind() {
 	case kindBuiltin:
 		if g := fn.asBuiltin(); g.two != nil {
@@ -90,70 +97,70 @@ func call2(fn, a, b value) value {
 	case kindScript:
 		if g := fn.asScript(); len(g.args) == 0 && !g.composition() {
 			if l := g.prog.lam(g.node); l.arity == 2 {
-				f := g.frame(l.size)
+				f := g.frame(l.size, lim)
 				f.slots[0], f.slots[1] = a, b
-				return trampoline(g.prog.limit, l.enterN(g, f), f)
+				return trampoline(l.enterN(g, f), f)
 			}
 		}
 	}
-	return call(fn, a, b)
+	return call(lim, fn, a, b)
 }
 
 // enter starts calling fn with arg. A builtin returns its result v, as
 // does a function that takes more arguments, with arg added to the ones it
 // has. Otherwise, enter returns the body of a script function's first arm
-// that matches all its arguments, in a new frame f, to run, and the limit
-// of its environment, lim, to run it under. A composition applies its first
+// that matches all its arguments, in a new frame f, to run. The call is
+// part of the evaluation that lim limits. A composition applies its first
 // function and enters its second.
-func enter(fn, arg value) (body tcode, f frame, v value, lim *limit) {
+func enter(lim *limit, fn, arg value) (body tcode, f frame, v value) {
 	for {
 		switch fn.boxedKind() {
 		case kindBuiltin:
 			g := fn.asBuiltin()
 			if g.arity == 1 {
-				return nil, f, g.one(arg), nil
+				return nil, f, g.one(arg)
 			}
-			return nil, f, partialVal(&partial{g, []value{arg}}), nil
+			return nil, f, partialVal(&partial{g, []value{arg}})
 		case kindPartial:
 			// Each partial application has its own arguments.
 			g := fn.asPartial()
 			args := append(g.args[:len(g.args):len(g.args)], arg)
 			if len(args) == g.fn.arity {
-				return nil, f, g.fn.invoke(args), nil
+				return nil, f, g.fn.invoke(lim, args)
 			}
-			return nil, f, partialVal(&partial{g.fn, args}), nil
+			return nil, f, partialVal(&partial{g.fn, args})
 		}
 		sf := fn.asScript()
 		if sf.composition() {
-			arg = apply(sf.caps[0], arg)
+			arg = apply(lim, sf.caps[0], arg)
 			fn = sf.caps[1]
 			continue
 		}
 		l := sf.prog.lam(sf.node)
 		if l.arity == 1 {
-			body, f = l.enter1(sf, arg)
-			return body, f, value{}, sf.prog.limit
+			body, f = l.enter1(sf, arg, lim)
+			return body, f, value{}
 		}
 		if len(sf.args)+1 < l.arity {
 			a := sf.applied(1)
 			a.args[len(sf.args)] = arg
-			return nil, f, scriptVal(a), nil
+			return nil, f, scriptVal(a)
 		}
-		f = sf.frame(l.size)
+		f = sf.frame(l.size, lim)
 		copy(f.slots, sf.args)
 		f.slots[l.arity-1] = arg
-		return l.enterN(sf, f), f, value{}, sf.prog.limit
+		return l.enterN(sf, f), f, value{}
 	}
 }
 
 // enterN is enter for one or more arguments args at once. A function that
 // takes exactly as many is called with all of them, without applying it to
 // one at a time.
-func enterN(fn value, args []value) (body tcode, f frame, v value, lim *limit) {
+func enterN(lim *limit, fn value, args []value) (body tcode, f frame, v value) {
 	switch fn.boxedKind() {
 	case kindBuiltin:
 		if g := fn.asBuiltin(); g.arity == len(args) && g.arity > 1 {
-			return nil, f, g.invoke(args), nil
+			return nil, f, g.invoke(lim, args)
 		}
 	case kindScript:
 		if g := fn.asScript(); len(args) > 1 && !g.composition() {
@@ -164,25 +171,25 @@ func enterN(fn value, args []value) (body tcode, f frame, v value, lim *limit) {
 				// time.
 				a := g.applied(len(args))
 				copy(a.args[len(g.args):], args)
-				return nil, f, scriptVal(a), nil
+				return nil, f, scriptVal(a)
 			case have == l.arity:
-				f = g.frame(l.size)
+				f = g.frame(l.size, lim)
 				copy(f.slots[copy(f.slots, g.args):], args)
-				return l.enterN(g, f), f, value{}, g.prog.limit
+				return l.enterN(g, f), f, value{}
 			}
 		}
 	}
 	last := len(args) - 1
 	for _, arg := range args[:last] {
-		fn = apply(fn, arg)
+		fn = apply(lim, fn, arg)
 	}
-	return enter(fn, args[last])
+	return enter(lim, fn, args[last])
 }
 
 // frame returns a new frame of size slots for a call of the lambda sf,
-// which takes more than one argument.
-func (sf *scriptFunc) frame(size int) frame {
-	return frame{slots: make([]value, size), caps: sf.caps}
+// which takes more than one argument, in the evaluation that lim limits.
+func (sf *scriptFunc) frame(size int, lim *limit) frame {
+	return frame{locals{make([]value, size), sf.caps}, lim}
 }
 
 // noArm returns the error that no arm of the function or match n matches

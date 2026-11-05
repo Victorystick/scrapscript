@@ -13,42 +13,54 @@ import (
 // calls stops any of them.
 const checkEvery = 1024
 
-// A limit stops the evaluations of an environment's programs once their
-// context is done. Its programs share it, so that a call from one into a
-// function of another counts the same.
+// A limit stops one evaluation once its context is done, or once its
+// non-tail calls nest too deep. Each evaluation has its own, which the
+// frames of its calls carry, so evaluations on different goroutines share
+// nothing that changes: a call from one program into a function of another
+// counts against the evaluation it is part of.
 //
 // The context is polled rather than waited on: a WebAssembly host has one
 // thread, so a timer can't fire while a scrap runs, and the deadline is
 // compared with the clock instead.
 type limit struct {
-	ctx      context.Context // nil if evaluations are unlimited
+	ctx      context.Context // nil if the evaluation has no deadline
 	done     <-chan struct{}
 	deadline time.Time
 	timed    bool
 	left     int // calls until the next check
 	depth    int // non-tail calls under way
-	maxDepth int // at most, beyond which they fail
+}
+
+// newLimit returns the limit of an evaluation that ctx stops, or that only
+// its depth stops if ctx is nil. It checks ctx at the first call.
+func newLimit(ctx context.Context) *limit {
+	l := &limit{ctx: ctx}
+	if ctx != nil {
+		l.done = ctx.Done()
+		l.deadline, l.timed = ctx.Deadline()
+	}
+	return l
 }
 
 // UseContext stops evaluations in e once ctx is done, by its deadline or
 // by being cancelled from another goroutine, checking it every so many
-// calls. That covers calls of values that e evaluated too, as by eval.Call
-// and the bindings that scrap-gen-go generates. An evaluation that it stops
-// fails with an error that wraps ctx.Err(), or context.DeadlineExceeded
-// once the deadline has passed, even if ctx hasn't noticed yet. A nil ctx
-// lifts the limit.
+// calls. That covers Eval, Apply and Test, and calls with Call of values
+// that e evaluated, as by the bindings that scrap-gen-go generates;
+// CallContext gives a call its own context instead. An evaluation that it
+// stops fails with an error that wraps ctx.Err(), or
+// context.DeadlineExceeded once the deadline has passed, even if ctx hasn't
+// noticed yet. A nil ctx lifts the limit.
+//
+// Calls already under way keep the context they started with. Like the
+// rest of e, UseContext must not be called while another goroutine uses e
+// or calls its values with Call.
 //
 // In WebAssembly, give it a context that only reports its deadline, as
 // cmd/scrap-wasm does: one from context.WithDeadline starts a timer, which
 // the Go runtime waits on through WASI's poll_oneoff, which a host may not
 // implement.
 func (e *Environment) UseContext(ctx context.Context) {
-	l := e.limit
-	*l = limit{ctx: ctx, depth: l.depth, maxDepth: l.maxDepth}
-	if ctx != nil {
-		l.done = ctx.Done()
-		l.deadline, l.timed = ctx.Deadline()
-	}
+	e.ctx = ctx
 }
 
 // tick counts a call, checking the context every checkEvery calls.
@@ -92,17 +104,19 @@ func (e stoppedError) Error() string {
 
 func (e stoppedError) Unwrap() error { return e.err }
 
-// maxDepth returns how deep non-tail calls may nest, so that a recursion
-// fails before it overflows the stack. Natively, a call takes up to about
-// 1 KB of Go's stack, which can grow to 1 GB. In WebAssembly the engine's
-// stack overflows first: a browser's Web Worker has room for about 2,400
-// calls, and failing takes about as much stack again as the calls it
+// maxDepth is how deep the non-tail calls of an evaluation may nest, so
+// that a recursion fails before it overflows the stack, which no deadline
+// prevents and which Go can't recover from. Natively, a call takes up to
+// about 1 KB of Go's stack, which can grow to 1 GB. In WebAssembly the
+// engine's stack overflows first: a browser's Web Worker has room for about
+// 2,400 calls, and failing takes about as much stack again as the calls it
 // unwinds.
-func maxDepth() int {
+var maxDepth = 100_000
+
+func init() {
 	if runtime.GOARCH == "wasm" {
-		return 1_000
+		maxDepth = 1_000
 	}
-	return 100_000
 }
 
 type tooDeepError struct{ max int }

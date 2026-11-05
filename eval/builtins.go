@@ -24,8 +24,10 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, variables) {
 		builtIns[name] = builtinVal(&builtinFunc{name: name, arity: 2, two: two})
 		scope = scope.Bind(name, typ)
 	}
-	define3 := func(name string, typ types.TypeRef, three func(value, value, value) value) {
-		builtIns[name] = builtinVal(&builtinFunc{name: name, arity: 3, three: three})
+	// A higher-order builtin calls the functions it is given as part of the
+	// evaluation that calls it, under its limit.
+	defineHigher := func(name string, typ types.TypeRef, arity int, fn func(*limit, []value) value) {
+		builtIns[name] = builtinVal(&builtinFunc{name: name, arity: arity, higher: fn})
 		scope = scope.Bind(name, typ)
 	}
 
@@ -64,18 +66,19 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, variables) {
 	define("list/length", reg.Func(aList, types.IntRef), func(ls value) value {
 		return intVal(len(ls.asList()))
 	})
-	define2("list/map", reg.Func(aToB, reg.Func(aList, bList)), func(fn, list value) value {
-		elems := list.asList()
+	defineHigher("list/map", reg.Func(aToB, reg.Func(aList, bList)), 2, func(lim *limit, args []value) value {
+		fn, elems := args[0], args[1].asList()
 		results := make([]value, len(elems))
 		for i, v := range elems {
-			results[i] = apply(fn, v)
+			results[i] = apply(lim, fn, v)
 		}
 		return listVal(results)
 	})
 	accum := reg.Func(a, reg.Func(b, a))
-	define3("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), func(acc, fn, list value) value {
-		for _, v := range list.asList() {
-			acc = call2(fn, acc, v)
+	defineHigher("list/fold", reg.Func(a, reg.Func(accum, reg.Func(bList, a))), 3, func(lim *limit, args []value) value {
+		acc, fn := args[0], args[1]
+		for _, v := range args[2].asList() {
+			acc = call2(lim, fn, acc, v)
 		}
 		return acc
 	})
@@ -92,10 +95,10 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, variables) {
 	})
 
 	// Sorts stably, by a comparison like int/cmp.
-	define2("list/sort", reg.Func(reg.Func(a, reg.Func(a, order())), reg.Func(aList, aList)), func(fn, list value) value {
-		elems := slices.Clone(list.asList())
+	defineHigher("list/sort", reg.Func(reg.Func(a, reg.Func(a, order())), reg.Func(aList, aList)), 2, func(lim *limit, args []value) value {
+		fn, elems := args[0], slices.Clone(args[1].asList())
 		slices.SortStableFunc(elems, func(x, y value) int {
-			switch call2(fn, x, y).tag() {
+			switch call2(lim, fn, x, y).tag() {
 			case ltID:
 				return -1
 			case gtID:

@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -245,23 +246,32 @@ func NewFunc(name string, arity int, fn func(args []Value) (Value, error)) Value
 }
 
 // Call applies the function fn to args, all at once if it takes as many,
-// without checking their types. It fails if the evaluation does, as when no arm matches or a
-// builtin fails.
-func Call(fn Value, args ...Value) (v Value, err error) {
-	// A host may call in during an evaluation, as from a function it made,
-	// and carry on after an error, so the depth of the calls that the error
-	// unwound is restored. Only a script function tells whose depth that is;
-	// a builtin that calls back into one, such as list/map, doesn't.
-	var l *limit
-	depth := 0
+// without checking their types. It fails if the evaluation does, as when no
+// arm matches or a builtin fails. The context that UseContext gave the
+// environment of fn, a script function, stops it as CallContext does.
+func Call(fn Value, args ...Value) (Value, error) {
+	var ctx context.Context
 	if sf, ok := fn.v.script(); ok {
-		l, depth = sf.prog.limit, sf.prog.limit.depth
+		ctx = *sf.prog.ctx
 	}
-	defer catch(&err, l, depth)
+	return CallContext(ctx, fn, args...)
+}
+
+// CallContext is Call as an evaluation of its own, which ctx stops as
+// UseContext describes, whatever context fn's environment has; a nil ctx
+// stops it only if its calls nest too deep. Calls may run on many
+// goroutines at once, as an HTTP server's handlers make them, each with its
+// request's context.
+//
+// A host function that calls a script back starts an evaluation of its
+// own, with its own depth of calls; to keep the deadline of the evaluation
+// that called it, give it the same context.
+func CallContext(ctx context.Context, fn Value, args ...Value) (v Value, err error) {
 	if len(args) == 0 {
 		return fn, nil
 	}
-	return Value{call(fn.v, fromHost(args)...)}, nil
+	defer catch(&err)
+	return Value{call(newLimit(ctx), fn.v, fromHost(args)...)}, nil
 }
 
 // Check checks that the value of the scrap s has the type that the type

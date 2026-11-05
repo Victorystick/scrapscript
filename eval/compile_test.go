@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -345,7 +346,7 @@ func compileString(t *testing.T, source string) *core {
 		return nil
 	}
 	units = append(units, unit{se: &se, typed: res.Nodes, deps: deps})
-	c, err := compile(units, &reg, globals, newShapeTable(reg.Labels()), &limit{})
+	c, err := compile(units, &reg, globals, newShapeTable(reg.Labels()), new(context.Context))
 	if err != nil {
 		t.Fatalf("compile %q: %v", source, err)
 	}
@@ -531,7 +532,7 @@ func TestCompileErrors(t *testing.T) {
 		}
 		var reg types.Registry
 		_, globals := bindBuiltIns(&reg)
-		_, err = compile([]unit{{se: &se}}, nil, globals, newShapeTable(reg.Labels()), &limit{})
+		_, err = compile([]unit{{se: &se}}, nil, globals, newShapeTable(reg.Labels()), new(context.Context))
 		if err == nil || !strings.Contains(err.Error(), tt.err) {
 			t.Errorf("%s: got %v, want %q", tt.source, err, tt.err)
 		}

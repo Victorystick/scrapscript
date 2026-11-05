@@ -45,23 +45,27 @@ func (t *shapeTable) record(v value) record {
 
 // A built-in function, or one that a host implements, which takes arity
 // arguments. A builtin takes them as Go arguments, so that a call with all
-// of them needs no slice; a host function of more than one takes a slice.
+// of them needs no slice; a host function of more than one takes a slice,
+// as does a higher-order builtin, which also takes its evaluation's limit.
 type builtinFunc struct {
 	name  string
 	arity int
-	one   func(value) value               // if arity is 1
-	two   func(value, value) value        // a builtin of arity 2
-	three func(value, value, value) value // a builtin of arity 3
-	many  func([]value) value             // a host function of arity 2 or more
+	one   func(value) value        // if arity is 1
+	two   func(value, value) value // a builtin of arity 2
+	many  func([]value) value      // a host function of arity 2 or more
+	// A builtin of arity 2 or more that calls functions it is given, in
+	// the evaluation that the limit limits.
+	higher func(*limit, []value) value
 }
 
-// invoke calls bf, which takes more than one argument, with all of them.
-func (bf *builtinFunc) invoke(args []value) value {
+// invoke calls bf, which takes more than one argument, with all of them,
+// in the evaluation that lim limits.
+func (bf *builtinFunc) invoke(lim *limit, args []value) value {
 	switch {
 	case bf.two != nil:
 		return bf.two(args[0], args[1])
-	case bf.three != nil:
-		return bf.three(args[0], args[1], args[2])
+	case bf.higher != nil:
+		return bf.higher(lim, args)
 	}
 	return bf.many(args)
 }

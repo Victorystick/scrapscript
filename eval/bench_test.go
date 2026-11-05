@@ -131,14 +131,14 @@ func BenchmarkEval(b *testing.B) {
 			if res.Sort {
 				b.Fatal("cannot evaluate a type")
 			}
-			c, err := compile(e.units(scrap), &e.reg, e.vars, e.shapes, e.limit)
+			c, err := compile(e.units(scrap), &e.reg, e.vars, e.shapes, &e.ctx)
 			if err != nil {
 				b.Fatal(err)
 			}
-			p := &program{core: c}
+			p := newProgram(c)
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := p.eval(); err != nil {
+				if _, err := p.eval(newLimit(nil)); err != nil {
 					b.Fatal(err)
 				}
 			}

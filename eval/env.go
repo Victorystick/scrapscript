@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io/fs"
@@ -60,7 +61,10 @@ type hashKey struct {
 // itself only through the Fetcher, Pusher and drafts it is given, so it runs
 // anywhere, including where there is no filesystem or network.
 //
-// An Environment is not safe for concurrent use: use one per goroutine.
+// An Environment is not safe for concurrent use: load, check and evaluate
+// scraps in it from one goroutine at a time. The values it returns are
+// immutable, though, and many goroutines may call them at once, with Call
+// or CallContext, while nothing else uses the environment.
 type Environment struct {
 	pusher  Pusher
 	fetcher Fetcher
@@ -70,8 +74,9 @@ type Environment struct {
 	reg   types.Registry
 	// The shapes of records, whose labels are in reg's table.
 	shapes *shapeTable
-	// What stops its programs' evaluations, which they share.
-	limit *limit
+	// What stops its evaluations, and calls of its values with Call, from
+	// UseContext; nil if nothing does.
+	ctx context.Context
 	// The TypeScope and variables match each other's contents.
 	// One is used for type inference, the other for evaluation.
 	typeScope types.TypeScope
@@ -86,7 +91,6 @@ func NewEnvironment() *Environment {
 	env.typeScope = typeScope
 	env.vars = vars
 	env.shapes = newShapeTable(env.reg.Labels())
-	env.limit = &limit{maxDepth: maxDepth()}
 	env.scraps = make(map[hashKey]*Scrap)
 	env.drafts = make(map[string]*Scrap)
 	return env
@@ -286,12 +290,12 @@ func (e *Environment) eval(s *Scrap, res types.Result) (value, error) {
 		return value{}, fmt.Errorf("cannot evaluate a type")
 	}
 	if !s.value.valid() {
-		c, err := compile(e.units(s), &e.reg, e.vars, e.shapes, e.limit)
+		c, err := compile(e.units(s), &e.reg, e.vars, e.shapes, &e.ctx)
 		if err != nil {
 			return value{}, err
 		}
-		p := &program{core: c}
-		v, err := p.eval()
+		p := newProgram(c)
+		v, err := p.eval(newLimit(e.ctx))
 		if err != nil {
 			return value{}, err
 		}
@@ -352,8 +356,8 @@ func (e *Environment) Apply(fn, arg *Scrap) (v Value, err error) {
 		strs, where := e.reg.Strings(argType, param)
 		return Value{}, fmt.Errorf("cannot apply: passed '%s' but expected '%s'%s", strs[0], strs[1], where)
 	}
-	defer catch(&err, e.limit, e.limit.depth)
-	return Value{apply(f, a)}, nil
+	defer catch(&err)
+	return Value{apply(newLimit(e.ctx), f, a)}, nil
 }
 
 // Infer returns the string representation of the type of a Scrap.
