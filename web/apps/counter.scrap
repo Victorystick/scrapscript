@@ -1,0 +1,24 @@
+-- A counter, with a step you can type. Edit me, and press Run.
+app
+; app : web model msg =
+    { init = _ -> { model = { count = 0, step = 1 }, cmds = [] }
+    , update =
+        | #add n  -> m -> { model = { ..m, count = m.count + n }, cmds = [] }
+        | #step t -> m -> { model = { ..m, step = step t m.step }, cmds = [] }
+    , view = m -> #el { tag = "div", attrs = [], children =
+        [ #el { tag = "p", attrs = [#style { name = "font-size", value = "2rem" }], children = [#text (int/to-text m.count)] }
+        , button "−" (#add (0 - m.step))
+        , button "+" (#add m.step)
+        , #el { tag = "label", attrs = [], children =
+            [ #text " step "
+            , #el { tag = "input", attrs = [#attr { name = "size", value = "3" }, #prop { name = "value", value = #text (int/to-text m.step) }, #on-input (t -> #step t)], children = [] }
+            ] }
+        ] }
+    , subscriptions = _ -> []
+    }
+; button = label -> msg -> #el { tag = "button", attrs = [#on-click msg], children = [#text label] }
+-- The step stays as it was until the input holds a number.
+; step = t -> old -> (| #some n -> n | #none -> old) (text/to-int t)
+; model : type = { count : int, step : int }
+; msg : type = [#add int, #step text]
+; web : type -> type -> type = $source:eb324364930850f33f10a407c0a36c40bbc4cda56a18d2e4cee1cfb7f2cbadd9

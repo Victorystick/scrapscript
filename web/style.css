@@ -78,3 +78,16 @@ nav { margin-bottom: 1rem; font-size: .9rem; }
 @media (prefers-color-scheme: dark) { .out .error { color: #f2b8b5; } }
 .out .error::before { content: "✗"; }
 .out .output::before { content: "$"; }
+
+/* The app playground uses the whole width: the scrap and the app side by
+   side, one above the other on narrow screens. */
+body.wide { max-width: none; padding-left: 1.5rem; padding-right: 1.5rem; }
+.apps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 1rem; align-items: start; }
+.apps section { margin: 0; min-width: 0; }
+.apps .example { margin-top: 0; }
+.apps .playground [contenteditable] { min-height: 24rem; }
+.actions select { font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 4px; margin-right: auto; }
+#app { min-height: 6rem; }
+#app button { font: inherit; margin-right: .25rem; }
+.apps .out { margin-top: 1rem; border-radius: 6px; }
+.note { color: var(--muted); font-size: .9rem; }
