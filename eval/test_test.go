@@ -1,6 +1,7 @@
 package eval_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,7 @@ func testScrap(t *testing.T, source string) ([]eval.TestResult, error) {
 	t.Helper()
 	e := eval.NewEnvironment()
 	e.UseDrafts(os.DirFS("../lib"))
-	return e.Test(read(t, e, source))
+	return e.Test(context.Background(), read(t, e, source))
 }
 
 func TestTest(t *testing.T) {

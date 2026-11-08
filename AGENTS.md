@@ -17,6 +17,8 @@ against the base commit with interleaved runs and benchstat.
   - Types and type members are compile-time only: erased, never part of a
     value's runtime shape.
 - Core packages stay free of os/net (enforced by eval/deps_test.go).
+- Name tests of concurrent use TestConcurrent...: CI runs those alone with
+  `-race` (`go test -race -run '^TestConcurrent' ./...`).
 - Try programs with `go run ./cmd/scrap type < file.scrap` (or `eval`). The
   CLI reads stdin, and paths resolve from the current directory by
   default; override with `--root <dir>`.

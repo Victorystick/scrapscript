@@ -4,6 +4,7 @@ package rich
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/host"
@@ -54,7 +55,7 @@ func Load(env *eval.Environment, app *eval.Scrap) (ApiRef, error) {
 	if err := env.Check(app, iface); err != nil {
 		return zero, err
 	}
-	v, err := env.Eval(app)
+	v, err := env.Eval(context.Background(), app)
 	if err != nil {
 		return zero, err
 	}
@@ -96,7 +97,7 @@ func apiFromValue(l *Bindings, v eval.Value) Api {
 		Flag:  r.Get(l.flag).Byte(),
 		Handle: func(fn eval.Value) func(C, string) (Reply, error) {
 			return func(a0 C, a1 string) (Reply, error) {
-				v, err := eval.Call(fn, a0.v, eval.Text(a1))
+				v, err := eval.Call(context.Background(), fn, a0.v, eval.Text(a1))
 				if err != nil {
 					var zero Reply
 					return zero, err
@@ -106,7 +107,7 @@ func apiFromValue(l *Bindings, v eval.Value) Api {
 		}(r.Get(l.handle)),
 		Helper: func(fn eval.Value) func(func(int64, int64) (int64, error)) (int64, error) {
 			return func(a0 func(int64, int64) (int64, error)) (int64, error) {
-				v, err := eval.Call(fn, eval.NewFunc("apiHelperArg0", 2, func(args []eval.Value) (eval.Value, error) {
+				v, err := eval.Call(context.Background(), fn, eval.NewFunc("apiHelperArg0", 2, func(args []eval.Value) (eval.Value, error) {
 					r, err := a0(args[0].Int(), args[1].Int())
 					if err != nil {
 						return eval.Value{}, err
@@ -144,7 +145,7 @@ func (x Api) toValue(l *Bindings) eval.Value {
 		eval.NewFunc("apiHelper", 1, func(args []eval.Value) (eval.Value, error) {
 			r, err := x.Helper(func(fn eval.Value) func(int64, int64) (int64, error) {
 				return func(a0 int64, a1 int64) (int64, error) {
-					v, err := eval.Call(fn, eval.Int(a0), eval.Int(a1))
+					v, err := eval.Call(context.Background(), fn, eval.Int(a0), eval.Int(a1))
 					if err != nil {
 						var zero int64
 						return zero, err
@@ -193,7 +194,7 @@ func (x ApiRef) Flag() byte {
 
 func (x ApiRef) Handle(a0 C, a1 string) (ReplyRef, error) {
 	l := x.b
-	v, err := eval.Call(l.apiShape.Field(x.v, 3), a0.v, eval.Text(a1))
+	v, err := eval.Call(context.Background(), l.apiShape.Field(x.v, 3), a0.v, eval.Text(a1))
 	if err != nil {
 		var zero ReplyRef
 		return zero, err
@@ -203,7 +204,7 @@ func (x ApiRef) Handle(a0 C, a1 string) (ReplyRef, error) {
 
 func (x ApiRef) Helper(a0 func(int64, int64) (int64, error)) (int64, error) {
 	l := x.b
-	v, err := eval.Call(l.apiShape.Field(x.v, 4), eval.NewFunc("apiHelperArg0", 2, func(args []eval.Value) (eval.Value, error) {
+	v, err := eval.Call(context.Background(), l.apiShape.Field(x.v, 4), eval.NewFunc("apiHelperArg0", 2, func(args []eval.Value) (eval.Value, error) {
 		r, err := a0(args[0].Int(), args[1].Int())
 		if err != nil {
 			return eval.Value{}, err
@@ -419,7 +420,7 @@ func replyFetchPayloadFromValue(l *Bindings, v eval.Value) ReplyFetchPayload {
 	return ReplyFetchPayload{
 		Then: func(fn eval.Value) func(string) (Reply, error) {
 			return func(a0 string) (Reply, error) {
-				v, err := eval.Call(fn, eval.Text(a0))
+				v, err := eval.Call(context.Background(), fn, eval.Text(a0))
 				if err != nil {
 					var zero Reply
 					return zero, err
@@ -458,7 +459,7 @@ func (x ReplyFetchPayloadRef) Load() ReplyFetchPayload { return replyFetchPayloa
 
 func (x ReplyFetchPayloadRef) Then(a0 string) (ReplyRef, error) {
 	l := x.b
-	v, err := eval.Call(l.replyFetchPayloadShape.Field(x.v, 0), eval.Text(a0))
+	v, err := eval.Call(context.Background(), l.replyFetchPayloadShape.Field(x.v, 0), eval.Text(a0))
 	if err != nil {
 		var zero ReplyRef
 		return zero, err

@@ -1,7 +1,6 @@
 package eval
 
 import (
-	"context"
 	"fmt"
 	"slices"
 
@@ -132,9 +131,6 @@ type core struct {
 	// of record literals and patterns.
 	table  *shapeTable
 	shapes []*shape
-	// The context of the environment, which stops calls of the program's
-	// values with Call.
-	ctx *context.Context
 
 	// For printing closures, not for evaluating them. A lambda's or
 	// composition's uses is what its code refers to; a binder is a name that
@@ -331,12 +327,11 @@ type unit struct {
 // before it, in the order that they depend on each other, into one core.
 // Free names that they don't bind refer to globals. Tags and record keys
 // are interned in the label table of shapes, and the shapes of records in
-// shapes. ctx points to the context of the environment, which Call
-// stops calls of its values with.
-func compile(units []unit, reg *types.Registry, globals variables, shapes *shapeTable, ctx *context.Context) (*core, error) {
+// shapes.
+func compile(units []unit, reg *types.Registry, globals variables, shapes *shapeTable) (*core, error) {
 	root := int32(len(units) - 1)
 	c := compiler{
-		core:     core{labels: shapes.labels, table: shapes, ctx: ctx, spans: []span{{0, root}}},
+		core:     core{labels: shapes.labels, table: shapes, spans: []span{{0, root}}},
 		units:    units,
 		reg:      reg,
 		globals:  globals,

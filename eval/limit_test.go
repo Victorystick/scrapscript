@@ -11,12 +11,12 @@ import (
 	"github.com/Victorystick/scrapscript/eval"
 )
 
-// stops evaluates source in e and checks that it fails with an error that
-// wraps want, soon after the context's deadline.
-func stops(t *testing.T, e *eval.Environment, source string, want error) {
+// stops evaluates source in e until ctx is done, and checks that it fails
+// with an error that wraps want, soon after.
+func stops(t *testing.T, ctx context.Context, e *eval.Environment, source string, want error) {
 	t.Helper()
 	start := time.Now()
-	_, err := e.Eval(read(t, e, source))
+	_, err := e.Eval(ctx, read(t, e, source))
 	if !errors.Is(err, want) {
 		t.Fatalf("%s: expected an error wrapping %v, got %v", source, want, err)
 	}
@@ -36,8 +36,7 @@ func TestDeadline(t *testing.T) {
 	} {
 		e := eval.NewEnvironment()
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-		e.UseContext(ctx)
-		stops(t, e, source, context.DeadlineExceeded)
+		stops(t, ctx, e, source, context.DeadlineExceeded)
 		cancel()
 	}
 }
@@ -46,11 +45,10 @@ func TestDeadlinePassed(t *testing.T) {
 	e := eval.NewEnvironment()
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	e.UseContext(ctx)
-	stops(t, e, `f 0 ; f = n -> f (n + 1)`, context.DeadlineExceeded)
+	stops(t, ctx, e, `f 0 ; f = n -> f (n + 1)`, context.DeadlineExceeded)
 
 	// A scrap that makes no calls still runs to the end.
-	if v, err := e.Eval(read(t, e, `1 + 2`)); err != nil || e.Print(v) != "3" {
+	if v, err := e.Eval(ctx, read(t, e, `1 + 2`)); err != nil || e.Print(v) != "3" {
 		t.Errorf("expected 3, got %v, %v", v, err)
 	}
 }
@@ -58,32 +56,29 @@ func TestDeadlinePassed(t *testing.T) {
 func TestCancel(t *testing.T) {
 	e := eval.NewEnvironment()
 	ctx, cancel := context.WithCancel(context.Background())
-	e.UseContext(ctx)
 	time.AfterFunc(20*time.Millisecond, cancel)
-	stops(t, e, `f 0 ; f = n -> f (n + 1)`, context.Canceled)
+	stops(t, ctx, e, `f 0 ; f = n -> f (n + 1)`, context.Canceled)
 }
 
-// TestDeadlineCall checks that a host's calls into a value are stopped too,
-// as the bindings that scrap-gen-go generates make them, and that the
-// environment can go on once the limit is lifted.
+// TestDeadlineCall checks that a host's calls into a value are stopped
+// too, and that the environment goes on after one is.
 func TestDeadlineCall(t *testing.T) {
 	e := eval.NewEnvironment()
-	loop, err := e.Eval(read(t, e, `| 0 -> 0 | n -> f n ; f = n -> f n`))
+	bg := context.Background()
+	loop, err := e.Eval(bg, read(t, e, `| 0 -> 0 | n -> f n ; f = n -> f n`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(bg, 50*time.Millisecond)
 	defer cancel()
-	e.UseContext(ctx)
-	if _, err := eval.Call(loop, eval.Int(1)); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := eval.Call(ctx, loop, eval.Int(1)); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected the call to stop, got %v", err)
 	}
 
-	e.UseContext(nil)
-	if v, err := eval.Call(loop, eval.Int(0)); err != nil || v.Int() != 0 {
+	if v, err := eval.Call(bg, loop, eval.Int(0)); err != nil || v.Int() != 0 {
 		t.Errorf("expected 0, got %v, %v", v, err)
 	}
-	if v, err := e.Eval(read(t, e, `list/fold 0 (a -> b -> a + b) [1, 2, 3]`)); err != nil || e.Print(v) != "6" {
+	if v, err := e.Eval(bg, read(t, e, `list/fold 0 (a -> b -> a + b) [1, 2, 3]`)); err != nil || e.Print(v) != "6" {
 		t.Errorf("expected 6, got %v, %v", v, err)
 	}
 }
@@ -92,7 +87,7 @@ func TestDeadlineCall(t *testing.T) {
 // nest too deep.
 func tooDeep(t *testing.T, e *eval.Environment, source string) {
 	t.Helper()
-	_, err := e.Eval(read(t, e, source))
+	_, err := e.Eval(context.Background(), read(t, e, source))
 	if err == nil || !strings.Contains(err.Error(), "calls nested deeper than") {
 		t.Fatalf("%s: expected calls nested too deep, got %v", source, err)
 	}
@@ -113,7 +108,7 @@ func TestDepth(t *testing.T) {
 		tooDeep(t, e, source)
 
 		// The calls that the error unwound don't count any longer.
-		if v, err := e.Eval(read(t, e, deep)); err != nil || e.Print(v) != "50000" {
+		if v, err := e.Eval(context.Background(), read(t, e, deep)); err != nil || e.Print(v) != "50000" {
 			t.Errorf("after %s: expected 50000, got %v, %v", source, v, err)
 		}
 	}
@@ -123,50 +118,43 @@ func TestDepth(t *testing.T) {
 // and that an error in one doesn't count against the next.
 func TestDepthCall(t *testing.T) {
 	e := eval.NewEnvironment()
-	f, err := e.Eval(read(t, e, `| 0 -> 0 | n -> 1 + f n ; f = n -> 1 + f n`))
+	f, err := e.Eval(context.Background(), read(t, e, `| 0 -> 0 | n -> 1 + f n ; f = n -> 1 + f n`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if _, err := eval.Call(f, eval.Int(1)); err == nil || !strings.Contains(err.Error(), "calls nested deeper than") {
+		if _, err := eval.Call(context.Background(), f, eval.Int(1)); err == nil || !strings.Contains(err.Error(), "calls nested deeper than") {
 			t.Fatalf("expected calls nested too deep, got %v", err)
 		}
 	}
-	if v, err := e.Eval(read(t, e, deep)); err != nil || e.Print(v) != "50000" {
+	if v, err := e.Eval(context.Background(), read(t, e, deep)); err != nil || e.Print(v) != "50000" {
 		t.Errorf("expected 50000, got %v, %v", v, err)
 	}
 }
 
-// TestCallContext checks that each call has its own deadline: one that
-// runs past its deadline stops, while calls without one, at the same time,
-// run to the end, whatever context the environment has.
-func TestCallContext(t *testing.T) {
+// TestConcurrentDeadlines checks that each call has its own deadline: one
+// that runs past its deadline stops, while calls without one, at the same
+// time, run to the end. Run it with -race.
+func TestConcurrentDeadlines(t *testing.T) {
 	e := eval.NewEnvironment()
-	f, err := e.Eval(read(t, e, `| 0 -> 0 | n -> f n ; f = n -> f n`))
+	bg := context.Background()
+	f, err := e.Eval(bg, read(t, e, `| 0 -> 0 | n -> f n ; f = n -> f n`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	passed, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer cancel()
-	e.UseContext(passed)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(bg, 50*time.Millisecond)
 	defer cancel()
 	stopped := make(chan error)
 	go func() {
-		_, err := eval.CallContext(ctx, f, eval.Int(1))
+		_, err := eval.Call(ctx, f, eval.Int(1))
 		stopped <- err
 	}()
 	for range 100 {
-		if v, err := eval.CallContext(nil, f, eval.Int(0)); err != nil || v.Int() != 0 {
+		if v, err := eval.Call(bg, f, eval.Int(0)); err != nil || v.Int() != 0 {
 			t.Fatalf("expected 0, got %v, %v", v, err)
 		}
 	}
 	if err := <-stopped; !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("expected the call to stop, got %v", err)
-	}
-	// Call keeps to the environment's context.
-	if _, err := eval.Call(f, eval.Int(1)); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected the call to stop, got %v", err)
 	}
 }
@@ -177,7 +165,7 @@ func TestCallContext(t *testing.T) {
 // maxDepth together. Run it with -race.
 func TestConcurrentCalls(t *testing.T) {
 	e := eval.NewEnvironment()
-	v, err := e.Eval(read(t, e, `{ deep, sum, sorted, pick }
+	v, err := e.Eval(context.Background(), read(t, e, `{ deep, sum, sorted, pick }
 ; deep = | 0 -> 0 | n -> 1 + deep (n - 1)
 ; sum = list/fold 0 (a -> b -> a + b) >> (n -> { n, twice = n * 2 })
 ; sorted = list/sort int/cmp >> list/map (n -> n + 1)
@@ -204,13 +192,13 @@ func TestConcurrentCalls(t *testing.T) {
 				}
 			}
 			n := eval.Int(int64(i))
-			v, err := eval.Call(deep, eval.Int(50_000))
+			v, err := eval.Call(context.Background(), deep, eval.Int(50_000))
 			check("deep", 50_000, eval.Value.Int, v, err)
-			v, err = eval.Call(sum, eval.NewList(eval.Int(1), eval.Int(2), n))
+			v, err = eval.Call(context.Background(), sum, eval.NewList(eval.Int(1), eval.Int(2), n))
 			check("sum", int64(2*(3+i)), func(v eval.Value) int64 { return e.Record(v).Get(twice).Int() }, v, err)
-			v, err = eval.Call(sorted, eval.NewList(eval.Int(3), n, eval.Int(1)))
+			v, err = eval.Call(context.Background(), sorted, eval.NewList(eval.Int(3), n, eval.Int(1)))
 			check("sorted", int64(min(i, 1)+1), func(v eval.Value) int64 { return v.List().Elements()[0].Int() }, v, err)
-			v, err = eval.Call(pick, abc.New(n, eval.Int(10), eval.Hole()))
+			v, err = eval.Call(context.Background(), pick, abc.New(n, eval.Int(10), eval.Hole()))
 			check("pick", int64(i+10), eval.Value.Int, v, err)
 		}()
 	}

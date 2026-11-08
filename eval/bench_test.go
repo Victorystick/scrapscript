@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -131,14 +132,14 @@ func BenchmarkEval(b *testing.B) {
 			if res.Sort {
 				b.Fatal("cannot evaluate a type")
 			}
-			c, err := compile(e.units(scrap), &e.reg, e.vars, e.shapes, &e.ctx)
+			c, err := compile(e.units(scrap), &e.reg, e.vars, e.shapes)
 			if err != nil {
 				b.Fatal(err)
 			}
 			p := newProgram(c)
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := p.eval(newLimit(nil)); err != nil {
+				if _, err := p.eval(newLimit(context.Background())); err != nil {
 					b.Fatal(err)
 				}
 			}

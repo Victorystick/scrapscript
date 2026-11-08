@@ -246,27 +246,29 @@ func NewFunc(name string, arity int, fn func(args []Value) (Value, error)) Value
 }
 
 // Call applies the function fn to args, all at once if it takes as many,
-// without checking their types. It fails if the evaluation does, as when no
-// arm matches or a builtin fails. The context that UseContext gave the
-// environment of fn, a script function, stops it as CallContext does.
-func Call(fn Value, args ...Value) (Value, error) {
-	var ctx context.Context
-	if sf, ok := fn.v.script(); ok {
-		ctx = *sf.prog.ctx
-	}
-	return CallContext(ctx, fn, args...)
-}
-
-// CallContext is Call as an evaluation of its own, which ctx stops as
-// UseContext describes, whatever context fn's environment has; a nil ctx
-// stops it only if its calls nest too deep. Calls may run on many
-// goroutines at once, as an HTTP server's handlers make them, each with its
-// request's context.
+// without checking their types, as an evaluation of its own. It fails if
+// the evaluation does, as when no arm matches or a builtin fails, or if its
+// calls nest too deep.
+//
+// It also fails once ctx is done, by its deadline or by being cancelled
+// from another goroutine, which it checks every so many calls, with an
+// error that wraps ctx.Err(), or context.DeadlineExceeded once the deadline
+// has passed, even if ctx hasn't noticed yet. A ctx that can't be done,
+// such as context.Background(), costs nothing. Eval, Apply, Test and
+// PrintScrap take a ctx in the same way.
+//
+// Calls may run on many goroutines at once, as an HTTP server's handlers
+// make them, each with its request's context.
 //
 // A host function that calls a script back starts an evaluation of its
 // own, with its own depth of calls; to keep the deadline of the evaluation
 // that called it, give it the same context.
-func CallContext(ctx context.Context, fn Value, args ...Value) (v Value, err error) {
+//
+// In WebAssembly, pass a context that only reports its deadline, as
+// cmd/scrap-wasm does: one from context.WithDeadline starts a timer, which
+// the Go runtime waits on through WASI's poll_oneoff, which a host may not
+// implement.
+func Call(ctx context.Context, fn Value, args ...Value) (v Value, err error) {
 	if len(args) == 0 {
 		return fn, nil
 	}

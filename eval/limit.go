@@ -23,7 +23,7 @@ const checkEvery = 1024
 // thread, so a timer can't fire while a scrap runs, and the deadline is
 // compared with the clock instead.
 type limit struct {
-	ctx      context.Context // nil if the evaluation has no deadline
+	ctx      context.Context // nil if it can't be done
 	done     <-chan struct{}
 	deadline time.Time
 	timed    bool
@@ -31,36 +31,19 @@ type limit struct {
 	depth    int // non-tail calls under way
 }
 
-// newLimit returns the limit of an evaluation that ctx stops, or that only
-// its depth stops if ctx is nil. It checks ctx at the first call.
+// newLimit returns the limit of an evaluation that ctx stops, as Call
+// describes, checking it every checkEvery calls, starting with the first.
+// A ctx that can't be done, such as context.Background(), isn't checked.
 func newLimit(ctx context.Context) *limit {
-	l := &limit{ctx: ctx}
+	l := &limit{}
 	if ctx != nil {
 		l.done = ctx.Done()
 		l.deadline, l.timed = ctx.Deadline()
 	}
+	if l.done != nil || l.timed {
+		l.ctx = ctx
+	}
 	return l
-}
-
-// UseContext stops evaluations in e once ctx is done, by its deadline or
-// by being cancelled from another goroutine, checking it every so many
-// calls. That covers Eval, Apply and Test, and calls with Call of values
-// that e evaluated, as by the bindings that scrap-gen-go generates;
-// CallContext gives a call its own context instead. An evaluation that it
-// stops fails with an error that wraps ctx.Err(), or
-// context.DeadlineExceeded once the deadline has passed, even if ctx hasn't
-// noticed yet. A nil ctx lifts the limit.
-//
-// Calls already under way keep the context they started with. Like the
-// rest of e, UseContext must not be called while another goroutine uses e
-// or calls its values with Call.
-//
-// In WebAssembly, give it a context that only reports its deadline, as
-// cmd/scrap-wasm does: one from context.WithDeadline starts a timer, which
-// the Go runtime waits on through WASI's poll_oneoff, which a host may not
-// implement.
-func (e *Environment) UseContext(ctx context.Context) {
-	e.ctx = ctx
 }
 
 // tick counts a call, checking the context every checkEvery calls.

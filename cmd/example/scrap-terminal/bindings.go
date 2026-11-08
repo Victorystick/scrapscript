@@ -3,6 +3,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/host"
 	"github.com/Victorystick/scrapscript/label"
@@ -28,7 +30,7 @@ func Load(env *eval.Environment, app *eval.Scrap) (ProgramRef, error) {
 	if err := env.Check(app, iface); err != nil {
 		return zero, err
 	}
-	v, err := env.Eval(app)
+	v, err := env.Eval(context.Background(), app)
 	if err != nil {
 		return zero, err
 	}
@@ -59,7 +61,7 @@ func programFromValue(l *Bindings, v eval.Value) Program {
 		Init: turnFromValue(l, r.Get(l.init)),
 		Step: func(fn eval.Value) func(Event, S) (Turn, error) {
 			return func(a0 Event, a1 S) (Turn, error) {
-				v, err := eval.Call(fn, a0.toValue(l), a1.v)
+				v, err := eval.Call(context.Background(), fn, a0.toValue(l), a1.v)
 				if err != nil {
 					var zero Turn
 					return zero, err
@@ -100,7 +102,7 @@ func (x ProgramRef) Init() TurnRef {
 
 func (x ProgramRef) Step(a0 EventRef, a1 S) (TurnRef, error) {
 	l := x.b
-	v, err := eval.Call(l.programShape.Field(x.v, 1), a0.v, a1.v)
+	v, err := eval.Call(context.Background(), l.programShape.Field(x.v, 1), a0.v, a1.v)
 	if err != nil {
 		var zero TurnRef
 		return zero, err

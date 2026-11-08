@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/Victorystick/scrapscript/eval"
 	"github.com/Victorystick/scrapscript/host"
@@ -30,7 +31,7 @@ func Load(env *eval.Environment, app *eval.Scrap) (AppRef, error) {
 	if err := env.Check(app, iface); err != nil {
 		return zero, err
 	}
-	v, err := env.Eval(app)
+	v, err := env.Eval(context.Background(), app)
 	if err != nil {
 		return zero, err
 	}
@@ -65,7 +66,7 @@ func appFromValue(l *Bindings, v eval.Value) App {
 	return App{
 		Init: func(fn eval.Value) func(Json) (Step, error) {
 			return func(a0 Json) (Step, error) {
-				v, err := eval.Call(fn, a0.toValue(l))
+				v, err := eval.Call(context.Background(), fn, a0.toValue(l))
 				if err != nil {
 					var zero Step
 					return zero, err
@@ -75,7 +76,7 @@ func appFromValue(l *Bindings, v eval.Value) App {
 		}(r.Get(l.init)),
 		Subscriptions: func(fn eval.Value) func(Model) ([]Sub, error) {
 			return func(a0 Model) ([]Sub, error) {
-				v, err := eval.Call(fn, a0.v)
+				v, err := eval.Call(context.Background(), fn, a0.v)
 				if err != nil {
 					var zero []Sub
 					return zero, err
@@ -85,7 +86,7 @@ func appFromValue(l *Bindings, v eval.Value) App {
 		}(r.Get(l.subscriptions)),
 		Update: func(fn eval.Value) func(Msg, Model) (Step, error) {
 			return func(a0 Msg, a1 Model) (Step, error) {
-				v, err := eval.Call(fn, a0.v, a1.v)
+				v, err := eval.Call(context.Background(), fn, a0.v, a1.v)
 				if err != nil {
 					var zero Step
 					return zero, err
@@ -95,7 +96,7 @@ func appFromValue(l *Bindings, v eval.Value) App {
 		}(r.Get(l.update)),
 		View: func(fn eval.Value) func(Model) (Node, error) {
 			return func(a0 Model) (Node, error) {
-				v, err := eval.Call(fn, a0.v)
+				v, err := eval.Call(context.Background(), fn, a0.v)
 				if err != nil {
 					var zero Node
 					return zero, err
@@ -151,7 +152,7 @@ func (x AppRef) Load() App { return appFromValue(x.b, x.v) }
 
 func (x AppRef) Init(a0 JsonRef) (StepRef, error) {
 	l := x.b
-	v, err := eval.Call(l.appShape.Field(x.v, 0), a0.v)
+	v, err := eval.Call(context.Background(), l.appShape.Field(x.v, 0), a0.v)
 	if err != nil {
 		var zero StepRef
 		return zero, err
@@ -161,7 +162,7 @@ func (x AppRef) Init(a0 JsonRef) (StepRef, error) {
 
 func (x AppRef) Subscriptions(a0 Model) (host.ListRef[SubRef], error) {
 	l := x.b
-	v, err := eval.Call(l.appShape.Field(x.v, 1), a0.v)
+	v, err := eval.Call(context.Background(), l.appShape.Field(x.v, 1), a0.v)
 	if err != nil {
 		var zero host.ListRef[SubRef]
 		return zero, err
@@ -171,7 +172,7 @@ func (x AppRef) Subscriptions(a0 Model) (host.ListRef[SubRef], error) {
 
 func (x AppRef) Update(a0 Msg, a1 Model) (StepRef, error) {
 	l := x.b
-	v, err := eval.Call(l.appShape.Field(x.v, 2), a0.v, a1.v)
+	v, err := eval.Call(context.Background(), l.appShape.Field(x.v, 2), a0.v, a1.v)
 	if err != nil {
 		var zero StepRef
 		return zero, err
@@ -181,7 +182,7 @@ func (x AppRef) Update(a0 Msg, a1 Model) (StepRef, error) {
 
 func (x AppRef) View(a0 Model) (NodeRef, error) {
 	l := x.b
-	v, err := eval.Call(l.appShape.Field(x.v, 3), a0.v)
+	v, err := eval.Call(context.Background(), l.appShape.Field(x.v, 3), a0.v)
 	if err != nil {
 		var zero NodeRef
 		return zero, err
@@ -614,7 +615,7 @@ func cmdFromValue(l *Bindings, v eval.Value) Cmd {
 	case l.now:
 		return NewCmdNow(func(fn eval.Value) func(int64) (Msg, error) {
 			return func(a0 int64) (Msg, error) {
-				v, err := eval.Call(fn, eval.Int(a0))
+				v, err := eval.Call(context.Background(), fn, eval.Int(a0))
 				if err != nil {
 					var zero Msg
 					return zero, err
@@ -625,7 +626,7 @@ func cmdFromValue(l *Bindings, v eval.Value) Cmd {
 	case l.randomFloat:
 		return NewCmdRandomFloat(func(fn eval.Value) func(float64) (Msg, error) {
 			return func(a0 float64) (Msg, error) {
-				v, err := eval.Call(fn, eval.Float(a0))
+				v, err := eval.Call(context.Background(), fn, eval.Float(a0))
 				if err != nil {
 					var zero Msg
 					return zero, err
@@ -709,7 +710,7 @@ func (x CmdRef) Now() func(int64) (Msg, error) {
 	}
 	return func(fn eval.Value) func(int64) (Msg, error) {
 		return func(a0 int64) (Msg, error) {
-			v, err := eval.Call(fn, eval.Int(a0))
+			v, err := eval.Call(context.Background(), fn, eval.Int(a0))
 			if err != nil {
 				var zero Msg
 				return zero, err
@@ -728,7 +729,7 @@ func (x CmdRef) RandomFloat() func(float64) (Msg, error) {
 	}
 	return func(fn eval.Value) func(float64) (Msg, error) {
 		return func(a0 float64) (Msg, error) {
-			v, err := eval.Call(fn, eval.Float(a0))
+			v, err := eval.Call(context.Background(), fn, eval.Float(a0))
 			if err != nil {
 				var zero Msg
 				return zero, err
@@ -879,7 +880,7 @@ func expectFromValue(l *Bindings, v eval.Value) Expect {
 	case l.bytes:
 		return NewExpectBytes(func(fn eval.Value) func(ResultResponseBytes) (Msg, error) {
 			return func(a0 ResultResponseBytes) (Msg, error) {
-				v, err := eval.Call(fn, a0.toValue(l))
+				v, err := eval.Call(context.Background(), fn, a0.toValue(l))
 				if err != nil {
 					var zero Msg
 					return zero, err
@@ -890,7 +891,7 @@ func expectFromValue(l *Bindings, v eval.Value) Expect {
 	case l.json:
 		return NewExpectJson(func(fn eval.Value) func(ResultResponseJson) (Msg, error) {
 			return func(a0 ResultResponseJson) (Msg, error) {
-				v, err := eval.Call(fn, a0.toValue(l))
+				v, err := eval.Call(context.Background(), fn, a0.toValue(l))
 				if err != nil {
 					var zero Msg
 					return zero, err
@@ -901,7 +902,7 @@ func expectFromValue(l *Bindings, v eval.Value) Expect {
 	case l.text:
 		return NewExpectText(func(fn eval.Value) func(ResultResponseText) (Msg, error) {
 			return func(a0 ResultResponseText) (Msg, error) {
-				v, err := eval.Call(fn, a0.toValue(l))
+				v, err := eval.Call(context.Background(), fn, a0.toValue(l))
 				if err != nil {
 					var zero Msg
 					return zero, err
@@ -975,7 +976,7 @@ func (x ExpectRef) Bytes() func(ResultResponseBytesRef) (Msg, error) {
 	}
 	return func(fn eval.Value) func(ResultResponseBytesRef) (Msg, error) {
 		return func(a0 ResultResponseBytesRef) (Msg, error) {
-			v, err := eval.Call(fn, a0.v)
+			v, err := eval.Call(context.Background(), fn, a0.v)
 			if err != nil {
 				var zero Msg
 				return zero, err
@@ -994,7 +995,7 @@ func (x ExpectRef) Json() func(ResultResponseJsonRef) (Msg, error) {
 	}
 	return func(fn eval.Value) func(ResultResponseJsonRef) (Msg, error) {
 		return func(a0 ResultResponseJsonRef) (Msg, error) {
-			v, err := eval.Call(fn, a0.v)
+			v, err := eval.Call(context.Background(), fn, a0.v)
 			if err != nil {
 				var zero Msg
 				return zero, err
@@ -1013,7 +1014,7 @@ func (x ExpectRef) Text() func(ResultResponseTextRef) (Msg, error) {
 	}
 	return func(fn eval.Value) func(ResultResponseTextRef) (Msg, error) {
 		return func(a0 ResultResponseTextRef) (Msg, error) {
-			v, err := eval.Call(fn, a0.v)
+			v, err := eval.Call(context.Background(), fn, a0.v)
 			if err != nil {
 				var zero Msg
 				return zero, err
@@ -1564,7 +1565,7 @@ func cmdRandomIntPayloadFromValue(l *Bindings, v eval.Value) CmdRandomIntPayload
 		Min: r.Get(l.min).Int(),
 		Msg: func(fn eval.Value) func(int64) (Msg, error) {
 			return func(a0 int64) (Msg, error) {
-				v, err := eval.Call(fn, eval.Int(a0))
+				v, err := eval.Call(context.Background(), fn, eval.Int(a0))
 				if err != nil {
 					var zero Msg
 					return zero, err
@@ -1615,7 +1616,7 @@ func (x CmdRandomIntPayloadRef) Min() int64 {
 
 func (x CmdRandomIntPayloadRef) Msg(a0 int64) (Msg, error) {
 	l := x.b
-	v, err := eval.Call(l.cmdRandomIntPayloadShape.Field(x.v, 2), eval.Int(a0))
+	v, err := eval.Call(context.Background(), l.cmdRandomIntPayloadShape.Field(x.v, 2), eval.Int(a0))
 	if err != nil {
 		var zero Msg
 		return zero, err
@@ -1675,7 +1676,7 @@ func subFromValue(l *Bindings, v eval.Value) Sub {
 	case l.animationFrame:
 		return NewSubAnimationFrame(func(fn eval.Value) func(float64) (Msg, error) {
 			return func(a0 float64) (Msg, error) {
-				v, err := eval.Call(fn, eval.Float(a0))
+				v, err := eval.Call(context.Background(), fn, eval.Float(a0))
 				if err != nil {
 					var zero Msg
 					return zero, err
@@ -1735,7 +1736,7 @@ func (x SubRef) AnimationFrame() func(float64) (Msg, error) {
 	}
 	return func(fn eval.Value) func(float64) (Msg, error) {
 		return func(a0 float64) (Msg, error) {
-			v, err := eval.Call(fn, eval.Float(a0))
+			v, err := eval.Call(context.Background(), fn, eval.Float(a0))
 			if err != nil {
 				var zero Msg
 				return zero, err
@@ -1766,7 +1767,7 @@ func subEveryPayloadFromValue(l *Bindings, v eval.Value) SubEveryPayload {
 		Ms: r.Get(l.ms).Int(),
 		Msg: func(fn eval.Value) func(int64) (Msg, error) {
 			return func(a0 int64) (Msg, error) {
-				v, err := eval.Call(fn, eval.Int(a0))
+				v, err := eval.Call(context.Background(), fn, eval.Int(a0))
 				if err != nil {
 					var zero Msg
 					return zero, err
@@ -1809,7 +1810,7 @@ func (x SubEveryPayloadRef) Ms() int64 {
 
 func (x SubEveryPayloadRef) Msg(a0 int64) (Msg, error) {
 	l := x.b
-	v, err := eval.Call(l.subEveryPayloadShape.Field(x.v, 1), eval.Int(a0))
+	v, err := eval.Call(context.Background(), l.subEveryPayloadShape.Field(x.v, 1), eval.Int(a0))
 	if err != nil {
 		var zero Msg
 		return zero, err
@@ -2118,7 +2119,7 @@ func attrFromValue(l *Bindings, v eval.Value) Attr {
 	case l.onCheck:
 		return NewAttrOnCheck(func(fn eval.Value) func(Bool) (Msg, error) {
 			return func(a0 Bool) (Msg, error) {
-				v, err := eval.Call(fn, a0.toValue(l))
+				v, err := eval.Call(context.Background(), fn, a0.toValue(l))
 				if err != nil {
 					var zero Msg
 					return zero, err
@@ -2131,7 +2132,7 @@ func attrFromValue(l *Bindings, v eval.Value) Attr {
 	case l.onInput:
 		return NewAttrOnInput(func(fn eval.Value) func(string) (Msg, error) {
 			return func(a0 string) (Msg, error) {
-				v, err := eval.Call(fn, eval.Text(a0))
+				v, err := eval.Call(context.Background(), fn, eval.Text(a0))
 				if err != nil {
 					var zero Msg
 					return zero, err
@@ -2245,7 +2246,7 @@ func (x AttrRef) OnCheck() func(BoolRef) (Msg, error) {
 	}
 	return func(fn eval.Value) func(BoolRef) (Msg, error) {
 		return func(a0 BoolRef) (Msg, error) {
-			v, err := eval.Call(fn, a0.v)
+			v, err := eval.Call(context.Background(), fn, a0.v)
 			if err != nil {
 				var zero Msg
 				return zero, err
@@ -2274,7 +2275,7 @@ func (x AttrRef) OnInput() func(string) (Msg, error) {
 	}
 	return func(fn eval.Value) func(string) (Msg, error) {
 		return func(a0 string) (Msg, error) {
-			v, err := eval.Call(fn, eval.Text(a0))
+			v, err := eval.Call(context.Background(), fn, eval.Text(a0))
 			if err != nil {
 				var zero Msg
 				return zero, err

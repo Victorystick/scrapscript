@@ -891,16 +891,19 @@ its arguments too, so `response text` and `response json` bind to
 `ResponseText` and `ResponseJson`, while `node msg` binds to `Node`.
 
 **Cancelling.** A host stops a script that runs too long with a
-`context.Context` for its environment, which the evaluator checks every so many
-calls of script functions: every loop of a scrap is a call. It polls the
-deadline against the clock rather than waiting on a timer, since a WebAssembly
-host has one thread, which a running scrap holds.
+`context.Context`, which it passes to each evaluation and each call of a
+script's function, and which the evaluator checks every so many calls of script
+functions: every loop of a scrap is a call. It polls the deadline against the
+clock rather than waiting on a timer, since a WebAssembly host has one thread,
+which a running scrap holds. Each call is limited on its own, so a host may make
+calls concurrently, as a server's handlers do, each with its request's context.
 
 **Call depth.** Calls in tail position run in constant stack, but each
 non-tail call nests in the host's stack, which a deadline doesn't stop from
 overflowing: in WebAssembly the engine's overflows within milliseconds. So
 non-tail calls nest at most 100,000 deep natively and 1,000 in WebAssembly,
-and a deeper recursion fails with an error.
+within each evaluation or call, and a deeper recursion fails with an error,
+with or without a deadline.
 
 **The web platform** (in progress; WEB_PLAN.md). Apps in the Elm
 architecture, which `cmd/scrap-web` runs in a page. Its interface,

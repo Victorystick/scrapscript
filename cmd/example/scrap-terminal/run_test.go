@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -69,7 +70,7 @@ func TestRunAgreesWithSimulate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	simv, err := env.Eval(sim)
+	simv, err := env.Eval(context.Background(), sim)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestRunAgreesWithSimulate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		appv, _ := env.Eval(app)
+		appv, _ := env.Eval(context.Background(), app)
 
 		for _, input := range inputs {
 			var out strings.Builder
@@ -92,7 +93,7 @@ func TestRunAgreesWithSimulate(t *testing.T) {
 				t.Fatalf("%s on %q: %v", name, input, err)
 			}
 
-			res, err := eval.Call(simv, appv, eval.NewList(lines(input)...))
+			res, err := eval.Call(context.Background(), simv, appv, eval.NewList(lines(input)...))
 			if err != nil {
 				t.Fatalf("%s on %q: simulate: %v", name, input, err)
 			}

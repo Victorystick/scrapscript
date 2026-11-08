@@ -1,6 +1,7 @@
 package eval_test
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -99,7 +100,7 @@ func TestRunProgram(t *testing.T) {
 	if err := e.Check(app, read(t, e, `$"./program.scrap"`)); err != nil {
 		t.Fatal(err)
 	}
-	v, err := e.Eval(app)
+	v, err := e.Eval(context.Background(), app)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestRunProgram(t *testing.T) {
 		if len(input) > 0 {
 			event, input = eval.NewVariant(e.Label("line"), eval.Text(input[0])), input[1:]
 		}
-		res, err := eval.Call(prog.Get(e.Label("step")), event, turn.Get(e.Label("state")))
+		res, err := eval.Call(context.Background(), prog.Get(e.Label("step")), event, turn.Get(e.Label("state")))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -137,25 +138,25 @@ func TestHostFunc(t *testing.T) {
 		return eval.Int(args[0].Int() + args[1].Int()), nil
 	})
 	// Partial applications of one function keep their own arguments.
-	fv, err := e.Eval(read(t, e, `f -> ([f 1 2, g 3, g 4] ; g = f 10)`))
+	fv, err := e.Eval(context.Background(), read(t, e, `f -> ([f 1 2, g 3, g 4] ; g = f 10)`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := eval.Call(fv, add)
+	v, err := eval.Call(context.Background(), fv, add)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := e.Print(v); got != `[ 3, 13, 14 ]` {
 		t.Errorf("expected [ 3, 13, 14 ], got %s", got)
 	}
-	if got := e.Print(eval.NewVariant(e.Label("f"), must(eval.Call(add, eval.Int(1))))); got != `#f (add 1)` {
+	if got := e.Print(eval.NewVariant(e.Label("f"), must(eval.Call(context.Background(), add, eval.Int(1))))); got != `#f (add 1)` {
 		t.Errorf("expected a partial host function to print as #f (add 1), got %s", got)
 	}
 
 	fail := eval.NewFunc("fail", 1, func([]eval.Value) (eval.Value, error) {
 		return eval.Value{}, errors.New("no")
 	})
-	if _, err := eval.Call(fv, fail); err == nil || err.Error() != "fail: no" {
+	if _, err := eval.Call(context.Background(), fv, fail); err == nil || err.Error() != "fail: no" {
 		t.Errorf("expected the host function's error, got %v", err)
 	}
 }
@@ -171,11 +172,11 @@ func TestShape(t *testing.T) {
 	}
 	// A scrap reads the record's fields as those of its own records, which
 	// have the same shape, whatever its fields' order.
-	fn, err := e.Eval(read(t, e, `| { b = 1, a = a } -> a ++ "y" | _ -> "no"`))
+	fn, err := e.Eval(context.Background(), read(t, e, `| { b = 1, a = a } -> a ++ "y" | _ -> "no"`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := eval.Call(fn, r)
+	v, err := eval.Call(context.Background(), fn, r)
 	if err != nil || v.Text() != "xy" {
 		t.Errorf("expected \"xy\", got %s, %v", e.Print(v), err)
 	}
@@ -199,7 +200,7 @@ func TestShapeField(t *testing.T) {
 	s := e.Shape(e.Label("b"), e.Label("a"))
 	// A record that a scrap made has the shape too, so its fields are at
 	// the indices that Shape was given its labels in.
-	r, err := e.Eval(read(t, e, `{ a = "x", b = 1 }`))
+	r, err := e.Eval(context.Background(), read(t, e, `{ a = "x", b = 1 }`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,18 +217,18 @@ func TestShapeField(t *testing.T) {
 
 func TestCallFailure(t *testing.T) {
 	e := environment()
-	fn, err := e.Eval(read(t, e, `| #a -> 2`))
+	fn, err := e.Eval(context.Background(), read(t, e, `| #a -> 2`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eval.Call(fn, eval.NewVariant(e.Label("b"), eval.Value{})); err == nil || !strings.Contains(err.Error(), "no arm matches #b") {
+	if _, err := eval.Call(context.Background(), fn, eval.NewVariant(e.Label("b"), eval.Value{})); err == nil || !strings.Contains(err.Error(), "no arm matches #b") {
 		t.Errorf("expected no arm to match, got %v", err)
 	}
-	fn, err = e.Eval(read(t, e, `| #a -> #c -> 2`))
+	fn, err = e.Eval(context.Background(), read(t, e, `| #a -> #c -> 2`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eval.Call(fn, eval.NewVariant(e.Label("a"), eval.Value{}), eval.NewVariant(e.Label("d"), eval.Value{})); err == nil || !strings.Contains(err.Error(), "no arm matches #a, #d") {
+	if _, err := eval.Call(context.Background(), fn, eval.NewVariant(e.Label("a"), eval.Value{}), eval.NewVariant(e.Label("d"), eval.Value{})); err == nil || !strings.Contains(err.Error(), "no arm matches #a, #d") {
 		t.Errorf("expected no arm to match, got %v", err)
 	}
 }

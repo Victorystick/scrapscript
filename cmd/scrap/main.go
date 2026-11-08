@@ -86,9 +86,6 @@ func makeEnv() *eval.Environment {
 	pusher := httpyard.New(*server)
 	env.UsePusher(pusher)
 	env.UseDrafts(os.DirFS(*root))
-	if *timeout > 0 {
-		env.UseContext(ctx)
-	}
 	// Don't cache invalid scraps, but trust the local cache for now.
 	fetcher := yards.Validate(pusher)
 	if *cache != "" {
@@ -106,10 +103,10 @@ func evaluate(args []string) {
 
 	if len(args) >= 2 && args[0] == "apply" {
 		fn := must(env.Read([]byte(args[1])))
-		fmt.Println(env.Print(must(env.Apply(fn, scrap))))
+		fmt.Println(env.Print(must(env.Apply(ctx, fn, scrap))))
 		return
 	}
-	fmt.Println(must(env.PrintScrap(scrap)))
+	fmt.Println(must(env.PrintScrap(ctx, scrap)))
 }
 
 func inferType(args []string) {
@@ -125,7 +122,7 @@ func runTests(args []string) {
 	input := must(io.ReadAll(os.Stdin))
 	env := makeEnv()
 	scrap := must(env.Read(input))
-	results := must(env.Test(scrap))
+	results := must(env.Test(ctx, scrap))
 	failed := 0
 	for _, r := range results {
 		if !r.Failed {

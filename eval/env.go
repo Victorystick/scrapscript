@@ -63,8 +63,11 @@ type hashKey struct {
 //
 // An Environment is not safe for concurrent use: load, check and evaluate
 // scraps in it from one goroutine at a time. The values it returns are
-// immutable, though, and many goroutines may call them at once, with Call
-// or CallContext, while nothing else uses the environment.
+// immutable, though, and many goroutines may call them at once with Call,
+// while nothing else uses the environment.
+//
+// Each method that evaluates takes a context, which stops the evaluation
+// once it is done; see Call.
 type Environment struct {
 	pusher  Pusher
 	fetcher Fetcher
@@ -74,9 +77,6 @@ type Environment struct {
 	reg   types.Registry
 	// The shapes of records, whose labels are in reg's table.
 	shapes *shapeTable
-	// What stops its evaluations, and calls of its values with Call, from
-	// UseContext; nil if nothing does.
-	ctx context.Context
 	// The TypeScope and variables match each other's contents.
 	// One is used for type inference, the other for evaluation.
 	typeScope types.TypeScope
@@ -275,27 +275,29 @@ func (e *Environment) check(s *Scrap) (types.Result, error) {
 	return res, nil
 }
 
-// Eval type-checks and evaluates a Scrap, after the scraps it refers to.
-func (e *Environment) Eval(s *Scrap) (Value, error) {
+// Eval type-checks and evaluates a Scrap, after the scraps it refers to,
+// until ctx is done. A scrap is evaluated once; later calls return the same
+// value.
+func (e *Environment) Eval(ctx context.Context, s *Scrap) (Value, error) {
 	res, err := e.infer(s)
 	if err != nil {
 		return Value{}, err
 	}
-	v, err := e.eval(s, res)
+	v, err := e.eval(ctx, s, res)
 	return Value{v}, err
 }
 
-func (e *Environment) eval(s *Scrap, res types.Result) (value, error) {
+func (e *Environment) eval(ctx context.Context, s *Scrap, res types.Result) (value, error) {
 	if res.Sort {
 		return value{}, fmt.Errorf("cannot evaluate a type")
 	}
 	if !s.value.valid() {
-		c, err := compile(e.units(s), &e.reg, e.vars, e.shapes, &e.ctx)
+		c, err := compile(e.units(s), &e.reg, e.vars, e.shapes)
 		if err != nil {
 			return value{}, err
 		}
 		p := newProgram(c)
-		v, err := p.eval(newLimit(e.ctx))
+		v, err := p.eval(newLimit(ctx))
 		if err != nil {
 			return value{}, err
 		}
@@ -329,8 +331,8 @@ func (e *Environment) units(s *Scrap) []unit {
 }
 
 // Apply type-checks and evaluates the function fn applied to arg, as if fn
-// were called with arg in the same scrap.
-func (e *Environment) Apply(fn, arg *Scrap) (v Value, err error) {
+// were called with arg in the same scrap, until ctx is done.
+func (e *Environment) Apply(ctx context.Context, fn, arg *Scrap) (v Value, err error) {
 	ares, err := e.infer(arg)
 	if err != nil {
 		return Value{}, err
@@ -339,11 +341,11 @@ func (e *Environment) Apply(fn, arg *Scrap) (v Value, err error) {
 	if err != nil {
 		return Value{}, err
 	}
-	a, err := e.eval(arg, ares)
+	a, err := e.eval(ctx, arg, ares)
 	if err != nil {
 		return Value{}, err
 	}
-	f, err := e.eval(fn, fres)
+	f, err := e.eval(ctx, fn, fres)
 	if err != nil {
 		return Value{}, err
 	}
@@ -357,7 +359,7 @@ func (e *Environment) Apply(fn, arg *Scrap) (v Value, err error) {
 		return Value{}, fmt.Errorf("cannot apply: passed '%s' but expected '%s'%s", strs[0], strs[1], where)
 	}
 	defer catch(&err)
-	return Value{apply(newLimit(e.ctx), f, a)}, nil
+	return Value{apply(newLimit(ctx), f, a)}, nil
 }
 
 // Infer returns the string representation of the type of a Scrap.
@@ -378,8 +380,8 @@ func (e *Environment) Print(v Value) string {
 // PrintScrap evaluates s, and returns a scrap that evaluates to its value
 // and prints the same, as Print does. If s is a record literal, the printed
 // record keeps its type members, so that it is the same scrap.
-func (e *Environment) PrintScrap(s *Scrap) (string, error) {
-	v, err := e.Eval(s)
+func (e *Environment) PrintScrap(ctx context.Context, s *Scrap) (string, error) {
+	v, err := e.Eval(ctx, s)
 	if err != nil {
 		return "", err
 	}

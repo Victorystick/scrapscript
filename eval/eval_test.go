@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -414,7 +415,7 @@ func eval(e *Environment, source string) (Value, error) {
 	if err != nil {
 		return Value{}, err
 	}
-	return e.Eval(scrap)
+	return e.Eval(context.Background(), scrap)
 }
 
 // Evaluates an expression and compares the string representation of the
@@ -489,7 +490,7 @@ func TestImportType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	val, err := env.Eval(scrap)
+	val, err := env.Eval(context.Background(), scrap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +503,7 @@ func TestImportType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if val, err = env.Eval(scrap); err != nil || env.Print(val) != "1" {
+	if val, err = env.Eval(context.Background(), scrap); err != nil || env.Print(val) != "1" {
 		t.Errorf("Expected 1, got %v, %v", val, err)
 	}
 
@@ -515,7 +516,7 @@ func TestImportType(t *testing.T) {
 	if err != nil || typ != "type = [ #a int, #b ]" {
 		t.Errorf("Expected type = [ #a int, #b ], got %s, %v", typ, err)
 	}
-	if _, err = env.Eval(scrap); err == nil || err.Error() != "cannot evaluate a type" {
+	if _, err = env.Eval(context.Background(), scrap); err == nil || err.Error() != "cannot evaluate a type" {
 		t.Errorf("Expected 'cannot evaluate a type', got %v", err)
 	}
 
@@ -528,7 +529,7 @@ func TestImportType(t *testing.T) {
 	if err != nil || typ != "type = [ #a int, #b ]" {
 		t.Errorf("Expected type = [ #a int, #b ], got %s, %v", typ, err)
 	}
-	if _, err = env.Eval(scrap); err == nil || err.Error() != "cannot evaluate a type" {
+	if _, err = env.Eval(context.Background(), scrap); err == nil || err.Error() != "cannot evaluate a type" {
 		t.Errorf("Expected 'cannot evaluate a type', got %v", err)
 	}
 }
@@ -564,14 +565,14 @@ func TestImportTypeMember(t *testing.T) {
 	if typ, err := env.Infer(scrap); err != nil || typ != "{ none : [ #none, ..a ] }" {
 		t.Errorf("Expected { none : [ #none, ..a ] }, got %s, %v", typ, err)
 	}
-	if val, err := env.Eval(scrap); err != nil || env.Print(val) != "{ none = #none }" {
+	if val, err := env.Eval(context.Background(), scrap); err != nil || env.Print(val) != "{ none = #none }" {
 		t.Errorf("Expected { none = #none }, got %v, %v", val, err)
 	}
 	scrap, err = env.Read([]byte(`f l.none ; f : l.option int -> int = | #some n -> n | #none -> 0 ; l = $source:` + lib))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if val, err := env.Eval(scrap); err != nil || env.Print(val) != "0" {
+	if val, err := env.Eval(context.Background(), scrap); err != nil || env.Print(val) != "0" {
 		t.Errorf("Expected 0, got %v, %v", val, err)
 	}
 
@@ -587,7 +588,7 @@ func TestImportTypeMember(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := env.PrintScrap(scrap); err != nil || got != ex.result {
+		if got, err := env.PrintScrap(context.Background(), scrap); err != nil || got != ex.result {
 			t.Errorf("%s: expected %q, got %q, %v", ex.source, ex.result, got, err)
 		}
 	}

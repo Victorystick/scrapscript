@@ -2,6 +2,7 @@ package eval
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -33,8 +34,9 @@ type TestResult struct {
 
 // Test checks that the value of the scrap s holds test cases, evaluates
 // it, and returns the outcome of each case, in the order of its labels and
-// indices. It fails if s isn't a test scrap or its evaluation fails.
-func (e *Environment) Test(s *Scrap) ([]TestResult, error) {
+// indices. It fails if s isn't a test scrap or its evaluation fails, as
+// once ctx is done.
+func (e *Environment) Test(ctx context.Context, s *Scrap) ([]TestResult, error) {
 	res, err := e.infer(s)
 	if err != nil {
 		return nil, err
@@ -46,7 +48,7 @@ func (e *Environment) Test(s *Scrap) ([]TestResult, error) {
 	if err := t.check(res.Type, ""); err != nil {
 		return nil, err
 	}
-	v, err := e.eval(s, res)
+	v, err := e.eval(ctx, s, res)
 	if err != nil {
 		return nil, err
 	}

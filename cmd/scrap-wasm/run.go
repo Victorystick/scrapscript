@@ -124,8 +124,9 @@ func respond(req request) response {
 	}
 	env := eval.NewEnvironment()
 	env.UseFetcher(yards.Validate(yards.ByMap(req.Sources)))
+	ctx := context.Background()
 	if req.Timeout > 0 {
-		env.UseContext(deadline{context.Background(), time.Now().Add(time.Duration(req.Timeout) * time.Millisecond)})
+		ctx = deadline{ctx, time.Now().Add(time.Duration(req.Timeout) * time.Millisecond)}
 	}
 	s, err := env.Read([]byte(req.Source))
 	if err != nil {
@@ -140,13 +141,13 @@ func respond(req request) response {
 	}
 	switch req.Command {
 	case "eval":
-		v, err := env.PrintScrap(s)
+		v, err := env.PrintScrap(ctx, s)
 		if err != nil {
 			return response{Type: t, Error: token.Render(err, nil)}
 		}
 		return response{Type: t, Value: v}
 	case "test":
-		results, err := env.Test(s)
+		results, err := env.Test(ctx, s)
 		if err != nil {
 			return response{Type: t, Error: token.Render(err, nil)}
 		}

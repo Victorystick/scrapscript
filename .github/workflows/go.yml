@@ -30,5 +30,10 @@ jobs:
     - name: Test
       run: go test -v ./...
 
+    # Only the tests of concurrent use, named TestConcurrent..., since the
+    # race detector slows the rest several times over.
+    - name: Test concurrency with the race detector
+      run: go test -race -run '^TestConcurrent' ./...
+
     - name: Build the WebAssembly module
       run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o /dev/null ./cmd/scrap-wasm

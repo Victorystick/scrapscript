@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -188,15 +186,6 @@ func TestFailedUpdate(t *testing.T) {
 	if err := s.Update(deep); err == nil || !strings.Contains(err.Error(), "calls nested deeper") {
 		t.Errorf("got %v, want the call depth error", err)
 	}
-	expect(t, s, "<p id=t>hi</p>")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	env.UseContext(ctx)
-	if err := s.Update(deep); !errors.Is(err, context.Canceled) {
-		t.Errorf("got %v, want context.Canceled", err)
-	}
-	env.UseContext(nil)
 	expect(t, s, "<p id=t>hi</p>")
 
 	if cmds := s.Commands(); len(cmds) != 1 || cmds[0].Tag() != CmdNow {

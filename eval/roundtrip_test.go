@@ -1,6 +1,9 @@
 package eval
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // Sources whose results are known to break SPEC.md section 10, rule 6: a
 // printed value must evaluate to the same value, which prints identically.
@@ -147,7 +150,7 @@ func TestPrintedMembers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := env.PrintScrap(scrap); err != nil {
+		if got, err := env.PrintScrap(context.Background(), scrap); err != nil {
 			t.Errorf("%s: %v", ex.source, err)
 		} else if got != ex.result {
 			t.Errorf("%s: expected %q, got %q", ex.source, ex.result, got)
@@ -209,7 +212,7 @@ func printScrapString(source string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return env.PrintScrap(scrap)
+	return env.PrintScrap(context.Background(), scrap)
 }
 
 func TestPrintedImports(t *testing.T) {

@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"slices"
@@ -148,7 +149,7 @@ func TestScrapsAreBoundOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	val, err := env.Eval(scrap)
+	val, err := env.Eval(context.Background(), scrap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,13 +170,13 @@ func TestErrorsInScrapsReferredTo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fn, err := env.Eval(scrap)
+	fn, err := env.Eval(context.Background(), scrap)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Hosts call functions unchecked, so this can fail at runtime, in the
 	// scrap that the function is from.
-	_, err = Call(fn, NewVariant(env.Label("b"), Value{}))
+	_, err = Call(context.Background(), fn, NewVariant(env.Label("b"), Value{}))
 	if err == nil || !strings.Contains(err.Error(), "| #a -> 1") {
 		t.Errorf("expected an error in pick.scrap, got %v", err)
 	}
@@ -243,7 +244,7 @@ func TestReadDraft(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := env.Eval(s)
+		v, err := env.Eval(context.Background(), s)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -330,7 +331,7 @@ func TestPushDraftTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	val, err := env.Eval(scrap)
+	val, err := env.Eval(context.Background(), scrap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +422,7 @@ func TestApply(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		val, err := env.Apply(fn, arg)
+		val, err := env.Apply(context.Background(), fn, arg)
 		switch {
 		case ex.err != "":
 			if err == nil || !strings.Contains(err.Error(), ex.err) {
@@ -446,7 +447,7 @@ func TestInliningAcrossScraps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := env.PrintScrap(scrap)
+	got, err := env.PrintScrap(context.Background(), scrap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +465,7 @@ func TestInliningAcrossScraps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err = env.PrintScrap(scrap)
+	got, err = env.PrintScrap(context.Background(), scrap)
 	if err != nil {
 		t.Fatal(err)
 	}
