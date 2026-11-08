@@ -93,6 +93,11 @@ $ echo '1 + 2' | scrap type
 <pre><code>int/to-text 42 ++ " is " ++ "the answer"</code></pre>
 <pre class="out"><samp class="value">"42 is the answer"</samp><samp class="type">text</samp></pre>
       </div>
+      <p><code>float/to-text</code> writes a float as scrap prints it, with digits on both sides of the point:</p>
+      <div class="example">
+<pre><code>float/to-text 2.5 ++ " and " ++ float/to-text 3.0</code></pre>
+<pre class="out"><samp class="value">"2.5 and 3.0"</samp><samp class="type">text</samp></pre>
+      </div>
       <p>A byte is <code>~</code> and two hex digits, such as <code>~ff</code>, and <code>~~</code> starts base64-encoded bytes:</p>
       <div class="example">
 <pre><code>bytes/to-utf8-text ~~aGVsbG8=</code></pre>
