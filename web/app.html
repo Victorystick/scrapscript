@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Apps · Scrapyard</title>
+  <meta name="description" content="Write web apps in scrapscript, in the Elm architecture, and run them as you edit them.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Scrapyard">
+  <meta property="og:title" content="Apps · Scrapyard">
+  <meta property="og:description" content="Write web apps in scrapscript, in the Elm architecture, and run them as you edit them.">
+  <meta property="og:url" content="https://victorystick.github.io/scrapscript/app">
+  <meta name="twitter:card" content="summary">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.ts"></script>
+</head>
+<body class="wide">
+  <header>
+    <nav><a href="./">Scrapyard</a> · <a href="tutorial">Tutorial</a> · <a href="play">Playground</a></nav>
+    <h1>Apps</h1>
+    <p>Web apps in scrapscript, in the Elm architecture: a model, messages that update it, and a view of it.</p>
+  </header>
+
+  <main class="apps">
+    <section>
+      <h2>Scrap</h2>
+      <div class="example playground" data-share>
+<pre><code></code></pre>
+      </div>
+      <noscript><p>Apps need JavaScript.</p></noscript>
+    </section>
+    <section>
+      <h2>App</h2>
+      <div id="app"></div>
+      <pre class="out" id="errors"></pre>
+      <p class="note">An app is <code>web model msg</code>, whose interface is <a href="https://github.com/Victorystick/scrapscript/blob/main/cmd/scrap-web/web.scrap"><code>web.scrap</code></a>: <code>init</code> takes flags, here <code>#null</code>, and <code>update</code> a message; both give the next model and the commands to carry out, such as HTTP requests. <code>view</code> and <code>subscriptions</code> say what the page shows and what the app listens to. Scraps that it refers to by <code>$source:</code> hash come from <a href="./">the yard</a>, and a step that runs longer than a second fails. The address bar keeps what you ran, so you can share it.</p>
+    </section>
+  </main>
+</body>
+</html>
