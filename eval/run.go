@@ -182,7 +182,7 @@ func enterN(fn value, args []value) (body tcode, f frame, v value, lim *limit) {
 // frame returns a new frame of size slots for a call of the lambda sf,
 // which takes more than one argument.
 func (sf *scriptFunc) frame(size int) frame {
-	return frame{slots: make([]value, size), caps: sf.caps}
+	return frame{slots: sf.prog.limit.slots(size), caps: sf.caps}
 }
 
 // noArm returns the error that no arm of the function or match n matches

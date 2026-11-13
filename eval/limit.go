@@ -28,6 +28,7 @@ type limit struct {
 	left     int // calls until the next check
 	depth    int // non-tail calls under way
 	maxDepth int // at most, beyond which they fail
+	frames   framePool
 }
 
 // UseContext stops evaluations in e once ctx is done, by its deadline or
@@ -44,7 +45,7 @@ type limit struct {
 // implement.
 func (e *Environment) UseContext(ctx context.Context) {
 	l := e.limit
-	*l = limit{ctx: ctx, depth: l.depth, maxDepth: l.maxDepth}
+	*l = limit{ctx: ctx, depth: l.depth, maxDepth: l.maxDepth, frames: l.frames}
 	if ctx != nil {
 		l.done = ctx.Done()
 		l.deadline, l.timed = ctx.Deadline()
