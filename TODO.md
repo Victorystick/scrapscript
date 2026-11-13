@@ -83,6 +83,24 @@ builtins now return plain values and panic with a `runtimeError`, which
         with the operand fast path, AccessLog was level with heap frames.
         `enter` must not return slots of its caller's buffer: it and
         `run` call each other, so Go moves the buffer to the heap.
+- [x] Recycle frames (November 2026, eval/frames.go): free a frame's
+      slots when its body returns or calls on in tail position, and take
+      a call's slots from the free frames of its size. Since the above,
+      inlining made frames large (AccessLog's are up to 22 slots, 69% of
+      its bytes) and allocation grew to over a third of its time. Without
+      clearing freed slots, which gave back a third of the gain (bulk
+      barriers, as above), and with the free frames dropped after each
+      collection instead, so stale slots keep garbage alive at most a
+      cycle longer: AccessLog bytes -74%, allocations -51%, instructions
+      -18%; fib, loop, fold, sum and tree -25 to -34%. It ties an environment's values to
+      one goroutine at a time, which a platform that serves requests
+      concurrently (SPEC.md section 13) would have to lift, with the pool
+      per evaluation rather than per environment.
+- [ ] Size frames per arm: a frame is as large as its function's largest
+      arm, with the calls inlined into it, so `lean`'s is 22 slots for the
+      arm that inlines `node`, while its other arms use 5. Needs the arm to
+      be chosen before the frame is made, as a decision tree (section 6)
+      would.
 
 - [x] Decide between `run` and the core compiled to Go closures: the
       closures, eval/closures.go, are the only evaluator. With calls out

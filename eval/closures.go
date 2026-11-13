@@ -73,7 +73,7 @@ func (l *lambdaCode) enter1(sf *scriptFunc, arg value) (tcode, frame) {
 	sf.prog.limit.tick()
 	g := frame{caps: sf.caps}
 	if l.size > 0 {
-		g.slots = make([]value, l.size)
+		g.slots = sf.prog.limit.slots(l.size)
 	}
 	for _, a := range l.arms {
 		if a.pats[0](arg, g.slots) {
@@ -106,6 +106,7 @@ func trampoline(l *limit, c tcode, f frame) value {
 	l.depth++
 	for {
 		v, next, g := c(f)
+		l.free(f.slots)
 		if next == nil {
 			l.depth--
 			return v

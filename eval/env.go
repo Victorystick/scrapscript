@@ -61,6 +61,8 @@ type hashKey struct {
 // anywhere, including where there is no filesystem or network.
 //
 // An Environment is not safe for concurrent use: use one per goroutine.
+// Nor are the functions it evaluates to, which share its recycled frames:
+// call them from one goroutine at a time.
 type Environment struct {
 	pusher  Pusher
 	fetcher Fetcher
