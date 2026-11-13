@@ -21,6 +21,8 @@ import (
 //	@s                   reads slot s of the current frame
 //	&i                   reads capture i of the running function
 //	(f x)                a call; pipes are calls too
+//	(f! x)               a call of a function that is a where-bound function
+//	                     literal, with all its arguments
 //	(+ a b)              an operator: + - * +< >+ ++, suffixed with float,
 //	                     text or bytes unless on ints or lists
 //	{ k = v ..r }        a record, based on r if ..r is there
@@ -104,6 +106,16 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 		fmt.Fprintf(s, "&%d", d.a)
 	case opCall:
 		c.list(s, "(", ")", "", cnode(d.a), cnode(d.b))
+	case opCallKnown:
+		r := c.range_(n)
+		s.WriteString("(")
+		c.dump(s, cnode(r[1]))
+		s.WriteString("!")
+		for _, x := range r[2:] {
+			s.WriteString(" ")
+			c.dump(s, cnode(x))
+		}
+		s.WriteString(")")
 	case opCallN:
 		var ns []cnode
 		for _, x := range c.range_(n) {
@@ -369,10 +381,10 @@ func TestCompile(t *testing.T) {
 			`((list/map @0 [2]) ; >1 1 ; >0 (fn/1 [@1] ^n&0 home=f | >0 -> (+ @0 &0)))`, 2},
 		// A recursive function captures itself once it is made.
 		{`f ; f = | 0 -> 1 | n -> n * f (n - 1)`,
-			`(@0 ; >0 new ; >0 (fill @0 (fn/1 [@0] ^f&0 home=f | 0 -> 1 | >0 -> (* @0 (&0 (- @0 1))))))`, 1},
+			`(@0 ; >0 new ; >0 (fill @0 (fn/1 [@0] ^f&0 home=f | 0 -> 1 | >0 -> (* @0 (&0! (- @0 1))))))`, 1},
 		// Mutually recursive ones capture each other.
 		{`even ; even = | 0 -> #t | n -> odd (n - 1) ; odd = | 0 -> #f | n -> even (n - 1)`,
-			`(@0 ; >0 new ; >1 new ; >0 (fill @0 (fn/1 [@1] ^odd&0 home=even | 0 -> #t | >0 -> (&0 (- @0 1)))) ; >1 (fill @1 (fn/1 [@0] ^even&0 home=odd | 0 -> #f | >0 -> (&0 (- @0 1)))))`, 2},
+			`(@0 ; >0 new ; >1 new ; >0 (fill @0 (fn/1 [@1] ^odd&0 home=even | 0 -> #t | >0 -> (&0! (- @0 1)))) ; >1 (fill @1 (fn/1 [@0] ^even&0 home=odd | 0 -> #f | >0 -> (&0! (- @0 1)))))`, 2},
 		// A recursive function's closure is made before its where, whose
 		// closures may capture it.
 		{`f ; f = (x -> g x ; g = y -> f y)`,
@@ -448,7 +460,7 @@ func TestCompile(t *testing.T) {
 		{`f 1 ; f = a -> b -> a + b`, `((@0 1) ; >0 (fn/2 home=f | >0 -> >1 -> (+ @0 @1)))`, 1},
 		// A large one only if nothing else refers to it.
 		{`f 1 + f 2 ; f = | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10`,
-			`((+ (@0 1) (@0 2)) ; >0 (fn/0 home=f | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10))`, 1},
+			`((+ (@0! 1) (@0! 2)) ; >0 (fn/0 home=f | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10))`, 1},
 		{`f 1 ; f = | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10`,
 			`((match 1 | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10) ; >0 (fn/0 home=f | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10))`, 1},
 		// Values.
