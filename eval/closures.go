@@ -416,7 +416,9 @@ func (p *program) expr(n cnode) code {
 		first, second, _ := p.compose(n)
 		fc, sc := p.expr(first), p.expr(second)
 		return func(f frame) value {
-			return scriptVal(&scriptFunc{prog: p, node: n, caps: []value{fc(f), sc(f)}})
+			sf := closure(p, n, 2)
+			sf.caps[0], sf.caps[1] = fc(f), sc(f)
+			return scriptVal(sf)
 		}
 
 	case opLambda:
@@ -426,7 +428,7 @@ func (p *program) expr(n cnode) code {
 			return func(frame) value { return sf }
 		}
 		return func(f frame) value {
-			sf := &scriptFunc{prog: p, node: n, caps: make([]value, len(from))}
+			sf := closure(p, n, len(from))
 			f.capture(sf.caps, from)
 			return scriptVal(sf)
 		}
@@ -682,7 +684,7 @@ func (p *program) binds(binds []int32) func(f frame) {
 	return func(f frame) {
 		for _, b := range bs {
 			if b.c == nil {
-				f.slots[b.slot] = scriptVal(&scriptFunc{prog: p, node: b.l, caps: make([]value, b.caps)})
+				f.slots[b.slot] = scriptVal(closure(p, b.l, b.caps))
 				continue
 			}
 			f.slots[b.slot] = b.c(f)
