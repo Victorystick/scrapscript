@@ -108,6 +108,10 @@ builtins now return plain values and panic with a `runtimeError`, which
       and 10% on Eval, even on fib and the higher-order lib/access-log,
       and recurse 2-2.6x deeper on the same Go stack (~0.6-0.8 KB per
       level against `run`'s ~1.6 KB frame). Allocation is the same.
+- [x] Known calls: a call that passes all the arguments of a where-bound
+      function literal, by name or as a field of an imported scrap, runs
+      its lambda directly (`opCallKnown`), without checking what it
+      calls. The first step towards specialising calls.
 - [ ] Explore lambda set inference (as in Roc): the checker tracks which
       closures can reach each function type, so calls compile to a switch
       over known closures instead of an indirect call. Likely a lot of work.
