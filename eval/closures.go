@@ -56,13 +56,14 @@ func (p *program) lam(n cnode) *lambdaCode {
 	if l == nil {
 		size, _, arity, arms := p.lambda(n)
 		l = &lambdaCode{size: size, arity: arity}
+		// Before its arms, whose known calls of it compile to l.
+		p.lambdas[n] = l
 		for i := 0; i < len(arms); i += arity + 1 {
 			l.arms = append(l.arms, armCode{
 				pats: p.patterns(arms[i : i+arity]),
 				body: p.body(cnode(arms[i+arity])),
 			})
 		}
-		p.lambdas[n] = l
 	}
 	return l
 }
@@ -267,6 +268,25 @@ func (p *program) expr(n cnode) code {
 				return v
 			}
 			return trampoline(p.limit, body, g)
+		}
+
+	case opCallKnown:
+		l, fc, acs := p.known(n)
+		if len(acs) == 1 {
+			ac := acs[0]
+			return func(f frame) value {
+				sf := fc.get(f).asScript()
+				body, g := l.enter1(sf, ac.get(f))
+				return trampoline(sf.prog.limit, body, g)
+			}
+		}
+		return func(f frame) value {
+			sf := fc.get(f).asScript()
+			g := sf.frame(l.size)
+			for i, c := range acs {
+				g.slots[i] = c.get(f)
+			}
+			return trampoline(sf.prog.limit, l.enterN(sf, g), g)
 		}
 
 	case opMatch:
@@ -516,6 +536,15 @@ func (p *program) expr(n cnode) code {
 	panic(p.errorf(n, "unhandled op %d", p.ops[n]))
 }
 
+// known compiles the known call n: the lambda that it calls, the function,
+// whose value is a closure of that lambda, and its arguments, as many as
+// the lambda takes. So the call needs none of the checks of a call of an
+// unknown function.
+func (p *program) known(n cnode) (*lambdaCode, operand, []operand) {
+	r := p.range_(n)
+	return p.lam(p.binders[r[0]].fn), p.operand(cnode(r[1])), p.operands(r[2:])
+}
+
 // done returns v as the value of a tcode.
 func done(v value) (value, tcode, frame) {
 	return v, nil, frame{}
@@ -609,6 +638,25 @@ func (p *program) tail(n cnode) tcode {
 				return done(v)
 			}
 			return value{}, body, g
+		}
+
+	case opCallKnown:
+		l, fc, acs := p.known(n)
+		if len(acs) == 1 {
+			ac := acs[0]
+			return func(f frame) (value, tcode, frame) {
+				sf := fc.get(f).asScript()
+				body, g := l.enter1(sf, ac.get(f))
+				return value{}, body, g
+			}
+		}
+		return func(f frame) (value, tcode, frame) {
+			sf := fc.get(f).asScript()
+			g := sf.frame(l.size)
+			for i, c := range acs {
+				g.slots[i] = c.get(f)
+			}
+			return value{}, l.enterN(sf, g), g
 		}
 
 	case opMatch:

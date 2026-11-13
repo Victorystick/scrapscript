@@ -49,11 +49,12 @@ const (
 	opNone op = iota
 
 	// Expressions.
-	opConst   // A: the index of a literal or builtin in consts.
-	opLocal   // A: the slot in the current frame.
-	opCapture // A: the index of the capture of the running function.
-	opCall    // A: the function. B: the argument.
-	opCallN   // A..B: the function, then two or more arguments.
+	opConst     // A: the index of a literal or builtin in consts.
+	opLocal     // A: the slot in the current frame.
+	opCapture   // A: the index of the capture of the running function.
+	opCall      // A: the function. B: the argument.
+	opCallN     // A..B: the function, then two or more arguments.
+	opCallKnown // A..B: the binder of the function, which is a function literal, then the function, then as many arguments as it takes.
 
 	// Operators. A, B: the operands, of the types that the op names, which
 	// the checker settled on.
@@ -204,6 +205,9 @@ type binder struct {
 	src   int32    // the source it is in
 	where ast.Node // its Where node, or None for a parameter, pattern name or scrap
 	sort  bool
+	// The lambda that its value is, if that is a function literal, or
+	// none. A call compiled before the lambda finds it here.
+	fn cnode
 	// The index in uses of what its annotation, or a sort binding's type,
 	// refers to.
 	types int32
@@ -949,6 +953,13 @@ func (c *compiler) call(x, fn, arg ast.Node) cnode {
 	if n, ok := c.inline(fn, args); ok {
 		return n
 	}
+	if b, ok := c.known(fn, len(args)); ok {
+		xs := []int32{b, int32(c.expr(fn))}
+		for _, a := range args {
+			xs = append(xs, int32(c.expr(a)))
+		}
+		return c.span(opCallKnown, xs, x)
+	}
 	if len(args) == 1 {
 		return c.node(opCall, int32(c.expr(fn)), int32(c.expr(arg)), x)
 	}
@@ -1101,6 +1112,61 @@ func (c *compiler) callee(fn ast.Node) (in inlinable, name ast.Node, i int, ok b
 	return in, ast.None, 0, ok
 }
 
+// known returns the binder of the function that fn names, if it is a
+// where-binding whose value is a function literal of arity arguments: a
+// binding in scope, or a field of another scrap whose value is a record
+// literal. Its value is a closure of that literal, without arguments.
+func (c *compiler) known(fn ast.Node, arity int) (int32, bool) {
+	se := c.src
+	var key string
+	if se.Kind(fn) == ast.Access {
+		rec, k := se.Access(fn)
+		fn, key = rec, c.name(k)
+	}
+	b := int32(-1)
+	switch se.Kind(fn) {
+	case ast.Ident:
+		i := lookup(c.values, c.name(se.Main(fn)))
+		if i < 0 {
+			return -1, false
+		}
+		b = c.values[i].b
+		if key != "" {
+			u, ok := c.imported[b]
+			if !ok {
+				return -1, false
+			}
+			b = c.field(u, key)
+		}
+	case ast.Import:
+		if key != "" {
+			b = c.field(c.units[c.cur].deps[fn], key)
+		}
+	}
+	if b < 0 {
+		return -1, false
+	}
+	bd := c.binders[b]
+	if bd.where == ast.None || bd.sort {
+		return -1, false
+	}
+	bse := c.units[bd.src].se
+	_, _, _, val := bse.Where(bd.where)
+	if k := bse.Kind(val); k != ast.Func && k != ast.MatchFunc {
+		return -1, false
+	}
+	return b, literalOf(bse, val).arity == arity
+}
+
+// field returns the binder of the field key of the unit u, if it is a
+// top-level binding there, or -1.
+func (c *compiler) field(u int32, key string) int32 {
+	if b, ok := c.exports[u][key]; ok {
+		return b
+	}
+	return -1
+}
+
 // exported returns the inlinable function that the field key of the unit u
 // is, if it is a top-level binding there.
 func (c *compiler) exported(u int32, key string) (inlinable, bool) {
@@ -1156,19 +1222,24 @@ type fnLiteral struct {
 }
 
 func (c *compiler) literal(x ast.Node) fnLiteral {
+	return literalOf(c.src, x)
+}
+
+// literalOf returns the function literal x of se.
+func literalOf(se *ast.SourceExpr, x ast.Node) fnLiteral {
 	var f fnLiteral
 	body := x
-	for c.src.Kind(body) == ast.Func {
+	for se.Kind(body) == ast.Func {
 		var param ast.Node
-		param, body = c.src.Func(body)
+		param, body = se.Func(body)
 		f.params = append(f.params, param)
 	}
 	f.arms = []ast.Node{body}
 	f.arity = len(f.params)
-	f.match = c.src.Kind(body) == ast.MatchFunc
+	f.match = se.Kind(body) == ast.MatchFunc
 	if f.match {
-		f.arms = c.src.Arms(body)
-		f.arity += c.src.Arity(body)
+		f.arms = se.Arms(body)
+		f.arity += se.Arity(body)
 	}
 	return f
 }
@@ -1268,6 +1339,7 @@ func (c *compiler) group(x ast.Node) cnode {
 			case opLambda:
 				_, u, _, _ := c.lambda(v)
 				c.uses[u].home = b
+				c.binders[b].fn = v
 			case opCompose:
 				_, _, u := c.compose(v)
 				c.uses[u].home = b

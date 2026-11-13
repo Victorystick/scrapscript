@@ -473,3 +473,42 @@ func TestInliningAcrossScraps(t *testing.T) {
 		t.Errorf("expected %q, got %q", want, got)
 	}
 }
+
+// Calls to recursive functions, which aren't inlined, are known calls if
+// they pass all the function's arguments, through an import too, and
+// still print as calls.
+func TestKnownCallsAcrossScraps(t *testing.T) {
+	env := pathEnv(map[string]string{
+		"lib.scrap": `{ len = len, take = take } ; len = | [] -> 0 | _ >+ t -> 1 + len t ; take = | 0 -> _ -> [] | _ -> [] -> [] | n -> x >+ xs -> x >+ take (n - 1) xs`,
+	})
+	scrap, err := env.Read([]byte(`[lib.len [1, 2], $"./lib.scrap".len (lib.take 1 [3, 4]), list/length (list/map (lib.take 1) [[5]])] ; lib = $"./lib.scrap"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := env.PrintScrap(scrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "[ 2, 1, 1 ]"; got != want {
+		t.Errorf("expected %s, got %s", want, got)
+	}
+	p := scrap.prog
+	calls := map[op]int{}
+	for n, o := range p.ops {
+		if p.source(cnode(n)) == &scrap.expr {
+			calls[o]++
+		}
+	}
+	// lib.take 1 takes too few arguments to be known, and builtins aren't.
+	if calls[opCallKnown] != 3 || calls[opCall]+calls[opCallN] != 3 {
+		t.Errorf("got %d known calls and %d others, want 3 and 3", calls[opCallKnown], calls[opCall]+calls[opCallN])
+	}
+
+	f, err := env.Read([]byte(`n -> lib.len (lib.take n [1, 2]) ; lib = $"./lib.scrap"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := env.PrintScrap(f); err != nil || got != "n -> lib.len (lib.take n [ 1, 2 ])\n; lib = { len = len, take = take }\n; len =\n  | [] -> 0\n  | _ >+ t -> 1 + len t\n; take =\n  | 0 -> _ -> []\n  | _ -> [] -> []\n  | n -> x >+ xs -> x >+ take (n - 1) xs" {
+		t.Errorf("got %q, %v", got, err)
+	}
+}
