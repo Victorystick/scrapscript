@@ -14,6 +14,21 @@ BENCH=Eval COUNT=5 ./bench/run.sh   # a subset
 The script writes `bench/<date>-<commit>.txt`, with `-dirty` added when the
 working tree has changes. Commit the file along with the change it measures.
 
+Where times vary too much to compare, as on a shared cloud machine,
+count instructions instead:
+
+```sh
+./bench/ir.sh                       # needs valgrind; a few minutes
+BENCH='Eval/(fib|tree)' ./bench/ir.sh
+```
+
+It counts each benchmark's instructions per op with cachegrind, which
+repeat within 1% for Eval and 0.1% for the AccessLogs, and writes
+`bench/<date>-<commit>.ir`, which benchstat compares too. Instructions
+aren't time: cache misses are free, and since the collector stops the world
+for repeatable counts, so are write barriers while it marks. Check changes
+that move those costs with times as well.
+
 ## Comparing
 
 ```sh
