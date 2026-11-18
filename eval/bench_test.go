@@ -2,6 +2,7 @@ package eval
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -144,6 +145,58 @@ func BenchmarkEval(b *testing.B) {
 			}
 		})
 	}
+}
+
+// BenchmarkCompile measures compiling checked programs into their core,
+// without evaluating them: Eval compiles each of evalSources once per op,
+// and AccessLogLib lib/'s access log, with the libraries it imports.
+func BenchmarkCompile(b *testing.B) {
+	type program struct {
+		e     *Environment
+		units []unit
+	}
+	check := func(b *testing.B, e *Environment, scrap *Scrap) program {
+		b.Helper()
+		res, err := e.infer(scrap)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if res.Sort {
+			b.Fatal("cannot evaluate a type")
+		}
+		return program{e, e.units(scrap)}
+	}
+	run := func(b *testing.B, programs []program) {
+		b.ReportAllocs()
+		for b.Loop() {
+			for _, p := range programs {
+				if _, err := compile(p.units, &p.e.reg, p.e.vars, p.e.shapes, p.e.limit); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+	}
+	b.Run("Eval", func(b *testing.B) {
+		var programs []program
+		for _, ex := range evalSources {
+			e, scrap := readBench(b, ex.source)
+			programs = append(programs, check(b, e, scrap))
+		}
+		run(b, programs)
+	})
+	b.Run("AccessLogLib", func(b *testing.B) {
+		source, err := os.ReadFile("../lib/access-log.scrap")
+		if err != nil {
+			b.Fatal(err)
+		}
+		e := NewEnvironment()
+		e.UseDrafts(os.DirFS("../lib"))
+		scrap, err := e.ReadDraft("access-log.scrap", source)
+		if err != nil {
+			b.Fatal(err)
+		}
+		run(b, []program{check(b, e, scrap)})
+	})
 }
 
 // BenchmarkRead measures the front end on a program and the drafts it
