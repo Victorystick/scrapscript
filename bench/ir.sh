@@ -39,6 +39,8 @@ eval Eval/tree 20 480
 eval Eval/text 20 480
 eval Eval/echo 10 240
 eval Read 50 1200
+eval Compile/Eval 50 1200
+eval Compile/AccessLogLib 10 240
 terminal AccessLog 1 11
 terminal AccessLogLib 1 3
 "
