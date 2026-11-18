@@ -193,7 +193,14 @@ func (a *allocator) lambda(n cnode) {
 	level, next, size, refers := a.level, a.next, a.size, a.refers
 	a.level++
 	a.refers = a.level
-	a.fns = append(a.fns[:a.level], nil)
+	// The list of the lambda before it at this level, whose captures are
+	// copied to frames, is reused.
+	if a.level < len(a.fns) {
+		a.fns = a.fns[:a.level+1]
+		a.fns[a.level] = a.fns[a.level][:0]
+	} else {
+		a.fns = append(a.fns, nil)
+	}
 	// A function of one argument matches it as it is; one of more keeps
 	// them in its first slots, for its arms to match.
 	args := 0
