@@ -17,6 +17,8 @@ multi-pattern arms, where-groups and pattern operators separately.
 - [x] Evaluate the core instead of the AST.
 - [ ] Later: define the canonical encoding and the `core` hash scheme on it
       (SPEC.md section 9.1.1).
+- [ ] Split lowering, optimisation and allocation, so that optimisations
+      are passes over the core: [COMPILE_PLAN.md](COMPILE_PLAN.md).
 
 ## 2. Eval re-reads source text on the hot path
 
@@ -196,8 +198,11 @@ builtins now return plain values and panic with a `runtimeError`, which
 
 Printed values should stay proportional to the value's size;
 `list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x)) (list/repeat 300 1)`
-prints 189 KB.
+prints 189 KB. SPEC.md's rule 6 lets the printer simplify; see
+COMPILE_PLAN.md's print normalisation.
 
+- [ ] Normalise closures when printing: β on values, η, dropping unused
+      bindings, from print origins (COMPILE_PLAN.md).
 - [ ] Name clashing bindings with numbers (`acc`, `acc2`) instead of primes,
       whose length grows with the number of clashes.
 - [ ] Merge bindings that print the same, bottom-up: `list/map mk [1, 1, 1]`
@@ -290,7 +295,10 @@ first. 1 and 2 change what the language promises.
     compare only where their labels are in scope.
   - Printing (section 10, rule 6): printed output can mint its own
     `@node` and reads back the same, but can't name the library's without
-    allowing forgery, so it can't be passed back to the library. Perhaps
+    allowing forgery, so it can't be passed back to the library. Rule 6
+    lets an evaluated scrap replace the original as an import, so this
+    blocks private labels: printing must name another scrap's labels
+    without letting source forge them. Perhaps
     the formal semantics (section 12) settles it, treating minted labels
     as name binders (as in Pitts and Stark's ν-calculus), so that rule 6
     holds up to renaming them.
