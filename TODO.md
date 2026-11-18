@@ -17,6 +17,8 @@ multi-pattern arms, where-groups and pattern operators separately.
 - [x] Evaluate the core instead of the AST.
 - [ ] Later: define the canonical encoding and the `core` hash scheme on it
       (SPEC.md section 9.1.1).
+- [ ] Split lowering, optimisation and allocation, so that optimisations
+      are passes over the core: [COMPILE_PLAN.md](COMPILE_PLAN.md).
 
 ## 2. Eval re-reads source text on the hot path
 
