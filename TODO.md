@@ -203,8 +203,6 @@ COMPILE_PLAN.md's print normalisation.
 
 - [ ] Normalise closures when printing: β on values, η, dropping unused
       bindings, from print origins (COMPILE_PLAN.md).
-- [ ] Print members only where annotations need them to check: they
-      aren't part of a value (SPEC.md section 7.7).
 - [ ] Name clashing bindings with numbers (`acc`, `acc2`) instead of primes,
       whose length grows with the number of clashes.
 - [ ] Merge bindings that print the same, bottom-up: `list/map mk [1, 1, 1]`
@@ -297,7 +295,10 @@ first. 1 and 2 change what the language promises.
     compare only where their labels are in scope.
   - Printing (section 10, rule 6): printed output can mint its own
     `@node` and reads back the same, but can't name the library's without
-    allowing forgery, so it can't be passed back to the library. Perhaps
+    allowing forgery, so it can't be passed back to the library. Rule 6
+    lets an evaluated scrap replace the original as an import, so this
+    blocks private labels: printing must name another scrap's labels
+    without letting source forge them. Perhaps
     the formal semantics (section 12) settles it, treating minted labels
     as name binders (as in Pitts and Stark's ν-calculus), so that rule 6
     holds up to renaming them.

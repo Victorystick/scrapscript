@@ -151,10 +151,13 @@ so no edition.
   evaluates to a closure whose source normalises to itself. Clashing
   names numbered by position (TODO.md section 8) suit this better than
   primes.
-- **Checking.** A rule may not reduce away an annotation, or the sort
-  binding it names, that the output needs to check, as recursive types
-  do (SPEC.md section 7.5). Dropping one that only narrowed a type is
-  fine: the output's type may be more general.
+- **Checking and exports.** Rule 6 lets an evaluated scrap replace the
+  original as an import, so printing keeps members and the annotations
+  of what the result exports, which may narrow its type and name its
+  aliases. A rule may not reduce those away, nor an annotation or sort
+  binding that the output needs to check, as recursive types do (SPEC.md
+  section 7.5). It may drop the annotation of a binding it inlines,
+  where the output checks without it.
 - **Names.** Printed output loses the user's names and sugar, a cost when
   debugging. A flag that prints sources unsimplified would keep them, and
   satisfies rule 6 as today's printer does.

@@ -600,8 +600,8 @@ f
   paths : avl.tree text int }` and `avl = …` may share a group in either order.
 - A scrap's result exports the members of the static part of its body, which is
   all that importers see of it.
-- Members are not part of a value, so printing needn't keep them (section 10,
-  rule 6). A printed scrap keeps those that its annotations need to check.
+- Printing keeps members, so that a printed scrap exports what the original
+  did (section 10, rule 6).
 
 Open: abstract members, which would need nominal identity; members through
 applications (section 12); the printed type of a value, as `scrap type` shows
@@ -698,15 +698,18 @@ Reliability is a top-level requirement. The rules:
    produce hash or path references and are never consulted by the language
    itself.
 6. **Results are scraps.** A value prints as a closed scrap that evaluates to
-   it, so the output of `scrap eval` can be evaluated again, published or
-   passed on, and `scrap eval < p | scrap eval` prints what `scrap eval < p`
-   does. The printed scrap:
+   it, so the output of `scrap eval` can be evaluated again, published,
+   passed on, or imported in place of the original, and `scrap eval < p |
+   scrap eval` prints what `scrap eval < p` does. The printed scrap:
    - **Checks, and evaluates to a value that no scrap can tell apart from
      the original.** Data is equal. Functions agree on every argument,
      including the errors they raise and whether they terminate; functions
      can't be compared, so `a -> b -> add a b` and `add` are the same value.
-     Types are erased, so the printed scrap's type may be more general than
-     the original's, and members (7.7) needn't print.
+   - **Exports what the original did.** Its static part (7.7) is the same,
+     so code that imports the original checks and runs the same against it.
+     Exported bindings and members keep their annotations, which may narrow
+     a type, and the alias names that tools print. Elsewhere its type may be
+     more general than the original's.
    - **Is a fixpoint.** Evaluating it and printing the result gives the same
      text. This holds within one version of the tools; another version may
      print the same value differently.
@@ -722,8 +725,8 @@ Reliability is a top-level requirement. The rules:
      fold operators that can't fail, but it doesn't call functions, which
      could fail or not terminate, nor unfold a recursive binding.
    - Annotations that the output needs in order to check stay, with the
-     sort bindings they refer to. Recursive functions over recursive types
-     (7.5) need them.
+     sort bindings they refer to, as do those that it exports. Recursive
+     functions over recursive types (7.5) need them.
    - Names, the order of bindings, and which values share a binding come
      from the value printed, a function's source and captured values among
      it, not from how it was computed or compiled. A
