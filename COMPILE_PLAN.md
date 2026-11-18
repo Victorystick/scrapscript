@@ -199,7 +199,9 @@ back the same), and `TestInliningAcrossScraps` and
    sources, without evaluating; in `bench/ir.sh`, repeatable to 0.3%.
    The baseline of main before this plan is `bench/2026-11-18-0a92ecc.ir`,
    and with Compile `bench/2026-11-18-5f3269e.ir`.
-1. [ ] **Variables.** Lowering emits binders instead of slots and
+1. [x] **Variables** (#46; compile instructions +0.7% for AccessLogLib,
+   +1.8% for Eval, over budget: the walk costs 2.9% and lowering saves
+   1.5%). Lowering emits binders instead of slots and
    captures; `opCapture` goes, and patterns bind binders. A new
    allocation pass assigns slots and captures exactly as today, into side
    tables that closures.go and print.go read, including each free name's
