@@ -198,8 +198,13 @@ builtins now return plain values and panic with a `runtimeError`, which
 
 Printed values should stay proportional to the value's size;
 `list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x)) (list/repeat 300 1)`
-prints 189 KB.
+prints 189 KB. SPEC.md's rule 6 lets the printer simplify; see
+COMPILE_PLAN.md's print normalisation.
 
+- [ ] Normalise closures when printing: β on values, η, dropping unused
+      bindings, from print origins (COMPILE_PLAN.md).
+- [ ] Print members only where annotations need them to check: they
+      aren't part of a value (SPEC.md section 7.7).
 - [ ] Name clashing bindings with numbers (`acc`, `acc2`) instead of primes,
       whose length grows with the number of clashes.
 - [ ] Merge bindings that print the same, bottom-up: `list/map mk [1, 1, 1]`

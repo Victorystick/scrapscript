@@ -600,8 +600,8 @@ f
   paths : avl.tree text int }` and `avl = …` may share a group in either order.
 - A scrap's result exports the members of the static part of its body, which is
   all that importers see of it.
-- Printing keeps members where their record literal is printed (section 10,
-  rule 6).
+- Members are not part of a value, so printing needn't keep them (section 10,
+  rule 6). A printed scrap keeps those that its annotations need to check.
 
 Open: abstract members, which would need nominal identity; members through
 applications (section 12); the printed type of a value, as `scrap type` shows
@@ -698,35 +698,52 @@ Reliability is a top-level requirement. The rules:
    produce hash or path references and are never consulted by the language
    itself.
 6. **Results are scraps.** A value prints as a closed scrap that evaluates to
-   the same value and prints identically. So `scrap eval` of the output of an
-   earlier `scrap eval` always gives that same output again. This requires:
-   - Functions print with the bindings they capture as a where-clause,
-     `f ; f = b -> a ; a = 3`, recursive ones included. Builtins print by
-     name, and captured hash references stay hash references.
-   - A function applied to fewer arguments than it takes prints as that
-     application: `(a -> b -> a) 3`, or `f 3` for a function bound to `f`.
-     A chain of lambdas `a -> b -> …` takes all its arguments at once.
-   - A function that a binding defines prints as that binding's name, so
-     recursive and mutually recursive groups print as groups:
-     `f ; f = | 0 -> 1 | n -> n * f (n - 1)`.
-   - The bindings that a value reaches, from whatever scopes, print as one
-     where-group after it. Two with the same name are told apart by primes,
-     `a'`, chosen so that no binder in the printed code shadows them.
-   - Bindings keep their annotations, and the sort bindings that those refer
-     to print too. Recursive functions over recursive types (7.5) need them
-     to check.
-   - Type members (7.7) print with the record literals they belong to: a
-     binding, or the scrap's result, whose value is a record literal prints
-     its fields and its members. A binding whose value is a reference prints
-     as that reference. A binding that only paths in types reach, such as
-     `avl` in `avl.tree`, prints as its static part alone: a reference as
-     itself, a record literal as its members, `{ option = option }`. A record
-     that reaches the result any other way, as through a call, prints without
-     members, since members don't survive value flow.
-   - Printing adds the parentheses the grammar needs: `#fun (x -> x * 2)`,
-     `list/fold 0 (a -> b -> a + b)`.
-   - TEXT, BYTE and BYTES print with escapes that read back to the same bytes, and
-     FLOAT prints exactly, in the shortest form that reads back to the same float.
+   it, so the output of `scrap eval` can be evaluated again, published or
+   passed on, and `scrap eval < p | scrap eval` prints what `scrap eval < p`
+   does. The printed scrap:
+   - **Checks, and evaluates to a value that no scrap can tell apart from
+     the original.** Data is equal. Functions agree on every argument,
+     including the errors they raise and whether they terminate; functions
+     can't be compared, so `a -> b -> add a b` and `add` are the same value.
+     Types are erased, so the printed scrap's type may be more general than
+     the original's, and members (7.7) needn't print.
+   - **Is a fixpoint.** Evaluating it and printing the result gives the same
+     text. This holds within one version of the tools; another version may
+     print the same value differently.
+   - **Is in proportion to the value,** not to how it was computed. This is a
+     goal rather than a rule: a printer that simplifies less is still correct.
+
+   Beyond these, how a value prints is up to the implementation and isn't
+   part of the language: printed output is a scrap like any other, which
+   means what it evaluates to. Changing the printer changes no scrap's
+   meaning and needs no new edition (9.1). What follows from the rules:
+   - A printer doesn't run code. Captured values are already values, so it
+     may substitute them (β on a value), η-reduce, drop unused bindings and
+     fold operators that can't fail, but it doesn't call functions, which
+     could fail or not terminate, nor unfold a recursive binding.
+   - Annotations that the output needs in order to check stay, with the
+     sort bindings they refer to. Recursive functions over recursive types
+     (7.5) need them.
+   - Names, the order of bindings, and which values share a binding come
+     from the value printed, a function's source and captured values among
+     it, not from how it was computed or compiled. A
+     fixpoint needs this, and it keeps optimisation unobservable.
+   - Builtins print by name, and hash references stay references, so
+     printing never inlines a library.
+   - Printing adds the parentheses the grammar needs: `#fun (x -> x * 2)`.
+     TEXT, BYTE and BYTES print with escapes that read back to the same
+     bytes, and FLOAT prints exactly, in the shortest form that reads back
+     to the same float.
+
+   Today's printer (eval/print.go) doesn't simplify. A function prints as
+   its source lambda with the bindings it captures as one where-group,
+   `f ; f = b -> a ; a = 3`, telling clashing names apart with primes. A
+   function that a binding defines prints as that binding's name, so
+   recursive groups print as groups, `f ; f = | 0 -> 1 | n -> n * f (n -
+   1)`. A partial application prints as the application, `(a -> b -> a) 3`.
+   Members print with the record literals they belong to. Values built by
+   repeated closure, as in a fold, can print far larger than they are
+   (TODO.md section 8).
 
 ## 11. Drafts and published scraps
 

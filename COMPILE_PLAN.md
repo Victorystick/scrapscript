@@ -78,22 +78,32 @@ Each optimisation left on the table ran into the single pass:
    section 5's core. That is
    where the `core` hash scheme's canonical encoding (section 9.1.1) can
    be defined later, on output that no optimisation has touched.
-3. **Optimisation is unobservable.** It never changes what a scrap
-   prints, which runtime error it raises (builtins can still fail,
-   TODO.md section 9), or whether it terminates. So it may discard or
+3. **Optimisation is unobservable.** It never changes a scrap's value
+   (SPEC.md section 10, rule 6), which runtime error it raises (builtins
+   can still fail, TODO.md section 9), or whether it terminates, and
+   printing doesn't see it (decision 4). So it may discard or
    duplicate only expressions that are *total*: constants, variables,
    lambdas, records, variants and lists of totals, field accesses, and the
    operators that can't fail (`+ - *` wrap; `++ >+ +<`). A call is never
    total, nor is a match whose arms aren't. Resources (time, depth, ticks)
    may change.
-4. **The printing contract.** A closure prints as its source lambda with
-   the values of that lambda's free names (SPEC.md section 10, rule 6;
-   eval/print.go). Every lambda the optimiser makes keeps a print origin:
+4. **Printing reads origins, not optimised code.** Rule 6 lets a value
+   print as any scrap that evaluates to it and is a fixpoint, so printing
+   optimised code would be allowed. It doesn't, for two reasons. Heuristic
+   inlining and specialisation aren't confluent: a specialised `ex add ;
+   ex = f -> a -> b -> f a b` printing as `a -> b -> add a b` reprints as
+   `add` once η-reduced, which isn't a fixpoint. And decision 8's test
+   could no longer compare printed results, since functions can't be
+   compared. So a closure prints from its source lambda and the values of
+   that lambda's free names (eval/print.go), simplified by printing's own
+   rules (below). Every lambda the optimiser makes keeps a print origin:
    the lambda it was copied from, whose `uses` say which captured value
    prints as which name. Every variable it copies keeps its origin
    binder, so captures map back to names. A closure's runtime value keeps
    its print origin separate from its code (today `scriptFunc.node` is
-   both), so that a specialised copy prints as its source.
+   both), so that a specialised copy prints as its source. Printing
+   decides sharing by structure, as print.go's `same` does, never by
+   identity, since the optimiser may duplicate totals.
 5. **Representation types on variables.** Lowering keeps what the checker
    knows about each variable's representation: int, float, text, bytes,
    list, a record of a closed shape, an open record, a variant, a
@@ -109,50 +119,54 @@ Each optimisation left on the table ran into the single pass:
    both ways and compare printed results and errors, which is how a new
    pass's mistakes show up.
 
-## Beta-reduction and printing
+## Print normalisation
 
 `ex add ; ex = f -> a -> b -> f a b` is equal to
 `a -> b -> add a b` (β: `add` is a variable, so a value, and substituting
 a value is sound under strict evaluation), and that to `add` (η: in
 `x -> g x`, if `g` is a value without `x`). Nothing in the language can
 tell them apart: functions can't be compared, and there are no effects.
-Only resources differ, and printing: today the first prints as
-`ex add ; ex = f -> a -> b -> f a b`, following rule 6's "a function
-applied to fewer arguments than it takes prints as that application".
+SPEC.md's rule 6 only asks that a value print as a scrap that evaluates
+to it, is a fixpoint, and is in proportion to the value, so any of the
+three may print. Today the first does, as its source.
 
-Printing a normal form instead is reasonable, and would answer TODO.md
-section 8: `list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x))
+Printing normal forms would answer TODO.md section 8:
+`list/fold (y -> y) (acc -> x -> (f ; f = y -> acc y + x))
 (list/repeat 300 1)` prints 189 KB because each closure prints the one it
-captured; β-reduced, it is `y -> y + 1 + 1 + …`, linear in 300. But it
-is a design change to SPEC.md, separate from this plan, and the plan
-should neither depend on it nor rule it out:
+captured; β-reduced, it is `y -> y + 1 + 1 + …`, linear in 300 (and `y +
+300`, since `+` wraps and so associates). The rules are the
+implementation's, not the language's: changing them changes what
+`scrap eval` prints, and web/'s expected outputs, but no scrap's meaning,
+so no edition.
 
-- **What it would take.** A small set of rewrite rules in SPEC.md, applied
-  when printing to a closure's source lambda with its captured values
-  substituted. They must terminate and never grow code, as shrinking
-  reductions do (Appel and Jim 1997): β when the argument is an atom or
-  the parameter is used at most once, η when the head is a variable, and
-  dropping unused total bindings. Hash references stay opaque, or printing
-  would inline libraries. Rule 6's partial-application form would change.
-- **What makes it hard.** Printed output must check (rule 6), and
-  recursive types need annotations (section 7.5), so a rule may not
-  reduce away an annotated binding that the output's types need. Printed
-  output loses the user's names and sugar, which is a cost when debugging.
-  And since printed output can be published, the rules are part of the
-  language: changing them is an edition change (section 9.1).
-- **Why it doesn't complect this plan.** If printing reduced with the
-  optimiser's rules, every heuristic (inlining budgets, specialisation)
-  would become observable and part of the spec. Kept apart, the optimiser
-  stays free, and printing stays a function of the source lambda and its
-  captures, which decision 4 keeps available either way. What they share
-  is machinery, not policy: one library of substitution, renaming, β and
-  η over the IR, which the optimiser uses freely and printing would use
-  with SPEC.md's fixed subset. Step 1 makes that library possible, since
-  substitution needs variables instead of slots.
+- **Rules.** Applied to a closure's source lambda with its captured
+  values, they must terminate and never grow code, as shrinking
+  reductions do (Appel and Jim 1997): β when the argument is a value and
+  the parameter is used at most once, or the argument is an atom; η when
+  the head is a variable; dropping unused bindings; folding total
+  operators only. Never unfold a recursive binding: `f 3` stays. Hash
+  references and builtins stay opaque.
+- **Fixpoint.** The rules must be idempotent, and names, binding order
+  and sharing must come from the value's structure, so that a normal form
+  evaluates to a closure whose source normalises to itself. Clashing
+  names numbered by position (TODO.md section 8) suit this better than
+  primes.
+- **Checking.** A rule may not reduce away an annotation, or the sort
+  binding it names, that the output needs to check, as recursive types
+  do (SPEC.md section 7.5). Dropping one that only narrowed a type is
+  fine: the output's type may be more general.
+- **Names.** Printed output loses the user's names and sugar, a cost when
+  debugging. A flag that prints sources unsimplified would keep them, and
+  satisfies rule 6 as today's printer does.
+- **Shared machinery, separate policy.** One library of substitution,
+  renaming, β and η over the IR, which the optimiser uses with its
+  heuristics and printing with its fixed rules. Step 1 makes it possible,
+  since substitution needs variables instead of slots; step 3 builds it.
+- **Testing.** Every program's printed result, evaluated and printed
+  again, gives the same text and checks, with optimisation on and off.
 
-So: build the steps below without print normalisation, keep decision 4,
-and decide print normalisation as its own SPEC.md change once step 3 has
-built the substitution machinery.
+So: build the steps below as planned, and normalise printing in its own
+PR once step 3 has built the library. It needs no SPEC.md change.
 
 ## Measuring
 
@@ -172,7 +186,7 @@ built the substitution machinery.
 
 Each is one PR, which passes `go test ./...`, web/'s `pnpm test` if output
 changes, and leaves performance unchanged unless it says otherwise. The
-tests that guard the printing contract and inlining are eval's
+tests that guard printing and inlining are eval's
 compile_test.go (the core's dumps), roundtrip_test.go (printed values read
 back the same), and `TestInliningAcrossScraps` and
 `TestKnownCallsAcrossScraps` in env_test.go.
@@ -270,6 +284,6 @@ back the same), and `TestInliningAcrossScraps` and
   builtins, and with values that hosts hold. Reference counts proper fit
   this implementation poorly: every copy of a two-word value would pay,
   and a bug mutates an immutable value silently.
-- **Print normalisation** (above), as a SPEC.md change after step 3.
+- **Print normalisation** (above), after step 3.
 - **The `core` hash scheme** (SPEC.md section 9.1.1), on lowering's output
   (decision 2), after an encoding is chosen.
