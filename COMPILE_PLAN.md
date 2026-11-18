@@ -217,7 +217,23 @@ back the same), and `TestInliningAcrossScraps` and
    callers are unchanged. Likewise a record that a known call returns
    into a match is written into the caller's slots. Targets: Eval/records,
    avl's `pop-min`.
-7. [ ] **Function arguments.** Specialise a known function on an argument
+7. [ ] **Reuse of unique values.** A value is unique where the compiler
+   proves it *fresh*, made in this function and not escaped (step 4's
+   facts), and at its *last use* (step 2's liveness). Then a spread
+   updates it in place, and a match that takes it apart gives its memory
+   to a construction of the same size in the arm (Koka's drop-reuse,
+   Lean's reset/reuse). Across known calls, a parameter is *owned* if
+   every call passes a fresh value at its last use, so that `loop (n - 1)
+   { ..r, a = r.a + 1 }` updates `r` in place. No counts at runtime, and
+   unobservable (decision 3): a unique value isn't captured or printed
+   anywhere else. Persistent structures threaded through a platform's
+   state are unique only if the host gives the state back rather than
+   keeping it, so decide first, in SPEC.md section 13, that passing the
+   state to `step` moves it: a program's state is already opaque to the
+   host, and the generated bindings must then drop their handle on it.
+   Targets: Eval/records, AccessLog's state spread and `upsert`'s path of
+   `#node` rebuilds, most of its 77k record literals per run.
+8. [ ] **Function arguments.** Specialise a known function on an argument
    that is a known lambda, or a partial application of one, passing its
    captures as arguments, within a code-size budget; a recursive call
    that passes the parameter on calls the copy. And raise arity: a lambda
@@ -227,7 +243,7 @@ back the same), and `TestInliningAcrossScraps` and
    Targets: AccessLog's `upsert path (hit status ms)`, AccessLogLib's
    closures, partial applications and argument slices. TODO.md section
    5's lambda sets are the general form; decide after this.
-8. [ ] **Evaluation state per evaluation.** The frame pool, the depth and
+9. [ ] **Evaluation state per evaluation.** The frame pool, the depth and
    the tick count belong to an environment today, which ties its
    functions to one goroutine (eval/env.go). A platform that serves
    requests concurrently (SPEC.md section 13) needs them per evaluation,
@@ -236,10 +252,24 @@ back the same), and `TestInliningAcrossScraps` and
 
 ## Outside this plan
 
-- **Lists are arrays,** so `x >+ xs` copies `xs`, and a list built by
-  prepending is quadratic (AccessLogLib's parser, `many`). A
-  representation change (a persistent vector, or chunks that share a
-  tail) rather than an optimisation.
+- **Lists, text and bytes copy to grow.** A list's capacity is its length,
+  so `l +< x` copies `l` every time, and a list built by appending is
+  quadratic, as text built by `acc ++ s` is; `x >+ xs` copies `xs`
+  (AccessLogLib's parser, `many`). Without any ownership: keep, with a
+  backing array, the length of the longest value that uses it, and write
+  `l +< x` in place when `l` is that long, since every other value that
+  shares the array is shorter and can't see the new element; otherwise
+  copy into double the capacity. Appends become amortized O(1), safe
+  whoever else holds the array. The same for `++` on text (in a buffer of
+  our own) and bytes, and for `>+` with room at the front and the lowest
+  index used. A representation change, independent of the steps above.
+- **Dynamic uniqueness,** only if step 7 leaves measured cases: a sticky
+  one-bit "shared" flag per object (not a count), set where the compiler
+  can't rule out duplication. It needs a header per object, which values
+  don't have, and care with list tails, which share arrays, with
+  builtins, and with values that hosts hold. Reference counts proper fit
+  this implementation poorly: every copy of a two-word value would pay,
+  and a bug mutates an immutable value silently.
 - **Print normalisation** (above), as a SPEC.md change after step 3.
 - **The `core` hash scheme** (SPEC.md section 9.1.1), on lowering's output
   (decision 2), after an encoding is chosen.
