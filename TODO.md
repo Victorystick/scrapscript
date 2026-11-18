@@ -100,6 +100,11 @@ builtins now return plain values and panic with a `runtimeError`, which
       the type registry owns and the runtime shares.
 - [x] Records as word buffers in label order, tags as `(id, payload)`
       (SPEC.md section 12, "Compact runtime values").
+- [x] Variants hold their payload instead of boxing it, when it is a
+      record, list, text, bytes, function, small int, byte, () or a tag
+      without a payload, so `#node { ... }` is one allocation, the
+      record's, and `#some 3` none. Big ints, floats and variants with
+      payloads are still boxed.
 - [ ] Compile matches to decision trees (Maranget 2008) with the same
       matrix steps as the exhaustiveness check (types/exhaustive.go), so
       each value is tested once instead of per arm. Pays off once tags are

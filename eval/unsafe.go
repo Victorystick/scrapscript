@@ -15,7 +15,7 @@ import (
 //
 //	text, bytes  n: kind | length  p: the first byte
 //	list         n: kind | length  p: the first element
-//	variant      n: kind | tag     p: the payload, or nil if it has none
+//	variant      n: kind | tag ... p: its payload's data, or nil if it has none; see variantVal
 //	record       n: kind | shape | length  p: the first value
 //	function     n: kind           p: the builtinFunc, partial or scriptFunc
 //
@@ -173,29 +173,90 @@ func (v value) builtin() (*builtinFunc, bool) {
 	return v.asBuiltin(), true
 }
 
+// A variant holds its tag in n, and its payload either in itself or in a
+// box that p points to:
+//
+//	n: kind:8 | inner:4 | tag:24 | info:28
+//
+// inner is the kind of the payload if the variant holds it, or 0 if it
+// is boxed or absent. A payload that points to its data, text, bytes, a
+// list, a record or a function, keeps p, with its length, or a record's
+// shape and length, in info. A small int, a byte, () or a tag without a
+// payload is info, and p points to inlinePayload, as it does for empty
+// text, bytes, lists and records. Anything else, a large
+// int, a float or a variant with a payload, is boxed. So a tag with a
+// record, such as #node { ... }, is one allocation, the record's.
+const (
+	innerShift  = 52
+	tagShift    = 28
+	maxTag      = 1<<(innerShift-tagShift) - 1
+	infoMask    = 1<<tagShift - 1
+	infoLenBits = 8 // of a record's info, the rest is its shape
+	variantMask = 0xff<<kindShift | maxTag<<tagShift
+)
+
+// What p of a variant points to if its payload is in its info.
+var inlinePayload byte
+
 // variantVal returns the tag with payload, or without a payload if it is
 // the zero value.
 func variantVal(tag label.ID, payload value) value {
+	if tag > maxTag {
+		panic("eval: too many labels")
+	}
+	t := uint64(tag) << tagShift
 	if !payload.valid() {
-		return boxed(kindVariant, uint64(tag), nil)
+		return boxed(kindVariant, t, nil)
+	}
+	inline := func(k kind, info uint64) value {
+		return boxed(kindVariant, uint64(k)<<innerShift|t|info, unsafe.Pointer(&inlinePayload))
+	}
+	held := func(k kind, info uint64) value {
+		if payload.p == nil { // empty
+			return inline(k, info)
+		}
+		return boxed(kindVariant, uint64(k)<<innerShift|t|info, payload.p)
+	}
+	switch k := payload.kind(); k {
+	case kindInt:
+		if i := payload.asInt(); i == i<<(64-tagShift)>>(64-tagShift) {
+			return inline(k, uint64(i)&infoMask)
+		}
+	case kindByte, kindHole:
+		return inline(k, payload.n)
+	case kindVariant:
+		if payload.p == nil {
+			return inline(k, uint64(payload.tag()))
+		}
+	case kindText, kindBytes, kindList:
+		if l := payload.n & lenMask; l <= infoMask {
+			return held(k, l)
+		}
+	case kindRecord:
+		id, l := uint64(payload.shapeID()), payload.n&fieldsMask
+		if id < 1<<(tagShift-infoLenBits) && l < 1<<infoLenBits {
+			return held(k, id<<infoLenBits|l)
+		}
+	case kindBuiltin, kindPartial, kindScript:
+		return held(k, 0)
 	}
 	p := new(value)
 	*p = payload
-	return boxed(kindVariant, uint64(tag), unsafe.Pointer(p))
+	return boxed(kindVariant, t, unsafe.Pointer(p))
 }
 
 // tagVal returns the tag without a payload.
 func tagVal(tag label.ID) value {
-	return boxed(kindVariant, uint64(tag), nil)
+	return variantVal(tag, value{})
 }
 
 func (v value) tag() label.ID {
-	return label.ID(v.n & lenMask)
+	return label.ID(v.n >> tagShift & maxTag)
 }
 
 // hasTag returns true if v, a variant, has the tag.
 func (v value) hasTag(tag label.ID) bool {
-	return v.n == uint64(kindVariant)<<kindShift|uint64(tag)
+	return v.n&variantMask == uint64(kindVariant)<<kindShift|uint64(tag)<<tagShift
 }
 
 // payload returns the payload of v, a variant, or the zero value if it has
@@ -204,7 +265,25 @@ func (v value) payload() value {
 	if v.p == nil {
 		return value{}
 	}
-	return *(*value)(v.p)
+	info := v.n & infoMask
+	p := v.p
+	if p == unsafe.Pointer(&inlinePayload) {
+		p = nil
+	}
+	switch k := kind(v.n >> innerShift & 0xf); k {
+	case kindNone:
+		return *(*value)(v.p)
+	case kindInt:
+		return intVal(int(int64(info<<(64-tagShift)) >> (64 - tagShift)))
+	case kindByte, kindHole:
+		return scalar(k, info)
+	case kindVariant:
+		return tagVal(label.ID(info))
+	case kindRecord:
+		return boxed(k, info>>infoLenBits<<shapeShift|info&(1<<infoLenBits-1), p)
+	default:
+		return boxed(k, info, p)
+	}
 }
 
 // toHost returns vs as Values, without copying them.
