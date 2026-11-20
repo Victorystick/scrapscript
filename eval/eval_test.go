@@ -325,6 +325,7 @@ var exp2str = []struct{ source, result string }{
 	{`[int/cmp 1 2, int/cmp 2 2, int/cmp 3 2]`, `[ #lt, #eq, #gt ]`},
 	{`[int/div 7 2, int/div -7 2, int/div 1 0]`, `[ #some 3, #some -3, #none ]`},
 	{`int/to-text -42 ++ "!"`, `"-42!"`},
+	{`[float/to-text 1.5, float/to-text -2.0, float/to-text 0.1, float/to-text 1000000000000000000000.0, float/to-text 0.000001]`, `[ "1.5", "-2.0", "0.1", "1000000000000000000000.0", "0.000001" ]`},
 	{`[text/cmp "a" "b", text/cmp "b" "b", text/cmp "b" "a"]`, `[ #lt, #eq, #gt ]`},
 	{`text/split " " "GET /a 200"`, `[ "GET", "/a", "200" ]`},
 	{`text/split "," ""`, `[ "" ]`},

@@ -19,6 +19,7 @@ func TestInferBuiltin(t *testing.T) {
 		{`ceil`, `float -> int`},
 		{`floor`, `float -> int`},
 		{`to-float`, `int -> float`},
+		{`float/to-text`, `float -> text`},
 
 		// bytes
 		{`byte/to-int`, `byte -> int`},
