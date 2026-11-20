@@ -13,14 +13,17 @@ it to GitHub Pages (`.github/workflows/pages.yml`).
   `sha256sum`) gives a scrap's key and `scrap push` uploads it.
 - The site uses the runtime in `../js`, `@scrapscript/web`, through the
   pnpm workspace: `scrap-wasm.wasm`, the scrap tool as WebAssembly, and
-  `scrap-wasm.ts`, which runs it, from `@scrapscript/web/scrap-wasm`.
-  `pnpm build` and `pnpm test` build the wasm first, so building needs Go.
-- The pages (`index.html`, `tutorial.html`, `play.html`), `style.css` and
+  `scrap-wasm.ts`, which runs it, from `@scrapscript/web/scrap-wasm`; and
+  `mount`, which runs apps with `scrap-web.wasm`. `pnpm build` and
+  `pnpm test` build both modules first, so building needs Go.
+- The pages (`index.html`, `tutorial.html`, `play.html`, `app.html`), `style.css` and
   the browser's copy of `scrap-wasm.wasm` are built by Vite under the base path `/scrapscript/`,
   so links between pages are relative. A new page must be listed in
   `vite.config.ts`.
-- `repl.ts` makes the `.example`s of a page editable and runs them in the
-  browser: `repl-worker.ts` evaluates them (or runs their tests, with
+- `editor.ts` makes a `.example` editable, highlighted as it is edited,
+  with Run and Reset, and with `data-share`, keeps the scrap in the address
+  bar. `repl.ts` makes the `.example`s of a page editors and runs them in
+  the browser: `repl-worker.ts` evaluates them (or runs their tests, with
   `data-run="test"`) with `scrap-wasm.wasm` in a Web Worker, fetching the
   scraps they refer to from the yard. Evaluating stops just before 5
   seconds, and the page stops the worker at 5 seconds. The `.example`s
@@ -36,3 +39,9 @@ it to GitHub Pages (`.github/workflows/pages.yml`).
   the CLI prints updates the tutorial in the same change: write an
   example, then paste in what the CLI prints.
 - `pnpm dev` serves locally and `pnpm test` builds and tests.
+- `app.html` is the app playground: `app.ts` mounts the editor's scrap as
+  an app next to it, keeping the last one running until a new one starts.
+  Its examples are `apps/*.scrap`, which name the web platform's interface
+  by hash; `app.test.ts` starts each with `scrap-web.wasm`, and fails when
+  the interface changes until they name its new hash. Push the interface
+  to the yard too: `scrap push < ../cmd/scrap-web/web.scrap`.

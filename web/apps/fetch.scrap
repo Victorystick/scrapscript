@@ -1,0 +1,31 @@
+-- Fetches this language's repository from GitHub's API, as JSON, and a
+-- scrap from the yard, as text.
+app
+; app : web model msg =
+    { init = _ -> { model = { repo = "Loading…", scrap = "" }, cmds = [get "https://api.github.com/repos/Victorystick/scrapscript" (#json (r -> #repo (describe r)))] }
+    , update =
+        | #repo t  -> m -> { model = { ..m, repo = t }, cmds = [] }
+        | #scrap t -> m -> { model = { ..m, scrap = t }, cmds = [] }
+        | #load    -> m -> { model = { ..m, scrap = "Loading…" }, cmds = [get ("https://scraps.oseg.dev/" ++ greet) (#text (r -> #scrap (body r)))] }
+    , view = m -> #el { tag = "div", attrs = [], children =
+        [ #el { tag = "p", attrs = [], children = [#text m.repo] }
+        , #el { tag = "button", attrs = [#on-click #load], children = [#text "Fetch a scrap"] }
+        , #el { tag = "pre", attrs = [], children = [#text m.scrap] }
+        ] }
+    , subscriptions = _ -> []
+    }
+; get = url -> expect -> #http { method = "GET", url = url, headers = [], body = #empty, expect = expect }
+; greet = "71d9fe524fc0ab11b9ee6e6cfa3bc3d410a4c1b3884bc1b0256c51699730b1eb"
+; body = | #ok r -> r.body | #error e -> e
+-- The repository's name and description, from members of the JSON object.
+; describe =
+    | #ok r -> field "full_name" r.body ++ ": " ++ field "description" r.body
+    | #error e -> e
+; field = key -> | #object ms -> find key ms | _ -> "?"
+; find = key ->
+    | [] -> "?"
+    | m >+ ms -> (| #eq -> as-text m.value | _ -> find key ms) (text/cmp m.key key)
+; as-text = | #text t -> t | _ -> "?"
+; model : type = { repo : text, scrap : text }
+; msg : type = [#repo text, #scrap text, #load]
+; web : type -> type -> type = $source:eb324364930850f33f10a407c0a36c40bbc4cda56a18d2e4cee1cfb7f2cbadd9

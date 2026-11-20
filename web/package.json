@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "pnpm build:wasm && vite dev",
     "build": "pnpm build:wasm && vite build",
-    "build:wasm": "pnpm --filter @scrapscript/web build:wasm",
+    "build:wasm": "pnpm --filter @scrapscript/web build",
     "preview": "pnpm build && vite preview",
     "build:scrap": "go build -o build/scrap ../cmd/scrap",
     "test": "pnpm build:wasm && pnpm build:scrap && vitest run"

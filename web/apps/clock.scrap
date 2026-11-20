@@ -1,0 +1,29 @@
+-- The time, every second, in UTC, and a spinner that turns every
+-- animation frame while it's on.
+app
+; app : web model msg =
+    { init = _ -> { model = { now = 0, frames = 0, spinning = #true }, cmds = [#now (t -> #tick t)] }
+    , update =
+        | #tick t  -> m -> { model = { ..m, now = t }, cmds = [] }
+        | #frame _ -> m -> { model = { ..m, frames = m.frames + 1 }, cmds = [] }
+        | #toggle  -> m -> { model = { ..m, spinning = not m.spinning }, cmds = [] }
+    , view = m -> #el { tag = "div", attrs = [], children =
+        [ #el { tag = "p", attrs = [#style { name = "font-size", value = "2rem" }], children = [#text (clock m.now)] }
+        , #el { tag = "div", attrs = [#style { name = "display", value = "inline-block" }, #style { name = "font-size", value = "2rem" }, #style { name = "transform", value = "rotate(" ++ int/to-text (m.frames * 6) ++ "deg)" }], children = [#text "✳"] }
+        , #el { tag = "button", attrs = [#on-click #toggle], children = [#text (label m.spinning)] }
+        ] }
+    , subscriptions = m -> #every { ms = 1000, msg = t -> #tick t } >+ spin m.spinning
+    }
+; spin = | #true -> [#animation-frame (d -> #frame d)] | #false -> []
+; label = | #true -> "Stop" | #false -> "Spin"
+; not = | #true -> #false | #false -> #true
+-- hh:mm:ss of ms since the epoch.
+; clock = ms -> text/join ":" (list/map two [hours ms, mod (div ms 60000) 60, mod (div ms 1000) 60])
+; hours = ms -> mod (div ms 3600000) 24
+; mod = a -> b -> a - b * div a b
+; div = a -> b -> (| #some q -> q | #none -> 0) (int/div a b)
+; two = n -> (| #lt -> "0" | _ -> "") (int/cmp n 10) ++ int/to-text n
+; model : type = { now : int, frames : int, spinning : bool }
+; bool : type = [#false, #true]
+; msg : type = [#tick int, #frame float, #toggle]
+; web : type -> type -> type = $source:eb324364930850f33f10a407c0a36c40bbc4cda56a18d2e4cee1cfb7f2cbadd9

@@ -122,8 +122,8 @@ The web platform:
     Tested in Chromium (#34).
 11. [x] **HTTP**, and `json` both ways (#36).
 12. [x] **Time, animation frames and random**, with subscriptions diffed (#37).
-13. [ ] **Playground** page in `web/`: an editor and the running app,
-    errors, scraps fetched from the yard, and the deadline.
+13. [x] **Playground** page in `web/`: an editor and the running app,
+    errors, scraps fetched from the yard, and the deadline (#38).
 14. [ ] **Hot reload** that keeps the model if its type is unchanged.
 15. [ ] **Publish** to npm, with a README for embedders.
 

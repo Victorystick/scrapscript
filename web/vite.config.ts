@@ -20,8 +20,11 @@ export function highlightExamples(): Plugin {
     transformIndexHtml: (html) =>
       html.replace(
         /(<div class="example[^"]*"[^>]*>\s*<pre>)<code>([\s\S]*?)(?=<\/code><\/pre>)/g,
-        (_, open, code) =>
-          `${open}<code data-highlights="${highlights(unescape(code))}">${code}`
+        // An empty example, which a script fills, has nothing to highlight.
+        (all, open, code) =>
+          code === ""
+            ? all
+            : `${open}<code data-highlights="${highlights(unescape(code))}">${code}`
       ),
   };
 }
@@ -40,7 +43,7 @@ export default defineConfig({
   plugins: [highlightExamples()],
   build: {
     rollupOptions: {
-      input: ["index.html", "tutorial.html", "play.html"],
+      input: ["index.html", "tutorial.html", "play.html", "app.html"],
     },
   },
 });
