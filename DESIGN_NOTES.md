@@ -140,7 +140,8 @@ changes are fine for now.
     same everywhere, and running out of time, stack or memory is reported as
     exactly that.
   - Integer overflow: wrap (as now), fail at runtime, or use arbitrary
-    precision. Measure before choosing.
+    precision. Measure before choosing. COMPILE_PLAN.md's printer argument
+    relies on `+` wrapping, and so associating.
   - Whether the spec should list every runtime failure (holes, division by
     zero, perhaps overflow, resource limits, platform failures).
 - **"Libraries are never inlined"** (section 10, rule 6). This relates to
@@ -152,7 +153,14 @@ changes are fine for now.
   - requiring each operation to be rounded on its own. Go may fuse
     `a * b + c` on arm64, ppc64 and s390x, so the implementation must
     prevent that with explicit `float64(…)` conversions.
-- Precedence of `and` and `or`, against comparisons and pipes.
+- Precedence of `and` and `or`, against comparisons and pipes, and how far
+  `if … else e` extends: whether `if c then a else b |> f` pipes only `b`,
+  as a lambda's body extends to the right.
+- What "reserved in expressions only" allows exactly. Labels stay free
+  (record fields, `.then`, type records), but punning makes a label a
+  variable, so `{ then }` in a literal, pattern or destructuring binding
+  must be written `{ then = t }`. Pattern binders can't be keywords.
+  `eval/testdata/expr.scrap` defines a function `then`, to rename.
 - How exactly guards change the core's `Match`.
 - Hashing: whether published source must be canonically formatted. Leave it
   until identity moves to a core format, if it ever does.
