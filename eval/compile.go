@@ -25,9 +25,9 @@ import (
 // A frame holds the values that one call of a function binds: its
 // parameter, the names its match arms bind and the where-bindings in its
 // body, outside the functions nested in it. The top level has a frame too.
-// Each expression of a body is evaluated at most once per call, so each
-// slot is written once, except that the arms of a match share slots: only
-// one arm's names are bound at a time.
+// Each expression of a body is evaluated at most once per call, so a frame
+// needs no loops' worth of state: a slot holds one binder's value at a
+// time, and is reused once that binder is dead.
 //
 // Closures are flat: a lambda copies the values of the names it uses from
 // outside it into its captures when it is made, since values never
@@ -77,7 +77,7 @@ const (
 	opLambda  // A..B: its uses, its arity n, then n patterns and a body per arm. If n > 1, its frame's first n slots are its arguments.
 	opMatch   // A..B: the value matched, its callee, then a pattern and a body per arm. Its patterns bind in the current frame.
 	opMatchN  // A..B: n, its callee, then n arguments, which go in n slots of the current frame, then n patterns and a body per arm.
-	opWhere   // A..B: the body, the group's binders as a range first..end, then a binder and value per binding, in evaluation order, with recursive ones' closures made first.
+	opWhere   // A..B: the body, then a binder and value per binding, in evaluation order, with recursive ones' closures made first.
 	opFill    // A: a lambda. B: the binder of the closure made for it before, whose captures it fills in.
 	opRecord  // A..B: the record it is based on or none, its shape or -1, then a key and value per field.
 	opAccess  // A: the record. B: the key, a label.ID.
@@ -136,7 +136,8 @@ type core struct {
 	// What stops evaluation, shared by the environment's programs.
 	limit *limit
 
-	// What allocation assigns, besides binders' slots. Per node: for a
+	// What allocation assigns, besides binders' slots, of which a binding
+	// whose value is only a type has none. Per node: for a
 	// variable, its slot in the current frame, or -1 minus its capture of
 	// the running function; for an opMatchN, the first of its arguments'
 	// slots; for a lambda, the index in frames of its frame's size, its
@@ -282,7 +283,7 @@ func (c *core) compose(n cnode) (first, second cnode, u int32) {
 // fills in later, with opFill.
 func (c *core) where(n cnode) (body cnode, binds []int32) {
 	r := c.range_(n)
-	return cnode(r[0]), r[3:]
+	return cnode(r[0]), r[1:]
 }
 
 // A callee is what an inlined call refers to its function by: a binder, or
@@ -410,8 +411,7 @@ func compile(units []unit, reg *types.Registry, globals variables, shapes *shape
 	c.enter(root)
 	c.root = c.scrap()
 	if binds != nil {
-		// Its binders are made after their values, so its range is empty.
-		c.root = c.span(opWhere, append([]int32{int32(c.root), 0, 0}, binds...), units[root].se.Expr)
+		c.root = c.span(opWhere, append([]int32{int32(c.root)}, binds...), units[root].se.Expr)
 	}
 	c.main = root
 	for x := units[root].se.Expr; units[c.main].se.Kind(x) == ast.Import; x = units[c.main].se.Expr {
@@ -1236,7 +1236,6 @@ func (c *compiler) group(x ast.Node) cnode {
 	body, binds := se.Group(x)
 	values, types := len(c.values), len(c.types)
 
-	first := int32(len(c.binders))
 	byNode := make(map[ast.Node]int32, len(binds))
 	for _, w := range binds {
 		_, id, _, val := se.Where(w)
@@ -1279,7 +1278,7 @@ func (c *compiler) group(x ast.Node) cnode {
 	comps := se.Components(binds, nil)
 	c.inlinable(body, binds, comps, byNode)
 
-	xs := []int32{0, first, int32(len(c.binders))}
+	xs := []int32{0}
 	for _, comp := range comps {
 		var made []int32
 		for _, w := range comp.Binds {

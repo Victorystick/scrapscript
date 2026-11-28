@@ -462,12 +462,13 @@ func TestCompile(t *testing.T) {
 		// Pipes are calls, builtins are constants.
 		{`[1] |> list/length`, `(list/length [1])`, 0},
 		{`list/length <| [1]`, `(list/length [1])`, 0},
-		// Where-bindings take slots in the frame, in evaluation order.
+		// Where-bindings take slots in the frame, in evaluation order. A slot
+		// is reused once what it holds is dead: read for the last time.
 		{`a + b ; a = 1 ; b = a`, `((+ @0 @1) ; >0 1 ; >1 @0)`, 2},
-		{`b ; b = a ; a = 1`, `(@0 ; >1 1 ; >0 @1)`, 2},
+		{`b ; b = a ; a = 1`, `(@0 ; >0 1 ; >0 @0)`, 1},
 		// A function has its own frame; the outer one is one out.
 		{`list/map f [2] ; f = x -> x + n ; n = 1`,
-			`((list/map @0 [2]) ; >1 1 ; >0 (fn/1 [@1] ^n&0 home=f | >0 -> (+ @0 &0)))`, 2},
+			`((list/map @0 [2]) ; >0 1 ; >0 (fn/1 [@0] ^n&0 home=f | >0 -> (+ @0 &0)))`, 1},
 		// A recursive function captures itself once it is made.
 		{`f ; f = | 0 -> 1 | n -> n * f (n - 1)`,
 			`(@0 ; >0 new ; >0 (fill @0 (fn/1 [@0] ^f&0 home=f | 0 -> 1 | >0 -> (* @0 (&0! (- @0 1))))))`, 1},
@@ -477,20 +478,21 @@ func TestCompile(t *testing.T) {
 		// A recursive function's closure is made before its where, whose
 		// closures may capture it.
 		{`f ; f = (x -> g x ; g = y -> f y)`,
-			`(@0 ; >0 new ; >0 ((fill @0 (fn/2 [@1, @0] ^g&0 | >0 -> (match @0 | >1 -> (&1 @1)))) ; >1 (fn/1 [@0] ^f&0 home=g | >0 -> (&0 @0))))`, 2},
-		// A where in a function body takes slots in the function's frame.
-		{`x -> (y ; y = x)`, `(fn/2 | >0 -> (@1 ; >1 @0))`, 0},
+			`(@0 ; >0 new ; >0 ((fill @0 (fn/1 [@1, @0] ^g&0 | >0 -> (match @0 | >0 -> (&1 @0)))) ; >1 (fn/1 [@0] ^f&0 home=g | >0 -> (&0 @0))))`, 2},
+		// A where in a function body takes slots in the function's frame,
+		// here its parameter's, once read.
+		{`x -> (y ; y = x)`, `(fn/1 | >0 -> (@0 ; >0 @0))`, 0},
 		// The arms of a match share slots; the frame is the largest arm.
 		{`| #a x -> x | #b { p = y, q = z } -> y + z`,
 			`(fn/2 | (#a >0) -> @0 | (#b { p = >0, q = >1 }) -> (+ @0 @1))`, 0},
-		// A where in an arm takes slots after the arm's pattern; the next arm
-		// reuses them.
+		// A where in an arm takes slots that the arm's names leave; the next
+		// arm reuses them.
 		{`| #a x -> (y ; y = x) | #b z -> z`,
-			`(fn/2 | (#a >0) -> (@1 ; >1 @0) | (#b >0) -> @0)`, 0},
+			`(fn/1 | (#a >0) -> (@0 ; >0 @0) | (#b >0) -> @0)`, 0},
 		// An inner function's free names are captured by the outer one too,
 		// for it to capture them from; names bound inside it are not.
 		{`(a -> (g ; g = b -> a + b + n)) ; n = 1`,
-			`((fn/2 [@0] ^n&0 | >0 -> (@1 ; >1 (fn/1 [@0, &0] ^a&0 ^n&1 home=g | >0 -> (+ (+ &0 @0) &1)))) ; >0 1)`, 1},
+			`((fn/1 [@0] ^n&0 | >0 -> (@0 ; >0 (fn/1 [@0, &0] ^a&0 ^n&1 home=g | >0 -> (+ (+ &0 @0) &1)))) ; >0 1)`, 1},
 		// A chain of lambdas is one function of all their arguments.
 		{`(a -> b -> a + b + n) ; n = 1`,
 			`((fn/2 [@0] ^n&0 | >0 -> >1 -> (+ (+ @0 @1) &0)) ; >0 1)`, 1},
@@ -510,42 +512,45 @@ func TestCompile(t *testing.T) {
 		// A function of more than one argument keeps them in its first
 		// slots, where names bind them.
 		{`| #a -> n -> 0 | _ -> { x = x } -> x`, `(fn/3 | #a -> >1 -> 0 | _ -> { x = >2 } -> @2)`, 0},
+		// The patterns of every arm read them, but an arm's body keeps only
+		// the ones it names.
+		{`| #a -> b -> (c ; c = b) | _ -> _ -> 0`, `(fn/2 | #a -> >1 -> (@0 ; >0 @1) | _ -> _ -> 0)`, 0},
 		{`| [a] ++ r -> a | r ++ [a] -> a | _ -> 0`,
 			`(fn/2 | (++ [>0] >1) -> @0 | (++ >0 [>1]) -> @1 | _ -> 0)`, 0},
 		{`| { ..r, a = x } -> x`, `(fn/2 | { a = >0 ..>1 } -> @0)`, 0},
 		// A function literal of one argument applied directly is a match in
 		// the current frame, without a closure or a frame of its own.
-		{`x -> x |> | #a y -> y | #b -> 0`, `(fn/2 | >0 -> (match @0 | (#a >1) -> @1 | #b -> 0))`, 0},
+		{`x -> x |> | #a y -> y | #b -> 0`, `(fn/1 | >0 -> (match @0 | (#a >0) -> @0 | #b -> 0))`, 0},
 		{`1 |> y -> y`, `(match 1 | >0 -> @0)`, 1},
 		// Its arms share slots, and so does what follows it, since closures
 		// made in an arm copy what they capture.
 		{`x -> [(x |> | #a y -> y | _ -> 0), (x |> z -> 1)]`,
-			`(fn/2 | >0 -> [(match @0 | (#a >1) -> @1 | _ -> 0), (match @0 | >1 -> 1)])`, 0},
+			`(fn/2 | >0 -> [(match @0 | (#a >1) -> @1 | _ -> 0), (match @0 | >0 -> 1)])`, 0},
 		{`x -> [(x |> | y -> (z -> y)), (x |> | w -> (v -> w))]`,
-			`(fn/2 | >0 -> [(match @0 | >1 -> (fn/1 [@1] ^y&0 | >0 -> &0)), (match @0 | >1 -> (fn/1 [@1] ^w&0 | >0 -> &0))])`, 0},
+			`(fn/2 | >0 -> [(match @0 | >1 -> (fn/1 [@1] ^y&0 | >0 -> &0)), (match @0 | >0 -> (fn/1 [@0] ^w&0 | >0 -> &0))])`, 0},
 		// So does what follows a where-group in a function.
-		{`x -> [(a ; a = x), (b ; b = x)]`, `(fn/2 | >0 -> [(@1 ; >1 @0), (@1 ; >1 @0)])`, 0},
+		{`x -> [(a ; a = x), (b ; b = x)]`, `(fn/2 | >0 -> [(@1 ; >1 @0), (@0 ; >0 @0)])`, 0},
 		// But not the arguments that an inlined call puts in slots before
 		// computing the next.
 		{`x -> f (g x) (g x) ; f = a -> b -> a + b ; g = y -> y + 1`,
-			`((fn/4 [@0, @1] ^f&0 ^g&1 ^g&1 | >0 -> (match@1 (match @0 | >3 -> (+ @3 1)) (match @0 | >3 -> (+ @3 1)) | >1 -> >2 -> (+ @1 @2))) ; >0 (fn/2 home=f | >0 -> >1 -> (+ @0 @1)) ; >1 (fn/1 home=g | >0 -> (+ @0 1)))`, 2},
+			`((fn/4 [@0, @1] ^f&0 ^g&1 ^g&1 | >0 -> (match@1 (match @0 | >3 -> (+ @3 1)) (match @0 | >0 -> (+ @0 1)) | >1 -> >2 -> (+ @1 @2))) ; >0 (fn/2 home=f | >0 -> >1 -> (+ @0 @1)) ; >1 (fn/1 home=g | >0 -> (+ @0 1)))`, 2},
 		{`1 |> y -> (g ; g = z -> y + z)`,
-			`(match 1 | >0 -> (@1 ; >1 (fn/1 [@0] ^y&0 home=g | >0 -> (+ &0 @0))))`, 2},
+			`(match 1 | >0 -> (@0 ; >0 (fn/1 [@0] ^y&0 home=g | >0 -> (+ &0 @0))))`, 1},
 		// A function of more arguments is still called.
 		{`1 |> | a -> b -> a`, `((fn/2 | >0 -> >1 -> @0) 1)`, 0},
 		// A call to a small where-bound function of one argument is a match
 		// too, whose body sees the names where the function is bound. The
 		// caller still captures the function, which its code prints with.
 		{`1 |> n -> f 2 ; f = x -> x + n ; n = 10`,
-			`((match 1 | >2 -> (match 2 | >3 -> (+ @3 @1))) ; >1 10 ; >0 (fn/1 [@1] ^n&0 home=f | >0 -> (+ @0 &0)))`, 4},
+			`((match 1 | >1 -> (match 2 | >1 -> (+ @1 @0))) ; >0 10 ; >1 (fn/1 [@0] ^n&0 home=f | >0 -> (+ @0 &0)))`, 2},
 		{`y -> f y ; f = x -> g x + 1 ; g = x -> x + k ; k = 3`,
-			`((fn/3 [@0, @2] ^f&0 | >0 -> (match @0 | >1 -> (+ (match @1 | >2 -> (+ @2 &1)) 1))) ; >2 3 ; >1 (fn/1 [@2] ^k&0 home=g | >0 -> (+ @0 &0)) ; >0 (fn/2 [@1, @2] ^g&0 home=f | >0 -> (+ (match @0 | >1 -> (+ @1 &1)) 1)))`, 3},
+			`((fn/1 [@1, @0] ^f&0 | >0 -> (match @0 | >0 -> (+ (match @0 | >0 -> (+ @0 &1)) 1))) ; >0 3 ; >1 (fn/1 [@0] ^k&0 home=g | >0 -> (+ @0 &0)) ; >1 (fn/1 [@1, @0] ^g&0 home=f | >0 -> (+ (match @0 | >0 -> (+ @0 &1)) 1)))`, 2},
 		// One of more arguments puts them in slots of their own, as in its
 		// frame, but only if the call passes all of them.
 		{`f 1 2 ; f = a -> b -> a + b + n ; n = 10`,
-			`((match@2 1 2 | >2 -> >3 -> (+ (+ @2 @3) @1)) ; >1 10 ; >0 (fn/2 [@1] ^n&0 home=f | >0 -> >1 -> (+ (+ @0 @1) &0)))`, 4},
+			`((match@1 1 2 | >1 -> >2 -> (+ (+ @1 @2) @0)) ; >0 10 ; >1 (fn/2 [@0] ^n&0 home=f | >0 -> >1 -> (+ (+ @0 @1) &0)))`, 3},
 		{`g 1 2 ; g = | 1 -> b -> b | a -> _ -> a`,
-			`((match@1 1 2 | 1 -> >2 -> @2 | >1 -> _ -> @1) ; >0 (fn/2 home=g | 1 -> >1 -> @1 | >0 -> _ -> @0))`, 3},
+			`((match@0 1 2 | 1 -> >1 -> @1 | >0 -> _ -> @0) ; >0 (fn/2 home=g | 1 -> >1 -> @1 | >0 -> _ -> @0))`, 2},
 		{`f 1 ; f = a -> b -> a + b`, `((@0 1) ; >0 (fn/2 home=f | >0 -> >1 -> (+ @0 @1)))`, 1},
 		// A large one only if nothing else refers to it.
 		{`f 1 + f 2 ; f = | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10`,
