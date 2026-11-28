@@ -64,6 +64,8 @@ func (c *compiler) allocate() {
 		a.levels[i], a.last[i] = -1, -1
 	}
 	c.loc = make([]int32, len(c.ops))
+	// About an event per binder and two per lambda.
+	a.log = make([]int32, 0, 8*n+64)
 	a.expr(c.root)
 	c.top = a.replay()
 	// Variables of their own frame read their binder's slot; the others
@@ -347,38 +349,37 @@ const (
 	reserved = -2 // an argument, while patterns read it
 )
 
-// A replay assigns slots by the log, keeping the slots of the frame it is
-// in: the binder each holds, or free or reserved.
+// A replay assigns slots by the log, keeping the slots of the frames it is
+// in, the current one last: the binder each holds, or free or reserved.
 type replay struct {
 	*allocator
-	slots []int32
-	size  int
+	stack []int32
+	base  int // the current frame's first slot in stack
 	at    int32
 }
 
 // dead reports whether the slot s is free at the current position.
 func (r *replay) dead(s int) bool {
-	if s >= len(r.slots) {
+	if r.base+s >= len(r.stack) {
 		return true
 	}
-	o := r.slots[s]
+	o := r.stack[r.base+s]
 	return o == free || o >= 0 && r.last[o] < r.at
 }
 
 // claim marks the k slots from s as held by o, growing the frame.
 func (r *replay) claim(s, k int, o int32) {
-	for len(r.slots) < s+k {
-		r.slots = append(r.slots, free)
+	for len(r.stack) < r.base+s+k {
+		r.stack = append(r.stack, free)
 	}
-	for i := s; i < s+k; i++ {
-		r.slots[i] = o
+	for i := r.base + s; i < r.base+s+k; i++ {
+		r.stack[i] = o
 	}
-	r.size = max(r.size, len(r.slots))
 }
 
-// base returns the first slot of the arguments of the opMatchN n, or of a
+// args returns the first slot of the arguments of the opMatchN n, or of a
 // lambda's if n is none.
-func (r *replay) base(n int32) int {
+func (r *replay) args(n int32) int {
 	if cnode(n) == none {
 		return 0
 	}
@@ -388,14 +389,11 @@ func (r *replay) base(n int32) int {
 // replay assigns the slots of the log's writes, and the frames' sizes and
 // captures, returning the size of the top frame.
 func (a *allocator) replay() int {
-	r := replay{allocator: a}
-	type saved struct {
-		slots []int32
-		size  int
-	}
-	var frames []saved
-	var spare [][]int32 // the slots of frames left, for reuse
-	var lambdas []int32 // the index in frames of each lambda entered
+	r := replay{allocator: a, stack: make([]int32, 0, 64)}
+	// The lambdas entered: the index in frames of each, and the base and
+	// size of the frame around it.
+	var lambdas []int32
+	size := 0
 	for e := a.log; len(e) > 0; e = e[4:] {
 		x, y := e[1], e[2]
 		r.at = e[3]
@@ -407,6 +405,7 @@ func (a *allocator) replay() int {
 			}
 			r.claim(s, 1, x)
 			a.binders[x].slot = s
+			size = max(size, s+1)
 		case evReserve:
 			k := int(y)
 			s := 0
@@ -422,53 +421,51 @@ func (a *allocator) replay() int {
 			}
 			r.claim(s, k, reserved)
 			a.loc[x] = int32(s)
+			size = max(size, s+k)
 		case evPatterns:
-			r.claim(r.base(x), int(y), reserved)
+			r.claim(r.args(x), int(y), reserved)
 		case evBody:
 			// The body keeps only the arguments it names.
-			s := r.base(x)
+			s := r.args(x)
 			for i, p := range a.extra[e[3] : e[3]+y] {
 				o := int32(free)
 				if a.ops[p] == patArg {
 					o = a.data[p].a
 					a.binders[o].slot = s + i
 				}
-				r.slots[s+i] = o
+				r.stack[r.base+s+i] = o
 			}
 		case evRelease:
-			for i := r.base(x); i < r.base(x)+int(y); i++ {
-				if r.slots[i] == reserved {
-					r.slots[i] = free
+			for i := r.base + r.args(x); i < r.base+r.args(x)+int(y); i++ {
+				if r.stack[i] == reserved {
+					r.stack[i] = free
 				}
 			}
 		case evEnter:
-			frames = append(frames, saved{r.slots, r.size})
-			lambdas = append(lambdas, a.loc[x])
-			r.slots, r.size = nil, 0
-			if len(spare) > 0 {
-				r.slots, spare = spare[len(spare)-1][:0], spare[:len(spare)-1]
-			}
+			lambdas = append(lambdas, a.loc[x], int32(r.base), int32(size))
+			r.base, size = len(r.stack), 0
 			if arity := int(a.extra[a.data[x].a+1]); arity > 1 {
 				r.claim(0, arity, reserved)
+				size = arity
 			}
 		case evExit:
 			i := a.loc[x]
-			a.frames[i] = int32(r.size)
-			spare = append(spare, r.slots)
-			f := frames[len(frames)-1]
-			frames, lambdas = frames[:len(frames)-1], lambdas[:len(lambdas)-1]
-			r.slots, r.size = f.slots, f.size
+			a.frames[i] = int32(size)
+			l := lambdas[len(lambdas)-3:]
+			r.stack = r.stack[:r.base]
+			r.base, size = int(l[1]), int(l[2])
+			lambdas = lambdas[:len(lambdas)-3]
 			// What it captures, now that the frame it is made in has its
 			// slots, and the captures of that frame's function are still
 			// binders.
-			level := int32(len(frames))
+			level := int32(len(lambdas) / 3)
 			caps := a.frames[i+2 : i+2+a.frames[i+1]]
 			for j, b := range caps {
 				if a.levels[b] == level {
 					caps[j] = int32(a.binders[b].slot)
 					continue
 				}
-				outer := lambdas[len(lambdas)-1]
+				outer := lambdas[len(lambdas)-3]
 				for k, o := range a.frames[outer+2 : outer+2+a.frames[outer+1]] {
 					if o == b {
 						caps[j] = -1 - int32(k)
@@ -478,5 +475,5 @@ func (a *allocator) replay() int {
 			}
 		}
 	}
-	return r.size
+	return size
 }
