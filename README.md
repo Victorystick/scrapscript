@@ -1,6 +1,6 @@
 # Scrapscript
 
-A exploration (read: very incomplete implementation) of [Scrapscript](https://scrapscript.org).
+An exploration (read: very incomplete implementation) of the ideas behind [Scrapscript](https://scrapscript.org).
 
 ## Installation
 
@@ -10,7 +10,7 @@ Learn the language in the [tutorial](https://victorystick.github.io/scrapscript/
 
 ## Overview
 
-The aim is to implement Scrapscript along with the `scrap` CLI as documented on https://scrapscript.org/guide.
+The aim is to explore Scrapscript's ideas with a working language and the `scrap` CLI: closed scraps that mean the same thing everywhere, referred to by the hash of their content, whose results can be passed on as scraps themselves. It started from the guide at https://scrapscript.org/guide and departs from it wherever that serves these ideas better. [SPEC.md](SPEC.md) describes the language it is heading towards.
 
 So far it supports
 
@@ -70,6 +70,10 @@ So far it supports
 > Note: Scraps are currently fetched from the scrapyard at https://scraps.oseg.dev/ as text and cached locally.
 
 ## Differences from https://scrapscript.org
+
+SPEC.md section 14 lists them all. The main ones:
+
+* No free names and no "latest version". A scrap refers to others by hash, or by path while it's a draft, so its meaning can't change over time.
 
 * Refers to scraps as `$source:<hex>`, the sha256 of their source, instead of `$sha1~~…`, as SHA-1 is cryptographically weak and `~~` otherwise means base64. During development, `$"./path"` refers to a draft file.
 

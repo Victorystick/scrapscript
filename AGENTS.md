@@ -10,7 +10,9 @@ against the base commit with interleaved runs and benchstat.
 
 - SPEC.md is the target language spec and decides design questions; README.md
   is for users; TODO.md tracks architectural blemishes; BENCHMARK.md and
-  bench/run.sh track performance.
+  bench/run.sh track performance. DESIGN_NOTES.md records the language's
+  goals and design decisions not yet written into SPEC.md, and the questions
+  deferred; read it before proposing design changes.
 - Design principles:
   - An import means the same as its source inlined in parentheses, so
     whatever works across imports must work locally too.
