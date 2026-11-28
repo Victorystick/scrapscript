@@ -8,6 +8,8 @@ consumer needs.
 Measure, don't assume: compare BenchmarkInfer/BenchmarkEval (eval package)
 against the base commit with interleaved runs and benchstat.
 
+- The Goals at the top of SPEC.md guide everything else: the spec, TODO.md,
+  the plans and the implementation.
 - SPEC.md is the target language spec and decides design questions; README.md
   is for users; TODO.md tracks architectural blemishes; BENCHMARK.md and
   bench/run.sh track performance. DESIGN_NOTES.md records the language's

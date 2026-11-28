@@ -142,6 +142,13 @@ builtins now return plain values and panic with a `runtimeError`, which
       `ScriptFunc` compares by printing), remove `eval.Equals`, and mark
       `Value` with an unexported `isValue()` method instead of `eq`. Only
       literal patterns compare values, and only primitives.
+- [ ] An Environment isn't safe for concurrent use (eval/env.go), so a
+      server evaluating scraps from many goroutines must load and check
+      them in each. Split it into an immutable compiled program that
+      goroutines share (code, shapes, labels, types) and per-call state
+      (frames, the limit and its counters), which a host keeps per worker
+      or in a pool and reuses across calls. The policy host in
+      DESIGN_NOTES.md needs this.
 - [ ] Sources have no file name, so errors in drafts don't say which file.
 - [ ] Structure parse and type errors for an LSP as well as the CLI: a
       start and end position (line and column, convertible to LSP's UTF-16

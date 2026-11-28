@@ -13,7 +13,16 @@ Goals:
 
 This language explores the ideas behind Scrapscript. It started from the guide
 at scrapscript.org, and departs from it wherever that serves these ideas better
-(section 14). Three ideas are its core, each resting on the one before:
+(section 14). These goals guide everything else: this spec, TODO.md and the
+plans.
+
+Its guiding use case is deriving values from other values: policies, such as
+which parts of an application a user may use, and with what configuration,
+given their account, subscription and history. A design question is settled by
+asking whether it makes such a policy easier to write, read, test and review,
+for people and for agents alike.
+
+Three ideas are its core, each resting on the one before:
 
 1. **Closed scraps.** A scrap has no free names and reads no ambient state, so
    it means the same thing everywhere and at any time. A name looked up in a

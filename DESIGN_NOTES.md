@@ -42,6 +42,34 @@ with the tutorial.
   `-(x ^ 2)`, as in JavaScript. Negation is int-only until floats are
   decided.
 
+## Experiments
+
+- **A policy host.** A server holds many policies, `map[PolicyName]*Scrap`,
+  each a function from an open record of inputs, `{ plan : …, ..r }`, to a
+  well-known closed output type. Unlike a platform (SPEC section 13), which
+  checks a script against a closed interface and is mostly a binary per
+  interface, a policy host is a library in an existing server, and reads
+  what each policy demands from its inferred input type.
+  - **A universe type.** The host declares a closed type of every input it
+    can fetch, and checks each policy's input type against it when
+    loading. An open row accepts any field, so without it a typo such as
+    `trail-ended` would be a field that the policy demands and nothing
+    fetches.
+  - **Type-directed fetching.** The inputs that a set of policies needs is
+    the union of their input rows, merged through nested records. A field
+    that two policies use at different types is a conflict, reported when
+    loading. The type gives an upper bound: a field read in only one
+    branch is still fetched. The checker infers these rows already; the
+    API would have to expose the fields that an inferred type uses.
+  - **A/B testing by hash.** A rollout chooses between policies by hash,
+    and each decision can be logged with the hash that made it and
+    replayed exactly.
+  - Concurrency: TODO.md section 7.
+- **Compiling scraps to Go.** If policies ship as server code, compiling a
+  scrap to Go source would remove the interpreter, which a company may push
+  back on embedding, while the generated code still records the scrap's
+  hash. Today `gogen` generates only bindings.
+
 ## Diagnostics
 
 - When an unbound NAME such as `a-b` splits into bound parts, suggest
