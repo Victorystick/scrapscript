@@ -154,8 +154,8 @@ func (o operand) get(f frame) value {
 
 // operand compiles the expression n as an operand.
 func (p *program) operand(n cnode) operand {
-	if p.ops[n] == opLocal {
-		return operand{slot: p.data[n].a}
+	if p.ops[n] == opVar && p.loc[n] >= 0 {
+		return operand{slot: p.loc[n]}
 	}
 	return operand{slot: -1, c: p.expr(n)}
 }
@@ -290,9 +290,8 @@ func (p *program) expr(n cnode) code {
 		}
 
 	case opMatch:
-		r := p.range_(n)
-		vc := p.operand(cnode(r[0]))
-		arms := r[1:]
+		v, _, arms := p.match(n)
+		vc := p.operand(v)
 		pats := make([]mcode, len(arms)/2)
 		bodies := p.exprsOf(arms, 2)
 		for i := range pats {
@@ -309,12 +308,12 @@ func (p *program) expr(n cnode) code {
 		}
 
 	case opMatchN:
-		r := p.range_(n)
-		s, k := r[0], int(r[1])
-		vcs := p.operands(r[2 : 2+k])
+		_, args, arms := p.matchN(n)
+		s, k := p.loc[n], len(args)
+		vcs := p.operands(args)
 		var pats [][]mcode
-		bodies := p.exprsOf(r[2+k:], k+1)
-		for a := r[2+k:]; len(a) > 0; a = a[k+1:] {
+		bodies := p.exprsOf(arms, k+1)
+		for a := arms; len(a) > 0; a = a[k+1:] {
 			pats = append(pats, p.patterns(a[:k]))
 		}
 		return func(f frame) value {
@@ -342,12 +341,11 @@ func (p *program) expr(n cnode) code {
 		v := p.consts[d.a]
 		return func(frame) value { return v }
 
-	case opLocal:
-		s := d.a
-		return func(f frame) value { return f.slots[s] }
-
-	case opCapture:
-		i := d.a
+	case opVar:
+		if s := p.loc[n]; s >= 0 {
+			return func(f frame) value { return f.slots[s] }
+		}
+		i := -1 - p.loc[n]
 		return func(f frame) value { return f.caps[i] }
 
 	case opAddInt:
@@ -456,7 +454,7 @@ func (p *program) expr(n cnode) code {
 
 	case opFill:
 		from := p.captures(cnode(d.a))
-		s := d.b
+		s := p.binders[d.b].slot
 		return func(f frame) value {
 			sf := f.slots[s]
 			f.capture(sf.asScript().caps, from)
@@ -660,9 +658,8 @@ func (p *program) tail(n cnode) tcode {
 		}
 
 	case opMatch:
-		r := p.range_(n)
-		vc := p.operand(cnode(r[0]))
-		arms := r[1:]
+		v, _, arms := p.match(n)
+		vc := p.operand(v)
 		pats := make([]mcode, len(arms)/2)
 		bodies := make([]tcode, len(arms)/2)
 		for i := range pats {
@@ -680,11 +677,11 @@ func (p *program) tail(n cnode) tcode {
 		}
 
 	case opMatchN:
-		r := p.range_(n)
-		s, k := r[0], int(r[1])
-		vcs := p.operands(r[2 : 2+k])
+		_, args, as := p.matchN(n)
+		s, k := p.loc[n], len(args)
+		vcs := p.operands(args)
 		var arms []armCode
-		for a := r[2+k:]; len(a) > 0; a = a[k+1:] {
+		for a := as; len(a) > 0; a = a[k+1:] {
 			arms = append(arms, armCode{pats: p.patterns(a[:k]), body: p.tail(cnode(a[k]))})
 		}
 		return func(f frame) (value, tcode, frame) {
@@ -712,22 +709,22 @@ func (p *program) tail(n cnode) tcode {
 	return func(f frame) (value, tcode, frame) { return done(c(f)) }
 }
 
-// binds compiles a where's bindings, as pairs of slot and value, into
+// binds compiles a where's bindings, as pairs of binder and value, into
 // code that puts their values in their slots.
 func (p *program) binds(binds []int32) func(f frame) {
 	type bind struct {
-		slot int32
+		slot int
 		c    code  // its value, or nil for a closure made before its captures
 		l    cnode // the lambda of that closure
 		caps int
 	}
 	bs := make([]bind, len(binds)/2)
 	for i := range bs {
-		s, x := binds[2*i], cnode(binds[2*i+1])
-		if s < 0 {
-			bs[i] = bind{slot: -1 - s, l: x, caps: len(p.captures(x))}
+		b, x := binds[2*i], cnode(binds[2*i+1])
+		if b < 0 {
+			bs[i] = bind{slot: p.binders[-1-b].slot, l: x, caps: len(p.captures(x))}
 		} else {
-			bs[i] = bind{slot: s, c: p.expr(x)}
+			bs[i] = bind{slot: p.binders[b].slot, c: p.expr(x)}
 		}
 	}
 	return func(f frame) {
@@ -777,7 +774,7 @@ func (p *program) pattern(n cnode) mcode {
 	d := p.data[n]
 	switch p.ops[n] {
 	case patBind:
-		s := d.a
+		s := p.binders[d.a].slot
 		return func(v value, f []value) bool {
 			f[s] = v
 			return true

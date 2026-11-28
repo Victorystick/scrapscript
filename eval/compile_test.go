@@ -11,7 +11,8 @@ import (
 	"github.com/Victorystick/scrapscript/types"
 )
 
-// The tests below compare a core with an S-expression that dump writes.
+// The tests below compare a core with an S-expression that dump writes,
+// with the slots and captures that allocation assigned.
 //
 // @ reads a slot and > writes one. Writes always go to the current frame.
 //
@@ -84,6 +85,16 @@ import (
 //	f = x -> x + n ; n = 1   (fn/1 [@1] ^n&0 home=f | >0 -> (+ @0 &0))
 //	f = x -> x               (fn/1 home=f | >0 -> @0)
 //	(x -> x + n) ; n = 1     (fn/1 [@0] ^n&0 | >0 -> (+ @0 &0))
+//
+// dumpVars writes the same with variables instead, as lowering makes them:
+// a name x instead of @s or &i, and >x instead of >s; a binder of the same
+// name as i binders before it as x'i, and a scrap's value as $i, by its
+// source. Lambdas are fn, without their frames and captures, uses lists
+// ^x for a captured name, and inlined calls name the function they call:
+//
+//	(inline f: a b | p -> q -> b)
+//	                     a call of f inlined as a match of its arms, with
+//	                     the arguments a and b; inline: without a name
 
 var opStrings = map[op]string{
 	opAddInt: "+", opSubInt: "-", opMulInt: "*",
@@ -94,109 +105,151 @@ var opStrings = map[op]string{
 	patCons: ">+", patSnoc: "+<", patConsBytes: ">+bytes", patSnocBytes: "+<bytes",
 }
 
-// dump writes node n of c as an S-expression, described above.
+// A dumper writes nodes of a core as S-expressions, described above, with
+// slots and captures as allocation assigned them, or with variables as
+// lowering made them if vars is set.
+type dumper struct {
+	*core
+	s    *strings.Builder
+	vars bool
+}
+
+// dump writes node n of c in the notation with slots.
 func (c *core) dump(s *strings.Builder, n cnode) {
-	d := c.data[n]
+	dumper{c, s, false}.dump(n)
+}
+
+// dumpVars writes node n of c in the notation with variables.
+func (c *core) dumpVars(s *strings.Builder, n cnode) {
+	dumper{c, s, true}.dump(n)
+}
+
+// binder writes what reads (prefix @) or writes (>) the binder b: prefix
+// and its slot, or its name, prefixed only if it writes.
+func (d dumper) binder(prefix string, b int32) {
+	if !d.vars {
+		fmt.Fprintf(d.s, "%s%d", prefix, d.binders[b].slot)
+		return
+	}
+	if prefix != "@" {
+		d.s.WriteString(prefix)
+	}
+	bd := d.binders[b]
+	if bd.name == "" {
+		fmt.Fprintf(d.s, "$%d", bd.src)
+		return
+	}
+	// The binders before it of the same name.
+	k := 0
+	for _, x := range d.binders[:b] {
+		if x.name == bd.name {
+			k++
+		}
+	}
+	d.s.WriteString(bd.name)
+	if k > 0 {
+		fmt.Fprintf(d.s, "'%d", k)
+	}
+}
+
+func (d dumper) dump(n cnode) {
+	s, c := d.s, d.core
+	dd := c.data[n]
 	switch o := c.ops[n]; o {
 	case opConst, patLiteral:
-		s.WriteString(printValue(c.table, c.consts[d.a]))
-	case opLocal:
-		fmt.Fprintf(s, "@%d", d.a)
-	case opCapture:
-		fmt.Fprintf(s, "&%d", d.a)
+		s.WriteString(printValue(c.table, c.consts[dd.a]))
+	case opVar:
+		switch l := c.loc[n]; {
+		case d.vars:
+			d.binder("", dd.a)
+		case l >= 0:
+			fmt.Fprintf(s, "@%d", l)
+		default:
+			fmt.Fprintf(s, "&%d", -1-l)
+		}
 	case opCall:
-		c.list(s, "(", ")", "", cnode(d.a), cnode(d.b))
+		d.list("(", ")", "", cnode(dd.a), cnode(dd.b))
 	case opCallKnown:
 		r := c.range_(n)
 		s.WriteString("(")
-		c.dump(s, cnode(r[1]))
+		d.dump(cnode(r[1]))
 		s.WriteString("!")
 		for _, x := range r[2:] {
 			s.WriteString(" ")
-			c.dump(s, cnode(x))
+			d.dump(cnode(x))
 		}
 		s.WriteString(")")
 	case opCallN:
-		var ns []cnode
-		for _, x := range c.range_(n) {
-			ns = append(ns, cnode(x))
-		}
-		c.list(s, "(", ")", "", ns...)
+		d.list("(", ")", "", nodes(c.range_(n))...)
 	case opAddInt, opSubInt, opMulInt, opAddFloat, opSubFloat, opMulFloat,
 		opAppendList, opAppendBytes, opPrependList, opPrependBytes,
 		opConcatList, opConcatText, opConcatBytes, patCons, patSnoc, patConsBytes, patSnocBytes:
-		c.list(s, "("+opStrings[o]+" ", ")", "", cnode(d.a), cnode(d.b))
+		d.list("("+opStrings[o]+" ", ")", "", cnode(dd.a), cnode(dd.b))
 	case opCompose:
 		first, second, u := c.compose(n)
 		s.WriteString("(>>")
-		c.uses_(s, u)
-		c.list(s, " ", ")", "", first, second)
+		d.uses(u)
+		d.list(" ", ")", "", first, second)
 	case opLambda:
-		size, u, arity, arms := c.lambda(n)
-		fmt.Fprintf(s, "(fn/%d", size)
-		if caps := c.captures(n); len(caps) > 0 {
-			s.WriteString(" [")
-			for i, x := range caps {
-				if i > 0 {
-					s.WriteString(", ")
+		r := c.range_(n)
+		u, arity, arms := r[0], int(r[1]), r[2:]
+		if d.vars {
+			s.WriteString("(fn")
+		} else {
+			size, _, _, _ := c.lambda(n)
+			fmt.Fprintf(s, "(fn/%d", size)
+			if caps := c.captures(n); len(caps) > 0 {
+				s.WriteString(" [")
+				for i, x := range caps {
+					if i > 0 {
+						s.WriteString(", ")
+					}
+					from(s, x)
 				}
-				from(s, x)
+				s.WriteString("]")
 			}
-			s.WriteString("]")
 		}
-		c.uses_(s, u)
-		for i := 0; i < len(arms); i += arity + 1 {
-			s.WriteString(" |")
-			for _, pat := range arms[i : i+arity] {
-				s.WriteString(" ")
-				c.dump(s, cnode(pat))
-				s.WriteString(" ->")
-			}
-			s.WriteString(" ")
-			c.dump(s, cnode(arms[i+arity]))
-		}
+		d.uses(u)
+		d.arms(arms, arity)
 		s.WriteString(")")
 	case opMatch:
-		r := c.range_(n)
-		s.WriteString("(match ")
-		c.dump(s, cnode(r[0]))
-		for i := 1; i < len(r); i += 2 {
+		v, callee, arms := c.match(n)
+		s.WriteString("(")
+		d.match(callee)
+		d.dump(v)
+		for i := 0; i < len(arms); i += 2 {
 			s.WriteString(" | ")
-			c.dump(s, cnode(r[i]))
+			d.dump(cnode(arms[i]))
 			s.WriteString(" -> ")
-			c.dump(s, cnode(r[i+1]))
+			d.dump(cnode(arms[i+1]))
 		}
 		s.WriteString(")")
 	case opMatchN:
-		r := c.range_(n)
-		k := int(r[1])
-		fmt.Fprintf(s, "(match@%d", r[0])
-		for _, x := range r[2 : 2+k] {
-			s.WriteString(" ")
-			c.dump(s, cnode(x))
+		callee, args, arms := c.matchN(n)
+		if d.vars {
+			s.WriteString("(")
+			d.match(callee)
+		} else {
+			// With the slot of its first argument.
+			fmt.Fprintf(s, "(match@%d ", c.loc[n])
 		}
-		for a := r[2+k:]; len(a) > 0; a = a[k+1:] {
-			s.WriteString(" |")
-			for _, pat := range a[:k] {
-				s.WriteString(" ")
-				c.dump(s, cnode(pat))
-				s.WriteString(" ->")
-			}
-			s.WriteString(" ")
-			c.dump(s, cnode(a[k]))
-		}
+		d.list("", "", "", nodes(args)...)
+		d.arms(arms, len(args))
 		s.WriteString(")")
 	case opWhere:
 		body, binds := c.where(n)
 		s.WriteString("(")
-		c.dump(s, body)
+		d.dump(body)
 		for i := 0; i < len(binds); i += 2 {
-			if binds[i] < 0 {
-				fmt.Fprintf(s, " ; >%d new", -1-binds[i])
+			s.WriteString(" ; ")
+			if b := binds[i]; b < 0 {
+				d.binder(">", -1-b)
+				s.WriteString(" new")
 				continue
 			}
-			fmt.Fprintf(s, " ; >%d ", binds[i])
-			c.dump(s, cnode(binds[i+1]))
+			d.binder(">", binds[i])
+			s.WriteString(" ")
+			d.dump(cnode(binds[i+1]))
 		}
 		s.WriteString(")")
 	case opRecord, patRecord:
@@ -215,11 +268,11 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 				fmt.Fprintf(s, "[%d]", fields[i])
 			}
 			s.WriteString(" = ")
-			c.dump(s, cnode(fields[i+1]))
+			d.dump(cnode(fields[i+1]))
 		}
 		if rest != none {
 			s.WriteString(" ..")
-			c.dump(s, rest)
+			d.dump(rest)
 		}
 		s.WriteString(" }")
 	case patSplit:
@@ -230,51 +283,82 @@ func (c *core) dump(s *strings.Builder, n cnode) {
 				s.WriteString(",")
 			}
 			fmt.Fprintf(s, " %s[%d] = ", c.labels.Name(sh.labels[fields[i]]), fields[i])
-			c.dump(s, cnode(fields[i+1]))
+			d.dump(cnode(fields[i+1]))
 		}
 		s.WriteString(" ..")
-		c.dump(s, rest)
+		d.dump(rest)
 		s.WriteString(" }")
 	case opFill:
-		fmt.Fprintf(s, "(fill @%d ", d.b)
-		c.dump(s, cnode(d.a))
+		s.WriteString("(fill ")
+		d.binder("@", dd.b)
+		s.WriteString(" ")
+		d.dump(cnode(dd.a))
 		s.WriteString(")")
 	case opAccess:
-		c.dump(s, cnode(d.a))
-		s.WriteString("." + c.labels.Name(label.ID(d.b)))
+		d.dump(cnode(dd.a))
+		s.WriteString("." + c.labels.Name(label.ID(dd.b)))
 	case opField:
-		c.dump(s, cnode(d.a))
+		d.dump(cnode(dd.a))
 		se := c.source(n)
 		_, key := se.Access(c.at[n])
-		fmt.Fprintf(s, ".%s[%d]", se.TokenText(key), d.b)
+		fmt.Fprintf(s, ".%s[%d]", se.TokenText(key), dd.b)
 	case opList, patList:
-		c.list(s, "[", "]", ", ", nodes(c.range_(n))...)
+		d.list("[", "]", ", ", nodes(c.range_(n))...)
 	case opVariant, patVariant:
-		if cnode(d.b) == none {
-			s.WriteString("#" + c.labels.Name(label.ID(d.a)))
+		if cnode(dd.b) == none {
+			s.WriteString("#" + c.labels.Name(label.ID(dd.a)))
 		} else {
-			c.list(s, "(#"+c.labels.Name(label.ID(d.a))+" ", ")", "", cnode(d.b))
+			d.list("(#"+c.labels.Name(label.ID(dd.a))+" ", ")", "", cnode(dd.b))
 		}
 	case patBind, patArg:
-		fmt.Fprintf(s, ">%d", d.a)
+		d.binder(">", dd.a)
 	case patWild:
 		s.WriteString("_")
 	case patPrefix:
 		rest, elems := c.elems(n)
 		s.WriteString("(++ ")
-		c.list(s, "[", "]", ", ", nodes(elems)...)
+		d.list("[", "]", ", ", nodes(elems)...)
 		s.WriteString(" ")
-		c.dump(s, rest)
+		d.dump(rest)
 		s.WriteString(")")
 	case patSuffix:
 		rest, elems := c.elems(n)
 		s.WriteString("(++ ")
-		c.dump(s, rest)
+		d.dump(rest)
 		s.WriteString(" ")
-		c.list(s, "[", "]", ", ", nodes(elems)...)
+		d.list("[", "]", ", ", nodes(elems)...)
 		s.WriteString(")")
 	default:
 		fmt.Fprintf(s, "?%d", o)
+	}
+}
+
+// match writes the head of a match with callee: match, or with variables,
+// for an inlined call, inline and the name it calls by.
+func (d dumper) match(callee int32) {
+	switch {
+	case !d.vars || callee == notInlined:
+		d.s.WriteString("match ")
+	case callee == noName:
+		d.s.WriteString("inline: ")
+	default:
+		d.s.WriteString("inline ")
+		d.binder("", callee)
+		d.s.WriteString(": ")
+	}
+}
+
+// arms writes arms of arity patterns and a body each.
+func (d dumper) arms(arms []int32, arity int) {
+	for ; len(arms) > 0; arms = arms[arity+1:] {
+		d.s.WriteString(" |")
+		for _, pat := range arms[:arity] {
+			d.s.WriteString(" ")
+			d.dump(cnode(pat))
+			d.s.WriteString(" ->")
+		}
+		d.s.WriteString(" ")
+		d.dump(cnode(arms[arity]))
 	}
 }
 
@@ -296,34 +380,39 @@ func nodes(xs []int32) []cnode {
 }
 
 // list writes ns between open and close, separated by sep, or by spaces.
-func (c *core) list(s *strings.Builder, open, close, sep string, ns ...cnode) {
+func (d dumper) list(open, close, sep string, ns ...cnode) {
 	if sep == "" {
 		sep = " "
 	}
-	s.WriteString(open)
+	d.s.WriteString(open)
 	for i, n := range ns {
 		if i > 0 {
-			s.WriteString(sep)
+			d.s.WriteString(sep)
 		}
-		c.dump(s, n)
+		d.dump(n)
 	}
-	s.WriteString(close)
+	d.s.WriteString(close)
 }
 
-// uses_ writes the free names of uses u, and its home.
-func (c *core) uses_(s *strings.Builder, u int32) {
-	us := c.uses[u]
+// uses writes the free names of uses u, and its home.
+func (d dumper) uses(u int32) {
+	s, us := d.s, d.core.uses[u]
 	for _, r := range us.free {
 		if r.b < 0 {
-			s.WriteString(" ^" + c.srcs[us.src].se.NodeText(r.ident))
-		} else if b := c.binders[r.b]; r.cap < 0 {
-			fmt.Fprintf(s, " ^%s:", b.name)
-		} else {
-			fmt.Fprintf(s, " ^%s&%d", b.name, r.cap)
+			s.WriteString(" ^" + d.srcs[us.src].se.NodeText(r.ident))
+			continue
+		}
+		switch name := d.binders[r.b].name; {
+		case r.cap < 0:
+			fmt.Fprintf(s, " ^%s:", name)
+		case d.vars:
+			fmt.Fprintf(s, " ^%s", name)
+		default:
+			fmt.Fprintf(s, " ^%s&%d", name, r.cap)
 		}
 	}
 	if us.home >= 0 {
-		s.WriteString(" home=" + c.binders[us.home].name)
+		s.WriteString(" home=" + d.binders[us.home].name)
 	}
 }
 
@@ -501,6 +590,59 @@ func TestCompile(t *testing.T) {
 	}
 }
 
+// TestLower compares cores in the notation with variables, as lowering
+// makes them, before allocation.
+func TestLower(t *testing.T) {
+	tests := []struct{ source, core string }{
+		// Where-bindings are variables, in evaluation order.
+		{`a + b ; a = 1 ; b = a`,
+			`((+ a b) ; >a 1 ; >b a)`},
+		// A lambda's free names are variables of the frames around it.
+		{`list/map f [2] ; f = x -> x + n ; n = 1`,
+			`((list/map f [2]) ; >n 1 ; >f (fn ^n home=f | >x -> (+ x n)))`},
+		// A recursive function's closure is made, then filled in.
+		{`f ; f = | 0 -> 1 | n -> n * f (n - 1)`,
+			`(f ; >f new ; >f (fill f (fn ^f home=f | 0 -> 1 | >n -> (* n (f! (- n 1))))))`},
+		{`f ; f = (x -> g x ; g = y -> f y)`,
+			`(f ; >f new ; >f ((fill f (fn ^g | >x -> (inline g: x | >y'1 -> (f y'1)))) ; >g (fn ^f home=g | >y -> (f y))))`},
+		{`(a -> (g ; g = b -> a + b + n)) ; n = 1`,
+			`((fn ^n | >a -> (g ; >g (fn ^a ^n home=g | >b -> (+ (+ a b) n)))) ; >n 1)`},
+		// Names bind arguments of a function of more than one.
+		{`| #a -> n -> 0 | _ -> { x = x } -> x`,
+			`(fn | #a -> >n -> 0 | _ -> { x = >x } -> x)`},
+		// A function literal applied directly is a match.
+		{`x -> x |> | #a y -> y | #b -> 0`,
+			`(fn | >x -> (match x | (#a >y) -> y | #b -> 0))`},
+		// An inlined call names the function it calls, which the lambda it is
+		// in captures, to print with.
+		{`x -> f (g x) (g x) ; f = a -> b -> a + b ; g = y -> y + 1`,
+			`((fn ^f ^g ^g | >x -> (inline f: (inline g: x | >y'1 -> (+ y'1 1)) (inline g: x | >y'2 -> (+ y'2 1)) | >a'1 -> >b'1 -> (+ a'1 b'1))) ; >f (fn home=f | >a -> >b -> (+ a b)) ; >g (fn home=g | >y -> (+ y 1)))`},
+		// Names that an inlined body sees are the ones where its function is
+		// bound, which may be shadowed at the call.
+		{`1 |> n -> f 2 ; f = x -> x + n ; n = 10`,
+			`((match 1 | >n'1 -> (inline f: 2 | >x'1 -> (+ x'1 n))) ; >n 10 ; >f (fn ^n home=f | >x -> (+ x n)))`},
+		// A known call.
+		{`f 1 + f 2 ; f = | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10`,
+			`((+ (f! 1) (f! 2)) ; >f (fn home=f | 0 -> 0 | 1 -> 1 | 2 -> 2 | 3 -> 3 | 4 -> 4 | 5 -> 5 | 6 -> 6 | 7 -> 7 | 8 -> 8 | 9 -> 9 | _ -> 10))`},
+		// A scrap's value is a variable of the top level.
+		{`x -> x + $"lib.scrap"`,
+			`((fn | >x -> (+ x $0)) ; >$0 0)`},
+		{`| { ..r, a = x } -> x`,
+			`(fn | { a = >x ..>r } -> x)`},
+	}
+	for _, tt := range tests {
+		c := compileString(t, tt.source)
+		if c == nil {
+			continue
+		}
+		var s strings.Builder
+		c.dumpVars(&s, c.root)
+		if s.String() != tt.core {
+			t.Errorf("%s\n got: %s\nwant: %s", tt.source, s.String(), tt.core)
+		}
+	}
+}
+
 // A builtin is one constant, however often it is referred to.
 func TestCompileBuiltinsOnce(t *testing.T) {
 	c := compileString(t, `list/map f (list/map f []) ; f = x -> x`)
@@ -522,7 +664,7 @@ func TestCompileTypes(t *testing.T) {
 	}
 	for _, b := range c.binders {
 		var s strings.Builder
-		c.uses_(&s, b.types)
+		dumper{c, &s, false}.uses(b.types)
 		if s.String() != want[b.name] {
 			t.Errorf("%s: got%q, want%q", b.name, s.String(), want[b.name])
 		}
