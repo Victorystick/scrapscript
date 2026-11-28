@@ -194,10 +194,11 @@ compile_test.go (the core's dumps), roundtrip_test.go (printed values read
 back the same), and `TestInliningAcrossScraps` and
 `TestKnownCallsAcrossScraps` in env_test.go.
 
-0. [ ] **Compile benchmark.** `BenchmarkCompile`: lowering, the passes and
-   allocation for the AccessLogLib program and the Eval sources, without
-   evaluating; add it to `bench/ir.sh`. The baseline of main before this
-   plan is `bench/2026-11-18-0a92ecc.ir`; commit a new one with Compile.
+0. [x] **Compile benchmark** (#45). `BenchmarkCompile`: lowering, the
+   passes and allocation for the AccessLogLib program and the Eval
+   sources, without evaluating; in `bench/ir.sh`, repeatable to 0.3%.
+   The baseline of main before this plan is `bench/2026-11-18-0a92ecc.ir`,
+   and with Compile `bench/2026-11-18-5f3269e.ir`.
 1. [ ] **Variables.** Lowering emits binders instead of slots and
    captures; `opCapture` goes, and patterns bind binders. A new
    allocation pass assigns slots and captures exactly as today, into side
