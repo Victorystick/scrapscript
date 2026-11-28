@@ -265,7 +265,7 @@ first. 1 and 2 change what the language promises.
       and `not`, `int/min`, `int/max`, `list/filter`, `list/reverse` and
       `list/range`. Since scraps are closed, the prelude is part of a
       scrap's meaning, which makes it the concrete case for editions
-      (section 9.1): changing a builtin changes published scraps.
+      (section 9.1): a builtin can change only in a new edition.
 - [ ] Later: record extension. Spreads only update, so `{ ..{ a = 1 }, b =
       2 }` is a type error; section 7.3 notes that lacks constraints make
       a separate extension construct possible.

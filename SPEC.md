@@ -5,17 +5,53 @@ towards, and does not describe it yet. It covers the surface grammar and its
 desugaring into a small core, types, scrap identity, drafts and publishing, and
 platforms, and replaces the precedence table of the reference interpreter with an
 explicit grammar. Section 14 relates it to the guide at scrapscript.org. Types
-(section 7) and platforms (section 13) are unfinished.
+(section 7) and platforms (section 13) are unfinished. There are no
+compatibility promises before the first edition (9.1): until then, anything
+may change.
+
+Goals:
+
+This language explores the ideas behind Scrapscript. It started from the guide
+at scrapscript.org, and departs from it wherever that serves these ideas better
+(section 14). Three ideas are its core, each resting on the one before:
+
+1. **Closed scraps.** A scrap has no free names and reads no ambient state, so
+   it means the same thing everywhere and at any time. A name looked up in a
+   scrap map means whichever version is current when it is looked up; a hash
+   means what it meant when it was written.
+2. **Content addressing.** A scrap is identified by a hash of its content
+   (section 9), and the hash pins its meaning. Closure is what lets it: a hash
+   of code with free names would pin its text but not its meaning.
+3. **Values travel.** A result prints as a closed scrap that evaluates to it
+   (section 10, rule 6), so it can be evaluated again, published or passed on.
+   It travels small, referring to what it depends on by hash. Stores and
+   transport are tooling, outside this spec.
+
+Two things follow from them:
+
+- **Platforms** (section 13). With no ambient state there are no ambient
+  effects either: a host supplies them, through an interface.
+- **Erased types** (section 7). A value that travels is plain data, so types
+  can't take part in evaluation. They are checked, then erased, and are never
+  part of a value's runtime shape.
 
 Principles:
 
-1. The **core language** is small (section 5). The surface syntax is a pure
-   desugaring into it. For now a scrap's identity is a hash of its source bytes
-   (section 9); a canonical-core scheme can be added later without changing the
-   surface language.
-2. One way to write each thing. No user-defined operators.
-3. Every parse failure is a spanned syntax error. The parser is total.
-4. Whitespace-insensitive layout, except the operator-spacing rule (2.3).
+1. **A small core.** The core language (section 5) defines what a scrap means,
+   and the surface syntax desugars into it. A small core is easier to optimise
+   and to verify. It prescribes no representation.
+2. **Every feature earns its place.** Sugar exists only where it reads clearly
+   better than the core form it desugars to. A construct gets a keyword only if
+   it can't be a function, as short-circuiting can't. There are no
+   user-defined operators: the edition alone fixes the grammar.
+3. **A scrap parses on its own.** How a scrap parses depends only on its text
+   and its edition, never on what it refers to or on types. The parser is
+   total: any input gives a tree or an error with a span. Parsing reports at
+   least the first error, and checking may report several. Errors from
+   parsing, loading and checking all carry spans, and runtime errors should.
+4. **Layout carries no meaning.** Indentation and line breaks don't matter, so
+   scraps survive one-liners, pipes and pasting. The one exception is the
+   operator-spacing rule (2.3), which lets names contain `-` and `/`.
 5. **Reliability first.** Meaning never depends on ambient state: a closed
    scrap evaluates the same everywhere. No implicit network, filesystem or
    clock access. Failures are reported at parse, load or check time, not at
@@ -250,8 +286,11 @@ not parse it and fail later.
 
 ## 5. Core language
 
-The surface desugars to these nodes. The canonical encoding (section 9) is
-defined on them.
+The surface desugars to these nodes. They define what a scrap means: an
+implementation may represent and compile them however it likes, as long as no
+scrap can tell the difference. `Var(index)` and `Record(sorted fields)` say
+that binder names and field order don't affect meaning, not how a core is
+stored.
 
 ```
 Int Float Text Bytes Hole
@@ -268,7 +307,7 @@ Desugaring:
 |---|---|
 | `a \|> f`, `f <\| a` | `Apply(f, a)` |
 | `f >> g`, `g << f` | `Fn(Apply(g, Apply(f, Var0)))` (no generated names) |
-| `a + b` etc. | `Apply(Apply(Var(add), a), b)` against the platform prelude, or dedicated primitive nodes (decide once) |
+| `a + b` etc. | `Apply(Apply(Var(add), a), b)` against the platform prelude; an implementation may use primitive nodes, which mean the same |
 | `a >+ xs` / `xs +< a` | cons / snoc primitives |
 | `#tag` | `Variant(tag, Hole)` |
 | `{ ..r, k = v }` | record update primitive |
@@ -283,8 +322,8 @@ Desugaring:
 | `!`, `?` | no specified meaning. If wanted, name them (`assert`). |
 | `@` | replaced by `.field` |
 | `::` | no use; `=>` is kept, as the type-level lambda (section 7.2) |
-| unary minus operator | negative literals only |
-| `&&`, `\|\|` | short-circuiting is branching, and matching is the only control flow. Combine booleans with a match on `#true` / `#false`. |
+| unary minus operator | negative literals only, for now; unary minus is planned (section 12) |
+| `&&`, `\|\|` | short-circuiting can't be a function, so it needs syntax: planned as the keywords `and` and `or` (section 12). Until then, combine booleans with a match on `#true` / `#false`. |
 | `,` / `..` as binary operators | separators / pattern-and-record syntax only |
 
 ## 7. Variants and types
@@ -648,9 +687,15 @@ canonical core but needs no canonicalisation pass.
   hash function is sha256 for every scheme; a different one would be a new
   scheme. Each scheme defines how a target is re-hashed when verified. An
   unknown scheme is an error.
-- Open: editions. The same bytes can parse or type-check differently in a later
-  edition (spec version), so the edition should take part in identity, either
-  in the `core` scheme or as a scheme of its own.
+- **Editions.** The same bytes could parse or check differently under a later
+  version of this spec, so a scrap declares its edition, a year, in its
+  source: `edition 2027`, before anything but comments. The declaration is
+  part of the hashed bytes, so a hash pins the edition, and with it the
+  grammar, the primitives and the prelude. A released edition never changes,
+  and neither does the declaration's own syntax, which is read before the
+  edition is known. A draft may leave the declaration out, to mean the
+  current edition; publishing rejects one that does (11.3). There is no
+  edition yet, and nothing is stable before the first.
 
 ### 9.1.1 Scheme `core` (reserved)
 
@@ -690,10 +735,11 @@ Reliability is a top-level requirement. The rules:
    closure ahead of time, fetching hashes from stores and, for drafts, reading
    paths (11.2). Checking and evaluating require the whole closure.
 4. A reference's type, or for a type scrap (7.6) the type it denotes, is inferred
-   from the target's source (present by rule 3), parsed and checked. While
-   the digest leaves out the edition (9.1), a type cache for published scraps
-   must be keyed by the digest and the checker's edition. The cache is an
-   optimisation only; deleting it never changes a result.
+   from the target's source (present by rule 3), parsed and checked. The
+   digest covers the scrap's edition (9.1), so a type cache for published
+   scraps may be keyed by the digest alone; before the first edition, it must
+   be keyed by the checker's version too. The cache is an optimisation only;
+   deleting it never changes a result.
 5. Name maps (versions, "latest", signing, scrapyard policy) are tooling. They
    produce hash or path references and are never consulted by the language
    itself.
@@ -710,6 +756,8 @@ Reliability is a top-level requirement. The rules:
      Exported bindings and members keep their annotations, which may narrow
      a type, and the alias names that tools print. Elsewhere its type may be
      more general than the original's.
+   - **States its edition,** once there are editions (9.1), so that it can be
+     published as it is.
    - **Is a fixpoint.** Evaluating it and printing the result gives the same
      text. This holds within one version of the tools; another version may
      print the same value differently.
@@ -799,7 +847,9 @@ Publishing turns a draft and its closure of drafts into published scraps,
 bottom-up: each draft it refers to is published first, then each path token is
 replaced by `$source:…` of its target's published form. Nothing else in the
 source changes, comments and layout included, so publishing the same drafts
-always gives the same hashes.
+always gives the same hashes. Once there are editions (9.1), a draft that
+declares none is rejected: publishing doesn't add the declaration, since it
+changes nothing but path tokens.
 
 ## 12. Planned work
 
@@ -813,6 +863,12 @@ always gives the same hashes.
     variants, and the exhaustiveness rule of 7.1: a closed, well-typed term never
     raises a match error.
 - **Canonical encoding of the core** (section 9), deferred by decision.
+- **Surface additions**, decided in DESIGN_NOTES.md and to be specified here
+  one at a time: unary minus (`-x`, with `-x ^ y` an error); the
+  short-circuiting keywords `and` and `or`; `if c then a else b`; and guards
+  on match arms (`| p if c -> e`), which need `Match` to fall through to the
+  next arm. Keywords are reserved only in expressions, so labels may still
+  be spelled like them.
 - **Type members** (7.7) are resolved statically and erased, so record types
   carry none and row unification is unchanged. Open: abstract members.
   - Later, members through applications, as ML functors: in
@@ -854,8 +910,9 @@ always gives the same hashes.
 
 ## 13. Platforms (sketch)
 
-A platform is what lets a scrap affect the world. Scraps stay pure: a platform
-gives them no effects to call, only types to return effects as data in. A
+A platform is what lets a scrap affect the world. A scrap reads no ambient
+state, so it can't reach ambient effects either, and stays pure: a platform
+gives it no effects to call, only types to return effects as data in. A
 platform has three parts:
 
 1. **An interface**: a type scrap (7.6) for the contract between script and
@@ -985,14 +1042,16 @@ a pure reference semantics (like `platforms/terminal/simulate.scrap`'s
 ## 14. Relation to the guide
 
 [scrapscript.org/guide](https://scrapscript.org/guide) describes the reference
-design. This grammar follows it where listed below, departs from it on purpose
-elsewhere, and leaves some of it open.
+design. This language explores the guide's ideas rather than implementing it
+(Goals, at the top): it follows the guide where listed below, departs from it on
+purpose where that serves those ideas better, and leaves some of it open.
 
 **Aligned:**
 
 - Where-clauses after the body, mutually recursive.
-- Match functions as the only control flow, with multi-pattern arms
-  (`| 1 -> 2 -> 3`); no FLOAT patterns.
+- Match functions, with multi-pattern arms (`| 1 -> 2 -> 3`), as the only
+  branching in the core; no FLOAT patterns. Surface sugar for branching is
+  planned (section 12).
 - `()` as the hole; INT, FLOAT, TEXT, BYTE and BYTES literals: `~FF` is one
   byte and `~~aGk=` is base64 bytes.
 - Names with `-` and `/`: `bytes/to-utf8-text`.
@@ -1014,7 +1073,7 @@ elsewhere, and leaves some of it open.
 | `scoop::chocolate`, `(#radius int)::radius 4` | `#chocolate`; `::` removed | Tags are structural, so they need no type to build them |
 | `t : #a a #b int`, a type as tags side by side | `t : type = [#a a, #b int]` | The guide's form is clean, but ambiguous with tag values and payloads |
 | Variants printed with their type, `(result text e)::ok "hi"` | `#ok "hi"` | Values carry no types at runtime |
-| `//`, `&&`, `\|\|`, `@` | Removed (section 6) | `//` was unevaluated; `@` is spelled `.field`; matching is the only branching |
+| `//`, `&&`, `\|\|`, `@` | Removed (section 6) | `//` was unevaluated; `@` is spelled `.field`; `&&` and `\|\|` are planned as the keywords `and` and `or` |
 | sha1 of the flat encoding, written `$sha1~~…` | sha256 of the source, written `$source:` and hex digits (section 9) | No canonical encoding yet; hex is what `sha256sum` prints; other encodings can be added as schemes |
 | `scrap platform connie2036/server`, a platform found by name | A host is a Go program, with bindings generated from the platform's interface (section 13) | Effects need native code, which a scrap name cannot supply |
 
