@@ -209,7 +209,10 @@ back the same), and `TestInliningAcrossScraps` and
    sizes and captures of every program in the tests are identical, and
    instructions and compile time within 1%. The core's test dumps change
    notation.
-2. [ ] **Liveness.** Allocation reuses a slot once its binder is dead,
+2. [x] **Liveness** (#PR; frames −26% in total for AccessLog: `lean` 22 to
+   15 slots, `balance` 16 to 9, `upsert` 14 to 13, the top frame 21 to 7;
+   compile instructions +3.4% for AccessLogLib, +4.9% for Eval).
+   Allocation reuses a slot once its binder is dead,
    instead of only across arms and after groups. Report frame sizes
    (AccessLog's `lean`, `upsert`, `balance`).
 3. [ ] **Inlining on the IR.** Copy a lambda's arms with fresh binders,
