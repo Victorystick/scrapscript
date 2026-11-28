@@ -175,6 +175,10 @@ func bindBuiltIns(reg *types.Registry) (types.TypeScope, variables) {
 		return floatVal(float64(i.asInt()))
 	})
 
+	define("float/to-text", reg.Func(types.FloatRef, types.TextRef), func(f value) value {
+		return textVal(floatText(f.asFloat()))
+	})
+
 	// float -> int
 	floatToInt := reg.Func(types.FloatRef, types.IntRef)
 	define("round", floatToInt, roundFunc(math.Round))

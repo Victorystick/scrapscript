@@ -593,12 +593,7 @@ func (p *valuePrinter) value(s *strings.Builder, v value, ctx printer.Context) {
 	case kindInt:
 		s.WriteString(strconv.Itoa(v.asInt()))
 	case kindFloat:
-		f := strconv.FormatFloat(v.asFloat(), 'f', -1, 64)
-		s.WriteString(f)
-		// A FLOAT has digits on both sides of its point.
-		if strings.IndexByte(f, '.') < 0 {
-			s.WriteString(".0")
-		}
+		s.WriteString(floatText(v.asFloat()))
 	case kindText:
 		s.WriteString(scanner.Quote(v.asText()))
 	case kindByte:
@@ -684,4 +679,15 @@ func (p *valuePrinter) app(s *strings.Builder, ctx printer.Context, head string,
 		s.WriteByte(' ')
 		p.value(s, arg, printer.Arg)
 	}
+}
+
+// floatText returns f as a FLOAT literal, as float/to-text does: in
+// decimal, with as few digits as read back as f, and digits on both sides
+// of its point.
+func floatText(f float64) string {
+	t := strconv.FormatFloat(f, 'f', -1, 64)
+	if strings.IndexByte(t, '.') < 0 {
+		t += ".0"
+	}
+	return t
 }
